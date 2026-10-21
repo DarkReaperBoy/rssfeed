@@ -140,4 +140,4 @@ In scope: folders, unread counts, read/unread persistence (localStorage, unread 
 
 ## Generated
 
-- 2026-10-22: initial build. Fetcher: rss-parser + jsdom/readability + sanitize-html. UI: single `assets/app.js` (~700 lines), vanilla. Data: `data/index.json` + `data/feeds/<id>.json`.
+- 2026-10-22: initial build. Fetcher: rss-parser + jsdom/readability + sanitize-html. UI: single `assets/app.js` (~700 lines), vanilla. Data: `data/index.json` + `data/feeds/<id>.json`. Publishing: workflow force-pushes assembled `_site/` to `gh-pages` (Pages source); default branch has no CI commits and ignores `data/`, `node_modules/`, `_site/`. Multi-folder feeds (`folders: []`) and per-folder `maxAgeDays` added after scraping inoreader.com for parity. Smoke test: `npm run test:ui` (21 assertions, all passing).
