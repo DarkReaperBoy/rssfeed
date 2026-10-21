@@ -44,13 +44,13 @@
 <div id="app">
   <nav id="rail" aria-label="Sections">
     <div class="rail-logo" title="ghrss"><svg viewBox="0 0 24 24" width="22" height="22"><circle cx="6" cy="18" r="2.5" fill="currentColor"/><path d="M4 10a10 10 0 0 1 10 10h3A13 13 0 0 0 4 7z" opacity=".75"/><path d="M4 4a16 16 0 0 1 16 16h3A19 19 0 0 0 4 1z" opacity=".45"/></svg></div>
-    <button class="rail-btn" data-scope="all" title="All articles"><svg><use href="#i-all"/></svg></button>
-    <button class="rail-btn" data-scope="unread" title="Unread"><svg><use href="#i-unread"/></svg><span class="rail-count" id="rail-unread-count"></span></button>
-    <button class="rail-btn" data-scope="today" title="Today"><svg><use href="#i-today"/></svg></button>
-    <button class="rail-btn" data-scope="recently-read" title="Recently read"><svg><use href="#i-read"/></svg></button>
+    <button class="rail-btn" data-scope="all" title="Newsfeed"><svg><use href="#i-all"/></svg><span class="tab-label">Newsfeed</span></button>
+    <button class="rail-btn" data-scope="unread" title="Unread"><svg><use href="#i-unread"/></svg><span class="tab-label">Unread</span><span class="rail-count tabs-counter" id="rail-unread-count"></span></button>
+    <button class="rail-btn" data-scope="today" title="Today"><svg><use href="#i-today"/></svg><span class="tab-label">Today</span></button>
+    <button class="rail-btn" data-scope="recently-read" title="Read"><svg><use href="#i-read"/></svg><span class="tab-label">Read</span></button>
     <div class="rail-spacer"></div>
-    <button class="rail-btn" id="btn-theme" title="Toggle theme"><svg><use href="#i-theme"/></svg></button>
-    <button class="rail-btn" id="btn-settings" title="Settings"><svg><use href="#i-settings"/></svg></button>
+    <button class="rail-btn" id="btn-theme" title="Toggle theme"><svg><use href="#i-theme"/></svg><span class="tab-label">Theme</span></button>
+    <button class="rail-btn" id="btn-settings" title="Settings"><svg><use href="#i-settings"/></svg><span class="tab-label">Settings</span></button>
   </nav>
 
   <aside id="sidebar">
@@ -74,15 +74,20 @@
   <main id="main">
     <header id="topbar">
       <button id="menu-toggle" class="icon-btn" title="Menu"><svg><use href="#i-menu"/></svg></button>
-      <h1 id="scope-title">All articles</h1>
-      <span id="scope-count" class="count-pill"></span>
+      <div class="heading-title">
+        <span id="scope-title">Newsfeed</span>
+        <span id="scope-count" class="heading-sub"></span>
+      </div>
       <div class="topbar-spacer"></div>
       <div id="search-wrap">
         <svg class="search-icon"><use href="#i-search"/></svg>
         <input id="search-input" type="search" placeholder='Search this section — feed: title: before: unread:true' autocomplete="off" spellcheck="false">
       </div>
       <div class="toolbar">
-        <button id="btn-mark-all" class="tool-btn" title="Mark all as read"><svg><use href="#i-markread"/></svg><span>Mark all as read</span></button>
+        <div class="btn-group-markread">
+          <button id="btn-mark-all" class="btn-heading" title="Mark all as read"><svg><use href="#i-read"/></svg></button>
+          <button id="btn-mark-all-split" class="btn-heading btn-split" title="Mark as read articles"><svg><use href="#i-chevron"/></svg></button>
+        </div>
       </div>
     </header>
 

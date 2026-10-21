@@ -41,7 +41,7 @@ const $ = (s) => window.document.querySelector(s);
 const $$ = (s) => [...window.document.querySelectorAll(s)];
 
 console.log('boot + sidebar');
-ok($('#tree').textContent.includes('All articles'), 'system views render');
+ok($('#tree').textContent.includes('Newsfeed'), 'system views render (Newsfeed)');
 ok($('#tree').textContent.includes('Technology'), 'folder renders');
 ok($('#tree').textContent.includes('Hacker News'), 'feed renders');
 ok($('#tree').textContent.includes('BBC News'), 'second feed renders');

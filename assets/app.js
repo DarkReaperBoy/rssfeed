@@ -303,7 +303,7 @@ function renderTree() {
       <svg><use href="#i-${icon}"/></svg><span class="label">${esc(label)}</span>${count ? `<span class="badge">${count}</span>` : ''}
     </button>`;
   const totalUnread = Object.keys(feeds).reduce((n, id) => n + unreadCount(id), 0);
-  html += sysItem('all', 'all', 'All articles', 0);
+  html += sysItem('all', 'all', 'Newsfeed', 0);
   html += sysItem('unread', 'unread', 'Unread', totalUnread);
   html += sysItem('today', 'today', 'Today', 0);
   html += sysItem('recently-read', 'read', 'Recently read', 0);
@@ -347,7 +347,7 @@ function renderTree() {
 
 function scopeTitle() {
   const s = state.scope;
-  if (s === 'all') return 'All articles';
+  if (s === 'all') return 'Newsfeed';
   if (s === 'unread') return 'Unread';
   if (s === 'today') return 'Today';
   if (s === 'recently-read') return 'Recently read';
@@ -464,7 +464,7 @@ function renderList() {
   setupScrollTracking();
   const unread = visible.filter((a) => !isRead(a)).length;
   $('#scope-title').textContent = scopeTitle();
-  $('#scope-count').textContent = visible.length ? (ui.status === 'unread' ? String(visible.length) : `${unread} unread / ${visible.length}`) : '';
+  $('#scope-count').textContent = `${unread} unread`; // their header: "Newsfeed" + "81 unread"
   updateTitleCounter();
   renderEmpty(visible);
 }
@@ -756,6 +756,7 @@ function bindEvents() {
   });
 
   $('#btn-mark-all').addEventListener('click', markAllAsReadInScope);
+  $('#btn-mark-all-split')?.addEventListener('click', markAllAsReadInScope);
   $('#btn-sort').addEventListener('click', () => {
     ui.sortDir = ui.sortDir === 'oldest' ? 'newest' : 'oldest';
     saveUi(); syncControls(); renderList();
