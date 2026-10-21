@@ -117,6 +117,89 @@ search.value = '';
 search.dispatchEvent(new window.Event('input', { bubbles: true }));
 await settle(300);
 
+console.log('layouts + sort (Inoreader parity)');
+for (const layout of ['expanded', 'column', 'cards', 'magazine', 'list']) {
+  $(`#layouts [data-layout="${layout}"]`).dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  await settle(30);
+  const hasRows = $$('#list .row').length > 0;
+  const rightClass = $('#list').classList.contains(`view-${layout}`);
+  ok(hasRows && rightClass, `${layout} view renders with rows`);
+  if (layout === 'expanded') ok($$('#list .row-body-inline').length > 0, 'expanded view shows inline article bodies');
+}
+$('#btn-sort').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+await settle(30);
+{
+  const ids = $$('#list .row').map((r) => r.dataset.id);
+  // oldest first: first row must differ from newest-first order unless 1 row
+  const firstOld = ids[0];
+  $('#btn-sort').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  await settle(30);
+  const firstNew = $$('#list .row').map((r) => r.dataset.id)[0];
+  ok(firstOld !== firstNew || ids.length < 2, 'sort toggle flips ordering (newest/oldest)');
+}
+
+console.log('folder unread badge = mark read (sidebar parity)');
+const folderBadge = $('#tree .tree-item[data-scope="folder:tech"] .badge');
+ok(!!folderBadge, 'folder badge present');
+if (folderBadge) {
+  const before = Number(folderBadge.textContent);
+  folderBadge.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  await settle(50);
+  const techBadge = $('#tree .tree-item[data-scope="folder:tech"] .badge');
+  ok(!techBadge || Number(techBadge.textContent) === 0, `clicking badge marks folder read (${before} → ${techBadge ? techBadge.textContent : 'gone'})`);
+  ok(!$('#toast').classList.contains('hidden') && $('#toast-action').textContent === 'Undo', 'undo toast shown');
+  $('#toast-action').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  await settle(50);
+  const restored = $('#tree .tree-item[data-scope="folder:tech"] .badge');
+  ok(!!restored && Number(restored.textContent) === before, 'undo restores unread counts');
+}
+
+console.log('sidebar options menu');
+$('#btn-sidebar-menu').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+await settle(30);
+ok(!$('#sidebar-menu').classList.contains('hidden'), 'sidebar menu opens');
+$('#sidebar-menu [data-opt="dimRead"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+await settle(30);
+ok(JSON.parse(window.localStorage.getItem('ghrss:ui')).dimRead === true, 'dim-read option persisted');
+$('#sidebar-menu [data-opt="dimRead"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+await settle(30);
+
+console.log('ported settings (title counter, titles-only, dates, bulk select)');
+ok(/^\(\d+\)/.test(window.document.title), `browser tab shows unread counter (${window.document.title})`);
+const openSettings = () => $('#btn-settings').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+openSettings();
+await settle(30);
+const fire = (sel, val) => {
+  const el = $(sel);
+  if (typeof val === 'boolean') el.checked = val; else el.value = val;
+  el.dispatchEvent(new window.Event('change', { bubbles: true }));
+};
+fire('#set-titles-only', true);
+await settle(30);
+ok($$('#list .row-snippet').length === 0, 'titles-only hides descriptions');
+fire('#set-absolute-dates', true);
+await settle(30);
+const timeText = $('#list .row .time')?.textContent || '';
+ok(/[\/:]|\d{1,2}:\d{2}/.test(timeText), `absolute dates render (${timeText})`);
+fire('#set-titles-only', false);
+fire('#set-absolute-dates', false);
+fire('#set-bulk-select', true);
+await settle(30);
+ok($$('#list .row-check').length > 0, 'bulk mode shows checkboxes');
+const checks = $$('#list .row-check').slice(0, 2);
+checks.forEach((c) => c.dispatchEvent(new window.MouseEvent('click', { bubbles: true })));
+await settle(30);
+ok(!$('#bulk-bar').classList.contains('hidden') && $('#bulk-count').textContent === '2', `bulk bar shows 2 selected`);
+$('#bulk-read').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+await settle(50);
+ok($('#bulk-bar').classList.contains('hidden'), 'bulk bar hides after marking read');
+ok(!$('#toast').classList.contains('hidden') && $('#toast-text').textContent.includes('Marked 2'), 'bulk toast confirms');
+$('#toast-action').dispatchEvent(new window.MouseEvent('click', { bubbles: true })); // undo to restore state
+await settle(50);
+fire('#set-bulk-select', false);
+$('.modal-close')?.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+await settle(30);
+
 console.log('read state persistence');
 const stored = JSON.parse(window.localStorage.getItem('ghrss:read') || '{}');
 ok(Object.keys(stored).length >= 1, 'read map persisted to localStorage');

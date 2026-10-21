@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>My Inoreader</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='6' cy='18' r='2.5' fill='%23e8710a'/%3E%3Cpath d='M4 10a10 10 0 0 1 10 10h3A13 13 0 0 0 4 7z' fill='%23f5a623'/%3E%3Cpath d='M4 4a16 16 0 0 1 16 16h3A19 19 0 0 0 4 1z' fill='%23e8710a'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="assets/styles.css">
 </head>
 <body>
@@ -21,6 +24,11 @@
   <symbol id="i-list" viewBox="0 0 24 24"><path d="M3 5h18v2H3zm0 6h18v2H3zm0 6h12v2H3z"/></symbol>
   <symbol id="i-compact" viewBox="0 0 24 24"><path d="M3 4h18v3H3zm0 6.5h18v3H3zM3 17h18v3H3z"/></symbol>
   <symbol id="i-cards" viewBox="0 0 24 24"><path d="M4 4h7v7H4zm9 0h7v7h-7zM4 13h7v7H4zm9 0h7v7h-7z"/></symbol>
+  <symbol id="i-expanded" viewBox="0 0 24 24"><path d="M3 4h18v6H3zm0 8h18v2H3zm0 3h18v2H3zm0 3h18v2H3z"/></symbol>
+  <symbol id="i-column" viewBox="0 0 24 24"><path d="M3 4h8v16H3zm10 0h8v16h-8z"/></symbol>
+  <symbol id="i-magazine" viewBox="0 0 24 24"><path d="M3 4h18v10H3zm0 12h8v4H3zm10 0h8v4h-8z"/></symbol>
+  <symbol id="i-sort" viewBox="0 0 24 24"><path d="M3 6h12v2H3zm0 5h9v2H3zm0 5h6v2H3zm14-3.6V19h3.4L16 22.4 12.6 19H16v-5.6z"/></symbol>
+  <symbol id="i-dots" viewBox="0 0 24 24"><path d="M6 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm6 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm6 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4z"/></symbol>
   <symbol id="i-theme" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z"/></symbol>
   <symbol id="i-markread" viewBox="0 0 24 24"><path d="M2 13h4v8H2zm6-6h4v14H8zm6-5h4v19h-4zm6 9h2v10h-2z"/></symbol>
   <symbol id="i-chevron" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6z"/></symbol>
@@ -48,7 +56,16 @@
   <aside id="sidebar">
     <div class="sidebar-head">
       <span>Feeds</span>
-      <button id="btn-refresh" class="icon-btn" title="Check for new data"><svg><use href="#i-refresh"/></svg></button>
+      <span class="sidebar-tools">
+        <button id="btn-sidebar-menu" class="icon-btn" title="Sidebar options"><svg><use href="#i-dots"/></svg></button>
+        <button id="btn-refresh" class="icon-btn" title="Check for new data"><svg><use href="#i-refresh"/></svg></button>
+      </span>
+      <div id="sidebar-menu" class="dropdown hidden">
+        <button class="dropdown-item" data-opt="updatedOnly"><span class="check"></span>Show updated subscriptions only</button>
+        <button class="dropdown-item" data-opt="dimRead"><span class="check"></span>Dim read subscriptions</button>
+        <div class="dropdown-line"></div>
+        <button class="dropdown-item" data-opt="sortAZ"><span class="check"></span>Sort alphabetically</button>
+      </div>
     </div>
     <div id="tree" role="tree"></div>
     <div class="sidebar-foot" id="last-updated" title=""></div>
@@ -62,7 +79,7 @@
       <div class="topbar-spacer"></div>
       <div id="search-wrap">
         <svg class="search-icon"><use href="#i-search"/></svg>
-        <input id="search-input" type="search" placeholder='Search — try feed:bbc title:ai before:2026-01-01 unread:true' autocomplete="off" spellcheck="false">
+        <input id="search-input" type="search" placeholder='Search this section — feed: title: before: unread:true' autocomplete="off" spellcheck="false">
       </div>
       <div class="toolbar">
         <button id="btn-mark-all" class="tool-btn" title="Mark all as read"><svg><use href="#i-markread"/></svg><span>Mark all as read</span></button>
@@ -82,18 +99,30 @@
         <option value="week">This week</option>
         <option value="month">This month</option>
       </select>
+      <button id="btn-sort" class="icon-btn" title="Sort: newest first"><svg><use href="#i-sort"/></svg></button>
       <button id="btn-show-filtered" class="icon-btn" title="Show filtered-out articles"><svg><use href="#i-eyeoff"/></svg></button>
       <div class="topbar-spacer"></div>
       <div class="layouts" id="layouts">
         <button class="icon-btn" data-layout="list" title="List view"><svg><use href="#i-list"/></svg></button>
-        <button class="icon-btn" data-layout="compact" title="Compact view"><svg><use href="#i-compact"/></svg></button>
+        <button class="icon-btn" data-layout="expanded" title="Expanded view"><svg><use href="#i-expanded"/></svg></button>
+        <button class="icon-btn" data-layout="column" title="Column view"><svg><use href="#i-column"/></svg></button>
         <button class="icon-btn" data-layout="cards" title="Card view"><svg><use href="#i-cards"/></svg></button>
+        <button class="icon-btn" data-layout="magazine" title="Magazine view"><svg><use href="#i-magazine"/></svg></button>
       </div>
     </div>
 
     <div id="list" class="view-list" aria-live="polite"></div>
     <div id="empty" class="hidden"></div>
   </main>
+</div>
+
+<div id="toast" class="hidden"><span id="toast-text"></span><button id="toast-action"></button></div>
+
+<div id="bulk-bar" class="hidden">
+  <span class="count" id="bulk-count">0</span>
+  <button class="tool-btn" id="bulk-read"><svg><use href="#i-read"/></svg>Mark read</button>
+  <button class="tool-btn" id="bulk-unread"><svg><use href="#i-unread"/></svg>Mark unread</button>
+  <button class="tool-btn" id="bulk-clear">Clear</button>
 </div>
 
 <div id="scrim" class="hidden"></div>
@@ -107,10 +136,30 @@
         <select id="set-theme"><option value="auto">Auto (system)</option><option value="light">Light</option><option value="dark">Dark</option></select>
       </label>
       <label class="row"><span>Default layout</span>
-        <select id="set-layout"><option value="list">List</option><option value="compact">Compact</option><option value="cards">Cards</option></select>
+        <select id="set-layout"><option value="list">List</option><option value="expanded">Expanded</option><option value="column">Column</option><option value="cards">Cards</option><option value="magazine">Magazine</option></select>
+      </label>
+      <label class="row"><span>List density</span>
+        <select id="set-density"><option value="comfort">Comfort</option><option value="compact">Compact</option><option value="ultra">Ultra</option></select>
       </label>
       <label class="row"><span>Mark read when opened</span><input type="checkbox" id="set-markread"></label>
       <label class="row"><span>…after (seconds)</span><input type="number" id="set-markread-delay" min="0" max="600" step="1"></label>
+      <label class="row"><span>Scroll tracking — mark read as you scroll past</span><input type="checkbox" id="set-scroll-tracking"></label>
+      <div class="modal-section">Article listing</div>
+      <label class="row"><span>Show titles only (hide descriptions)</span><input type="checkbox" id="set-titles-only"></label>
+      <label class="row"><span>Open original webpages directly</span><input type="checkbox" id="set-open-original"></label>
+      <label class="row"><span>Show feed icons in list</span><input type="checkbox" id="set-show-favicons"></label>
+      <label class="row"><span>Column view thumbnails</span><input type="checkbox" id="set-column-thumbs"></label>
+      <label class="row"><span>Multiple select (bulk actions)</span><input type="checkbox" id="set-bulk-select"></label>
+      <label class="row"><span>Auto scroll opened article to top</span><input type="checkbox" id="set-auto-scroll"></label>
+      <label class="row"><span>Use absolute dates</span><input type="checkbox" id="set-absolute-dates"></label>
+      <label class="row"><span>Article titles font size</span>
+        <select id="set-font-size"><option value="13.5px">Small</option><option value="14.5px">Medium</option><option value="16px">Large</option><option value="18px">Extra large</option></select>
+      </label>
+      <div class="modal-section">Sidebar</div>
+      <label class="row"><span>Show favicons</span><input type="checkbox" id="set-side-favicons"></label>
+      <label class="row"><span>Compact sidebar (icons only)</span><input type="checkbox" id="set-compact-sidebar"></label>
+      <label class="row"><span>Clickable unread counters</span><input type="checkbox" id="set-counters-clickable"></label>
+      <label class="row"><span>Unread count in browser tab title</span><input type="checkbox" id="set-title-counter"></label>
       <div class="modal-section">Subscription stats</div>
       <div id="stats-table"></div>
       <div class="modal-section">Data</div>

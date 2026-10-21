@@ -23,12 +23,20 @@ const state = {
   markTimers: new Map(),
   loading: new Set(),
   refreshTimer: null,
+  bulkSel: new Set(),
 };
 const ui = Object.assign({
   theme: 'auto', layout: 'list', status: 'unread', dateRange: 'all',
   showFiltered: false, openFolders: { 'tech': true }, sidebarOpen: false,
   markReadOnOpen: true, markReadAfterSeconds: 0,
+  density: 'comfort', sortDir: 'newest',
+  updatedOnly: false, dimRead: false, sortAZ: false, scrollTracking: false,
+  titlesOnly: false, openOriginal: false, showFavicons: true, columnThumbs: true,
+  bulkSelect: false, autoScroll: true, absoluteDates: false, fontSize: '14.5px',
+  sideFavicons: true, compactSidebar: false, countersClickable: true, titleCounter: true,
 }, loadObj(LS_UI));
+// migrate pre-parity values
+if (ui.layout === 'compact') { ui.layout = 'list'; ui.density = 'compact'; }
 
 function loadObj(k) { try { return JSON.parse(localStorage.getItem(k)) || {}; } catch { return {}; } }
 function saveObj(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
@@ -53,6 +61,15 @@ function relTime(ts) {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: d.getFullYear() === new Date().getFullYear() ? undefined : 'numeric' });
 }
 const fullTime = (ts) => ts ? new Date(ts).toLocaleString() : '';
+const absTime = (ts) => ts
+  ? new Date(ts).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+  : '';
+let baseTitle = 'My Inoreader';
+function updateTitleCounter() {
+  let n = 0;
+  for (const arts of state.feeds.values()) for (const a of arts) if (!isRead(a) && !a._f?.hidden) n++;
+  document.title = n > 0 && ui.titleCounter !== false ? `(${n}) ${baseTitle}` : baseTitle;
+}
 function faviconHtml(feed) {
   const site = feed?.site || '';
   if (!site) return `<span class="favicon-tile">${esc((feed?.title || '?')[0])}</span>`;
@@ -251,9 +268,12 @@ function computeVisible() {
       out.push(a);
     }
   }
-  out.sort((x, y) => state.scope === 'recently-read'
-    ? (state.read[y.id] || 0) - (state.read[x.id] || 0)
-    : y.date - x.date);
+  out.sort((x, y) => {
+    const dir = ui.sortDir === 'oldest' ? 1 : -1;
+    return state.scope === 'recently-read'
+      ? dir * ((state.read[x.id] || 0) - (state.read[y.id] || 0))
+      : dir * (x.date - y.date);
+  });
   // The currently open article stays visible even once it stops matching
   // (e.g. marked read under the "Unread" filter) until it is collapsed.
   if (state.expandedId && !out.some((a) => a.id === state.expandedId)) {
@@ -274,7 +294,8 @@ function unreadCount(feedId) {
 function renderTree() {
   const tree = $('#tree');
   const feeds = state.index?.feeds || {};
-  const folders = state.config?.folders || [];
+  const folders = [...(state.config?.folders || [])];
+  if (ui.sortAZ) folders.sort((a, b) => a.name.localeCompare(b.name));
   const inFolder = new Set();
   let html = '';
   const sysItem = (scope, icon, label, count) => `
@@ -291,23 +312,31 @@ function renderTree() {
   const feedItem = (id) => {
     inFolder.add(id);
     const meta = feedMeta(id), n = unreadCount(id);
-    return `<button class="tree-item ${state.scope === 'feed:' + id ? 'active' : ''} ${n ? 'unread' : ''}" data-scope="feed:${esc(id)}" title="${esc(meta.title)}">
-      ${faviconHtml({ title: meta.title, site: meta.site })}<span class="label">${esc(meta.title)}</span>${n ? `<span class="badge">${n}</span>` : ''}
+    if (ui.updatedOnly && n === 0) return '';
+    const dim = ui.dimRead && n === 0 ? 'dimmed' : '';
+    return `<button class="tree-item ${state.scope === 'feed:' + id ? 'active' : ''} ${n ? 'unread' : ''} ${dim}" data-scope="feed:${esc(id)}" title="${esc(meta.title)}">
+      ${faviconHtml({ title: meta.title, site: meta.site })}<span class="label">${esc(meta.title)}</span>${n ? `<span class="badge" data-markread="feed:${esc(id)}" title="Mark as read">${n}</span>` : ''}
     </button>`;
   };
   for (const folder of folders) {
-    const kids = Object.keys(feeds).filter((id) => feedMeta(id).folders.includes(folder.id));
+    let kids = Object.keys(feeds).filter((id) => feedMeta(id).folders.includes(folder.id));
+    if (ui.sortAZ) kids.sort((a, b) => feedTitle(a).localeCompare(feedTitle(b)));
+    if (ui.updatedOnly) kids = kids.filter((id) => unreadCount(id) > 0);
     if (!kids.length) continue;
     const n = kids.reduce((s, id) => s + unreadCount(id), 0);
+    if (ui.updatedOnly && n === 0) continue;
     const open = ui.openFolders[folder.id] !== false;
+    const dim = ui.dimRead && n === 0 ? 'dimmed' : '';
     html += `<div class="tree-folder ${open ? 'open' : ''}">
-      <button class="tree-item ${state.scope === 'folder:' + folder.id ? 'active' : ''} ${n ? 'unread' : ''}" data-folder="${esc(folder.id)}" data-scope="folder:${esc(folder.id)}">
-        <svg class="chev"><use href="#i-chevron"/></svg><span class="label">${esc(folder.name)}</span>${n ? `<span class="badge">${n}</span>` : ''}
+      <button class="tree-item ${state.scope === 'folder:' + folder.id ? 'active' : ''} ${n ? 'unread' : ''} ${dim}" data-folder="${esc(folder.id)}" data-scope="folder:${esc(folder.id)}">
+        <svg class="chev"><use href="#i-chevron"/></svg><span class="label">${esc(folder.name)}</span>${n ? `<span class="badge" data-markread="folder:${esc(folder.id)}" title="Mark as read">${n}</span>` : ''}
       </button>
       <div class="tree-children">${kids.map(feedItem).join('')}</div>
     </div>`;
   }
   const loose = Object.keys(feeds).filter((id) => !inFolder.has(id));
+  if (ui.sortAZ) loose.sort((a, b) => feedTitle(a).localeCompare(feedTitle(b)));
+  if (ui.updatedOnly) { for (const id of [...loose]) if (unreadCount(id) === 0) loose.splice(loose.indexOf(id), 1); }
   if (loose.length) html += loose.map(feedItem).join('');
   tree.innerHTML = html;
 
@@ -341,31 +370,41 @@ function rowHtml(a) {
   const feed = feedMeta(a._feed);
   const read = isRead(a);
   const f = a._f || {};
-  const thumb = state.layout === 'cards' ? thumbFor(a) : null;
-  return `<article class="row ${read ? '' : 'unread'} ${f.highlight ? 'highlight' : ''} ${state.expandedId === a.id ? 'expanded' : ''}" data-id="${esc(a.id)}">
-    ${state.layout !== 'cards' ? '<span class="dot"></span>' : ''}
+  const thumbLayout = ['cards', 'column', 'magazine'].includes(state.layout);
+  const thumb = thumbLayout && (state.layout !== 'column' || ui.columnThumbs) ? thumbFor(a) : null;
+  const showDot = !thumbLayout && state.layout !== 'magazine';
+  const isExpanded = state.expandedId === a.id && ui.layout !== 'expanded';
+  const timeHtml = ui.absoluteDates ? absTime(a.date) : relTime(a.date);
+  return `<article class="row ${read ? '' : 'unread'} ${f.highlight ? 'highlight' : ''} ${isExpanded ? 'expanded' : ''}" data-id="${esc(a.id)}">
+    ${showDot ? '<span class="dot"></span>' : ''}
+    ${ui.bulkSelect ? `<input type="checkbox" class="row-check" ${state.bulkSel.has(a.id) ? 'checked' : ''} title="Select">` : ''}
     ${thumb ? `<img class="row-thumb" loading="lazy" src="${esc(thumb)}" alt="" onerror="this.remove()">` : ''}
     <div class="row-main">
       <div class="row-meta">
         ${faviconHtml(feed)}<span class="feed-name">${esc(feed.title)}</span>
         ${a.author ? `<span class="author">— ${esc(a.author)}</span>` : ''}
         ${f.hidden ? '<span class="author" title="Filtered">[filtered]</span>' : ''}
-        <span class="time" title="${esc(fullTime(a.date))}">${esc(relTime(a.date))}</span>
+        <span class="time" title="${esc(fullTime(a.date))}">${esc(timeHtml)}</span>
       </div>
       <div class="row-title">${esc(a.title)}</div>
-      ${state.layout !== 'compact' ? `<div class="row-snippet">${esc(a.summary || stripTags(a.content).slice(0, 220))}</div>` : ''}
+      ${state.layout !== 'compact' && !ui.titlesOnly ? `<div class="row-snippet">${esc(a.summary || stripTags(a.content).slice(0, 220))}</div>` : ''}
     </div>
     <div class="row-actions">
+      <button class="icon-btn" data-act="hide-read" title="Mark as read and hide"><svg><use href="#i-close"/></svg></button>
       <button class="icon-btn" data-act="toggle-read" title="${read ? 'Mark unread' : 'Mark read'}"><svg><use href="#i-${read ? 'unread' : 'read'}"/></svg></button>
       <button class="icon-btn" data-act="keep" title="${isKept(a) ? 'Allow auto mark-read' : 'Keep unread'}"><svg><use href="#i-${isKept(a) ? 'eye' : 'eyeoff'}"/></svg></button>
       <a class="icon-btn" href="${esc(a.link || '#')}" target="_blank" rel="noopener noreferrer" title="Open original" data-act="open-original" onclick="event.stopPropagation()"><svg><use href="#i-external"/></svg></a>
     </div>
   </article>`;
 }
+function articleBody(a) {
+  const hasText = !!a.text;
+  return a._viewText && hasText ? a.text : (a.content || a.text || `<p>${esc(a.summary || '')}</p>`);
+}
 function readerHtml(a) {
   const feed = feedMeta(a._feed);
   const hasText = !!a.text;
-  const body = a._viewText && hasText ? a.text : (a.content || a.text || `<p>${esc(a.summary || '')}</p>`);
+  const body = articleBody(a);
   const idx = state.visible.indexOf(a);
   return `<div class="reader" data-id="${esc(a.id)}">
     <div class="reader-head">
@@ -389,6 +428,21 @@ function readerHtml(a) {
       <button class="tool-btn" data-act="toggle-read"><svg><use href="#i-${isRead(a) ? 'unread' : 'read'}"/></svg>${isRead(a) ? 'Mark unread' : 'Mark read'}</button>
       <button class="tool-btn" data-act="keep"><svg><use href="#i-${isKept(a) ? 'eye' : 'eyeoff'}"/></svg>${isKept(a) ? 'Allow auto mark-read' : 'Keep unread'}</button>
     </div>
+    ${attachmentsHtml(a)}
+  </div>`;
+}
+function attachmentsHtml(a) {
+  const enc = (a.enclosures || []).filter((e) => e.url && !/^image\/(?!.*thumbnail)/.test(e.type || ''));
+  const imgs = (a.enclosures || []).filter((e) => /^image\//.test(e.type || ''));
+  if (!enc.length && !imgs.length) return '';
+  const label = (e) => {
+    const kind = (e.type || '').split('/')[0];
+    const name = decodeURIComponent(e.url.split('/').pop().split('?')[0] || '').slice(0, 90);
+    return kind && kind !== 'image' ? `${kind.toUpperCase()} · ${name}` : name;
+  };
+  return `<div class="reader-attachments">
+    ${enc.map((e) => `<a href="${esc(e.url)}" target="_blank" rel="noopener noreferrer"><svg style="width:16px;height:16px"><use href="#i-external"/></svg>${esc(label(e))}</a>`).join('')}
+    ${imgs.map((e) => `<a href="${esc(e.url)}" target="_blank" rel="noopener noreferrer"><img src="${esc(e.url)}" alt="">${esc(label(e))}</a>`).join('')}
   </div>`;
 }
 function shortHost(url) { try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return 'original'; } }
@@ -396,21 +450,22 @@ function shortHost(url) { try { return new URL(url).hostname.replace(/^www\./, '
 function renderList() {
   const list = $('#list');
   const visible = computeVisible();
-  list.className = `view-${ui.layout}`;
+  list.className = `view-${ui.layout}${ui.layout === 'list' ? ` density-${ui.density}` : ''}${ui.showFavicons ? '' : ' no-favicons'}`;
+  document.body.classList.toggle('bulk-mode', !!ui.bulkSelect);
+  updateBulkBar();
   if (state.expandedId && !visible.some((a) => a.id === state.expandedId)) state.expandedId = null;
   list.innerHTML = visible.map((a) => {
-    const row = rowHtml(a);
-    return state.expandedId === a.id
-      ? row.replace('</article>', `${readerHtml(a)}</article>`)
-      : row;
+    let row = rowHtml(a);
+    if (state.expandedId === a.id) row = row.replace('</article>', `${readerHtml(a)}</article>`);
+    else if (ui.layout === 'expanded') row = row.replace('</article>', `<div class="row-body-inline">${articleBody(a)}</div></article>`);
+    return row;
   }).join('');
-  if (state.expandedId) {
-    const readerBody = list.querySelector('.reader-body');
-    if (readerBody) { sanitizeReaderDom(readerBody); upgradeEmbeds(readerBody); }
-  }
+  list.querySelectorAll('.reader-body, .row-body-inline').forEach((el) => { sanitizeReaderDom(el); upgradeEmbeds(el); });
+  setupScrollTracking();
   const unread = visible.filter((a) => !isRead(a)).length;
   $('#scope-title').textContent = scopeTitle();
   $('#scope-count').textContent = visible.length ? (ui.status === 'unread' ? String(visible.length) : `${unread} unread / ${visible.length}`) : '';
+  updateTitleCounter();
   renderEmpty(visible);
 }
 function renderEmpty(visible) {
@@ -512,34 +567,102 @@ function scheduleMarkRead(a) {
   if (delay <= 0) run();
   else state.markTimers.set(a.id, setTimeout(run, delay));
 }
-function markAllAsReadInScope() {
-  confirmDialog('Mark all as read', `Mark all articles in "${scopeTitle()}" as read? Unread items hidden by filters are skipped.`, () => {
-    let n = 0;
-    for (const feedId of feedIdsInScope()) {
-      for (const a of state.feeds.get(feedId) || []) {
-        if (a._f?.hidden) continue;
-        if (isRead(a) || isKept(a) || a._f?.keepUnread) continue;
-        if (state.scope === 'today' && a.date < startOfToday()) continue;
-        state.read[a.id] = Date.now(); n++;
-      }
+function collectScopeIds(scope) {
+  let feedIds;
+  if (scope.startsWith('feed:')) feedIds = [scope.slice(5)];
+  else if (scope.startsWith('folder:')) {
+    const fid = scope.slice(7);
+    feedIds = Object.keys(state.index?.feeds || {}).filter((id) => feedMeta(id).folders.includes(fid));
+  } else feedIds = feedIdsInScope();
+  const ids = [];
+  for (const feedId of feedIds) {
+    for (const a of state.feeds.get(feedId) || []) {
+      if (a._f?.hidden || isKept(a) || a._f?.keepUnread || isRead(a)) continue;
+      if (scope === 'today' && a.date < startOfToday()) continue;
+      ids.push(a.id);
     }
-    saveRead(); state.expandedId = null; renderTree(); renderList();
+  }
+  return ids;
+}
+function markScopeRead(scope) {
+  const ids = collectScopeIds(scope);
+  if (!ids.length) { showToast('Nothing to mark — everything here is read'); return; }
+  const snapshot = ids.map((id) => ({ id, ts: state.read[id] }));
+  for (const id of ids) state.read[id] = Date.now();
+  saveRead(); state.expandedId = null; renderTree(); renderList();
+  showToast(`Marked ${ids.length} article${ids.length === 1 ? '' : 's'} as read`, 'Undo', () => {
+    for (const { id, ts } of snapshot) { if (ts) state.read[id] = ts; else delete state.read[id]; }
+    saveRead(); renderTree(); renderList();
+  });
+}
+function markAllAsReadInScope() {
+  confirmDialog('Mark all as read', `Mark all articles in "${scopeTitle()}" as read? Articles kept unread or hidden by filters are skipped.`, () => {
+    markScopeRead(state.scope);
   });
 }
 
+function updateBulkBar() {
+  const bar = $('#bulk-bar');
+  if (!ui.bulkSelect || !state.bulkSel.size) { bar.classList.add('hidden'); return; }
+  bar.classList.remove('hidden');
+  $('#bulk-count').textContent = String(state.bulkSel.size);
+}
+function bulkMark(on) {
+  if (!state.bulkSel.size) return;
+  const ids = [...state.bulkSel];
+  const snapshot = ids.map((id) => ({ id, ts: state.read[id] }));
+  let n = 0;
+  for (const id of ids) {
+    if (on) state.read[id] = Date.now(); else delete state.read[id];
+    n++;
+  }
+  state.bulkSel.clear();
+  saveRead(); renderTree(); renderList();
+  showToast(`${on ? 'Marked' : 'Unmarked'} ${n} article${n === 1 ? '' : 's'}${on ? ' as read' : ' as unread'}`, 'Undo', () => {
+    for (const { id, ts } of snapshot) { if (ts) state.read[id] = ts; else delete state.read[id]; }
+    saveRead(); renderTree(); renderList();
+  });
+}
+
+let toastTimer = null;
+function showToast(text, actionLabel, cb) {
+  const el = $('#toast');
+  $('#toast-text').textContent = text;
+  const btn = $('#toast-action');
+  btn.textContent = actionLabel || '';
+  btn.style.display = actionLabel ? '' : 'none';
+  btn.onclick = () => { if (cb) cb(); hideToast(); };
+  el.classList.remove('hidden');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(hideToast, 7000);
+}
+function hideToast() { $('#toast').classList.add('hidden'); }
+
 /* ---------------- interactions ---------------- */
 function onListClick(e) {
-  const actBtn = e.target.closest('[data-act]');
   const rowEl = e.target.closest('.row');
   if (!rowEl) return;
   const id = rowEl.dataset.id;
   const a = findArticle(id);
   if (!a) return;
 
+  if (e.target.classList?.contains('row-check')) {
+    e.stopPropagation();
+    if (state.bulkSel.has(id)) state.bulkSel.delete(id); else state.bulkSel.add(id);
+    updateBulkBar();
+    return;
+  }
+  const actBtn = e.target.closest('[data-act]');
+
   if (actBtn) {
     const act = actBtn.dataset.act;
     e.stopPropagation();
     if (act === 'toggle-read') { forceAllowed = true; markRead(id, !isRead(a)); forceAllowed = false; }
+    else if (act === 'hide-read') {
+      forceAllowed = true; markRead(id, true); forceAllowed = false;
+      if (state.expandedId === id) state.expandedId = null;
+      renderList();
+    }
     else if (act === 'keep') { if (state.kept[id]) delete state.kept[id]; else state.kept[id] = true; saveKept(); renderList(); }
     else if (act === 'open-original') { /* anchor handles it */ }
     else if (act === 'collapse') { state.expandedId = null; renderList(); }
@@ -552,12 +675,20 @@ function onListClick(e) {
     return;
   }
   if (rowEl.classList.contains('expanded')) return; // clicking inside reader body does nothing
+  if (ui.layout === 'expanded') { // expanded view: content always visible; click just marks read
+    if (!isRead(a) && !isKept(a) && !a._f?.keepUnread) scheduleMarkRead(a);
+    return;
+  }
+  if (ui.openOriginal && a.link) { // "Open original webpages directly"
+    window.open(a.link, '_blank', 'noopener');
+    scheduleMarkRead(a);
+    return;
+  }
   if (state.expandedId === id) { state.expandedId = null; renderList(); return; }
   state.expandedId = id;
   renderList();
   listScrollTo(id);
-  const reader = $('.reader-body');
-  if (reader) { sanitizeReaderDom(reader); upgradeEmbeds(reader); }
+  if (ui.autoScroll) $('.reader')?.scrollIntoView?.({ block: 'start' });
   scheduleMarkRead(a);
 }
 function listScrollTo(id) {
@@ -572,6 +703,13 @@ function bindEvents() {
   $('#list').addEventListener('click', onListClick);
 
   document.addEventListener('click', (e) => {
+    if (!e.target.closest('#sidebar-menu') && !e.target.closest('#btn-sidebar-menu')) $('#sidebar-menu')?.classList.add('hidden');
+    const markBtn = e.target.closest('[data-markread]');
+    if (markBtn) {
+      e.stopPropagation();
+      if (ui.countersClickable) markScopeRead(markBtn.dataset.markread);
+      return;
+    }
     const scopeBtn = e.target.closest('[data-scope]');
     if (scopeBtn) {
       state.scope = scopeBtn.dataset.scope;
@@ -618,6 +756,21 @@ function bindEvents() {
   });
 
   $('#btn-mark-all').addEventListener('click', markAllAsReadInScope);
+  $('#btn-sort').addEventListener('click', () => {
+    ui.sortDir = ui.sortDir === 'oldest' ? 'newest' : 'oldest';
+    saveUi(); syncControls(); renderList();
+  });
+  $('#btn-sidebar-menu').addEventListener('click', (e) => {
+    e.stopPropagation();
+    $('#sidebar-menu').classList.toggle('hidden');
+    syncSidebarMenu();
+  });
+  $('#sidebar-menu').addEventListener('click', (e) => {
+    const item = e.target.closest('[data-opt]');
+    if (!item) return;
+    ui[item.dataset.opt] = !ui[item.dataset.opt];
+    saveUi(); syncSidebarMenu(); renderTree();
+  });
   $('#btn-refresh').addEventListener('click', () => refresh(true));
   $('#menu-toggle').addEventListener('click', () => {
     document.body.classList.toggle('sidebar-open');
@@ -637,6 +790,28 @@ function bindEvents() {
   $('#set-layout').addEventListener('change', (e) => { ui.layout = e.target.value; saveUi(); syncControls(); renderList(); });
   $('#set-markread').addEventListener('change', (e) => { ui.markReadOnOpen = e.target.checked; saveUi(); });
   $('#set-markread-delay').addEventListener('change', (e) => { ui.markReadAfterSeconds = Math.max(0, Number(e.target.value) || 0); saveUi(); });
+  $('#set-density').addEventListener('change', (e) => { ui.density = e.target.value; saveUi(); renderList(); });
+  $('#set-scroll-tracking').addEventListener('change', (e) => { ui.scrollTracking = e.target.checked; saveUi(); setupScrollTracking(); });
+  const bindBool = (sel, key, after) => $(sel).addEventListener('change', (e) => {
+    ui[key] = e.target.checked; saveUi(); syncControls(); (after || renderList)();
+  });
+  bindBool('#set-titles-only', 'titlesOnly');
+  bindBool('#set-open-original', 'openOriginal');
+  bindBool('#set-show-favicons', 'showFavicons');
+  bindBool('#set-column-thumbs', 'columnThumbs');
+  bindBool('#set-auto-scroll', 'autoScroll');
+  bindBool('#set-absolute-dates', 'absoluteDates');
+  bindBool('#set-side-favicons', 'sideFavicons', applySidebarMode);
+  bindBool('#set-compact-sidebar', 'compactSidebar', applySidebarMode);
+  bindBool('#set-counters-clickable', 'countersClickable');
+  $('#set-bulk-select').addEventListener('change', (e) => {
+    ui.bulkSelect = e.target.checked; saveUi(); state.bulkSel.clear(); syncControls(); renderList();
+  });
+  $('#set-font-size').addEventListener('change', (e) => { ui.fontSize = e.target.value; saveUi(); syncControls(); });
+
+  $('#bulk-read').addEventListener('click', () => bulkMark(true));
+  $('#bulk-unread').addEventListener('click', () => bulkMark(false));
+  $('#bulk-clear').addEventListener('click', () => { state.bulkSel.clear(); renderList(); });
   $('#btn-clear-read').addEventListener('click', () => {
     confirmDialog('Clear read state', 'Reset every article back to unread in this browser?', () => {
       state.read = {}; saveRead(); renderAll();
@@ -648,16 +823,58 @@ function bindEvents() {
 }
 
 function applyTheme() { document.documentElement.dataset.theme = ui.theme; }
+function applySidebarMode() {
+  document.body.classList.toggle('compact-sidebar', !!ui.compactSidebar);
+  document.body.classList.toggle('hide-side-favicons', !ui.sideFavicons);
+}
+function syncSidebarMenu() {
+  $$('#sidebar-menu [data-opt]').forEach((el) => el.classList.toggle('on', !!ui[el.dataset.opt]));
+}
 function syncControls() {
   $$('#status-chips .chip').forEach((c) => c.classList.toggle('active', c.dataset.status === ui.status));
   $$('#layouts [data-layout]').forEach((b) => b.classList.toggle('active', b.dataset.layout === ui.layout));
   $('#date-range').value = ui.dateRange;
   $('#btn-show-filtered').classList.toggle('active', ui.showFiltered);
   $('#btn-show-filtered svg use').setAttribute('href', ui.showFiltered ? '#i-eye' : '#i-eyeoff');
+  $('#btn-sort').classList.toggle('active', ui.sortDir === 'oldest');
+  $('#btn-sort').title = ui.sortDir === 'oldest' ? 'Sort: oldest first' : 'Sort: newest first';
   $('#set-theme').value = ui.theme;
   $('#set-layout').value = ui.layout;
+  $('#set-density').value = ui.density || 'comfort';
   $('#set-markread').checked = !!ui.markReadOnOpen;
   $('#set-markread-delay').value = ui.markReadAfterSeconds || 0;
+  $('#set-scroll-tracking').checked = !!ui.scrollTracking;
+  const bools = {
+    '#set-titles-only': 'titlesOnly', '#set-open-original': 'openOriginal',
+    '#set-show-favicons': 'showFavicons', '#set-column-thumbs': 'columnThumbs',
+    '#set-bulk-select': 'bulkSelect', '#set-auto-scroll': 'autoScroll',
+    '#set-absolute-dates': 'absoluteDates', '#set-side-favicons': 'sideFavicons',
+    '#set-compact-sidebar': 'compactSidebar', '#set-counters-clickable': 'countersClickable',
+    '#set-title-counter': 'titleCounter',
+  };
+  for (const [sel, key] of Object.entries(bools)) { const el = $(sel); if (el) el.checked = !!ui[key]; }
+  $('#set-font-size').value = ui.fontSize || '14.5px';
+  document.documentElement.style.setProperty('--title-size', ui.fontSize || '14.5px');
+  applySidebarMode();
+  syncSidebarMenu();
+}
+
+/* Inoreader "scroll tracking": mark items read when scrolled past (opt-in) */
+let scrollObserver = null;
+function setupScrollTracking() {
+  if (scrollObserver) { scrollObserver.disconnect(); scrollObserver = null; }
+  if (!ui.scrollTracking || typeof IntersectionObserver === 'undefined') return;
+  let dirty = false;
+  scrollObserver = new IntersectionObserver((entries) => {
+    for (const en of entries) {
+      if (en.isIntersecting || en.boundingClientRect.top >= 0) continue;
+      const a = findArticle(en.target.dataset.id);
+      if (!a || isRead(a) || isKept(a) || a._f?.keepUnread || a._f?.hidden) continue;
+      state.read[a.id] = Date.now(); dirty = true;
+    }
+    if (dirty) { saveRead(); renderTree(); renderList(); }
+  }, { threshold: 0 });
+  $$('#list .row').forEach((r) => scrollObserver.observe(r));
 }
 
 /* ---------------- settings / stats ---------------- */
@@ -731,7 +948,8 @@ async function boot() {
       ui.markReadAfterSeconds = Number(s.markReadAfterSeconds) || 0;
       saveUi();
     }
-    document.title = state.config.settings?.siteName || 'My Inoreader';
+    baseTitle = state.config.settings?.siteName || 'My Inoreader';
+    document.title = baseTitle;
     compileFilters();
   } catch (err) {
     $('#empty').classList.remove('hidden');

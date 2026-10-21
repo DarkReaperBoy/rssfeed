@@ -134,10 +134,38 @@ Matcher semantics:
 
 ## Feature scope (decided with the user — do NOT add without asking)
 
-In scope: folders, unread counts, read/unread persistence (localStorage, unread kept forever), all article layouts (list/compact/cards), search with operators (`feed:`, `title:`, `before:`, `after:`, `unread:`, `is:read`), date filters, config-driven include/exclude filters, text-view extraction with embeds, dark/light/auto theme, mark-all-as-read / mark-unread / keep-unread, per-feed refresh, subscription stats, retention config, settings panel linking to config.json editor.
+In scope: folders, unread counts, read/unread persistence (localStorage, unread kept forever), **all five Inoreader layouts (list/expanded/column/card/magazine)** + list density (comfort/compact/ultra) + newest/oldest sort (help-proven parity: inoreader.com/help/basic/article-view), search with operators (`feed:`, `title:`, `before:`, `after:`, `unread:`, `is:read`) + OR groups, date filters, config-driven include/exclude filters, text-view extraction with embeds, dark/light/auto theme, mark-all-as-read / mark-unread / keep-unread, **mark-read with Undo toast**, **click a sidebar unread badge → mark that feed/folder read**, sidebar options (show updated only, dim read subscriptions, sort A–Z), row "mark as read and hide" (X) button, opt-in scroll-tracking mark-read, per-feed refresh, subscription stats, retention config, settings panel linking to config.json editor.
+
+Note: parity items were verified against the user's saved real-reader page (Desktop HTML capture) and inoreader.com help/preferences payloads — keep AGENTS.md aligned with that reality.
 
 **Out of scope (explicitly rejected)**: stars/favorites, read-later, OPML import/export (config JSON is the substitute), tags, automation rules beyond filters, keyboard shortcuts, article notes/highlights-by-selection, desktop notifications, accounts/auth/tokens, newsletter ingestion, AI summaries, keyword-monitoring feeds.
 
+## IN PROGRESS (parity port from the user's saved real-reader capture — 2026-10-22, user napping, full port authorized)
+
+Source material on the user's Desktop (OUTSIDE the project — do not delete):
+- `(81) Inoreader - The FBI just arrested...html` — saved real Inoreader reader page, full DOM (sidebar `#tree`, `#reader_pane`, `#top_tabs`, toolbar) + embedded preferences JSON blob (starts ~byte 91679, key `article_listing` etc.)
+- `..._files/` — their real assets: `main_6VYi.css` (1.6MB theme CSS), `base_6VYi.css` (206KB), `index_js_6VYi.js`, `article_skeleton_6VYi.js`, …
+- `1790938239967.gif` — screen recording (cannot be viewed by agent)
+
+### Confirmed design tokens (ported or to port)
+- Primary blue **#1875F3** (`--primary-color`, `.text-primary`), darker #0952b5, lighter #61a0f7 — OUR `--accent` should become this (currently #4a90d9)
+- Font **Roboto, sans-serif** (+ Public Sans somewhere); headings dark navy **#081425 / #1a2433 / #31415d**; secondary gray **#828d9d**; light bg **#f3f4f7 / #F1F5FA**; borders **#D9DDE6**
+- Sidebar width **310px** (we use 264); reader content max ~870px (ours 860 ✓)
+- `.tree_unread { font-weight:bold }` ✓ we have; `.article_title_link{font-weight:bold}` + underline on hover; article titles `-webkit-line-clamp: 2/3`; READ articles show header buttons/date at **opacity 0.6** (unread full)
+- Reader typography: `.article-content h1 1.5rem`, `h2 1.3rem`
+- Top tabs (left rail): Home, Dashboards, Feeds (badge), Saved, Automate, Search, Add content, Preferences, profile — ours covers reader subset by design (dashboards/saved/automate out of scope)
+
+### PORTED — design (styles.css tokens verified against their real CSS)
+Primary **#1875F3** (+darker #0952b5/#lighter #61a0f7), Roboto via Google Fonts, sidebar **310px**, secondary **#828d9d**, bg-hover **#f3f4f7**, border **#d9dde6**, headings **#081425/#1a2433**, 2-line title clamp + underline-on-hover, read rows dim metadata to .65, reader h1 1.5rem/h2 1.3rem, --list-max 870px. `--sidebar-w`, `--title-size`, `--font` vars.
+
+### PORTED — features (41 smoke assertions passing)
+5 layouts + density + sort newest/oldest; badge-click mark-read + Undo toast; sidebar ⋯ menu (updated-only/dim-read/sort A–Z); X "mark as read and hide"; scroll tracking; titles-only; open-original mode; feed-icons toggle; column thumbnails toggle; **bulk multi-select + bulk bar (read/unread/undo)**; auto-scroll opened article; absolute dates; title font-size select; compact sidebar; sidebar favicons toggle; clickable-counters toggle; **tab title unread counter**; attachments/enclosures list in reader; mark-all confirm. Migration: old `layout:'compact'` → list+density-compact.
+
+### Do NOT port (user rejected): stars/read-later/tags/notes/rules/shortcuts/notifications/OPML; out of scope: dashboards, teams, AI, translations, TTS, image proxy, popularity scores, monitoring feeds, newsletters, timezone/date-format pickers, magic sort, custom CSS.
+
+Full prefs inventory saved at /tmp/inoreader_pref_pairs + /tmp/inoreader_prefs.json (ephemeral — re-extract from the Desktop capture if gone).
+
 ## Generated
 
+- 2026-10-22 (2): Inoreader-parity pass driven by scraping the real reader (user's saved Desktop page + help center): 5 layouts, density, sort toggle, badge-click mark-read, undo toast, sidebar options menu, scroll tracking, X hide-button. Smoke test extended to 34 assertions, all passing.
 - 2026-10-22: initial build. Fetcher: rss-parser + jsdom/readability + sanitize-html. UI: single `assets/app.js` (~700 lines), vanilla. Data: `data/index.json` + `data/feeds/<id>.json`. Publishing: workflow force-pushes assembled `_site/` to `gh-pages` (Pages source); default branch has no CI commits and ignores `data/`, `node_modules/`, `_site/`. Multi-folder feeds (`folders: []`) and per-folder `maxAgeDays` added after scraping inoreader.com for parity. Smoke test: `npm run test:ui` (21 assertions, all passing).

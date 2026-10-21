@@ -75,15 +75,16 @@ That's it. Every hour the Action re-fetches feeds and force-updates `gh-pages` (
 
 ## Features
 
-- Folders + feeds with live unread counts (folder & global totals)
-- **Unread is sacred**: nothing marks an article read except you (open, mark buttons, or a `markRead` filter). Unread articles are never removed by retention within the kept window
-- All/Unread/Read chips, date filters (today / 3 days / week / month), All·Unread·Today·Recently read views
-- List / Compact / Cards layouts, light/dark/auto theme
-- Inline reading pane with prev/next, original site link, mark read/unread, "keep unread"
+- Folders + feeds with live unread counts (folder & global totals) — **click a counter to mark that section read** (with Undo)
+- **Unread is sacred**: nothing marks an article read except you (open, mark buttons, bulk, or a `markRead` filter). Unread articles are never removed by retention within the kept window
+- All/Unread/Read chips, date filters (today / 3 days / week / month), All·Unread·Today·Recently read views, newest/oldest sort
+- **All five Inoreader layouts**: List (Comfort/Compact/Ultra density), Expanded, Column, Cards, Magazine — light/dark/auto theme
+- Inline reading pane with prev/next, original site link, mark read/unread, "keep unread", attachments list
 - **Text view**: feeds with `fullText` get readability-extracted clean article text (vs. truncated feed content)
 - **Embeds**: YouTube/Vimeo click-to-play (privacy `youtube-nocookie`), SoundCloud, inline audio/video players
 - Search with operators: `feed:bbc title:ai before:2026-01-01 after:2025-12-01 unread:true is:read`, plus `OR` groups
 - Full-text search across titles, authors, summaries and article bodies
+- Settings mirroring Inoreader preferences: titles-only, open-original mode, feed icons, scroll tracking, multiple select (bulk mark read/unread with undo), absolute dates, title font size, compact sidebar, tab-title unread counter, sidebar options (updated-only / dim read / sort A–Z)
 - Subscription stats + retention info in the settings panel
 
 ## Local development
