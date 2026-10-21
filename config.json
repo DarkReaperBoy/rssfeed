@@ -1,0 +1,82 @@
+{
+  "settings": {
+    "siteName": "My Inoreader",
+    "theme": "auto",
+    "view": "list",
+    "articlesPerFeed": 200,
+    "retentionDays": 90,
+    "keepUnreadForever": true,
+    "markReadOnOpen": true,
+    "markReadAfterSeconds": 0,
+    "refreshMinutes": 60,
+    "fullTextDefault": false
+  },
+  "folders": [
+    { "id": "tech", "name": "Technology" },
+    { "id": "news", "name": "News" }
+  ],
+  "feeds": [
+    {
+      "id": "hacker-news",
+      "title": "Hacker News",
+      "url": "https://hnrss.org/frontpage",
+      "site": "https://news.ycombinator.com",
+      "folder": "tech"
+    },
+    {
+      "id": "ars-technica",
+      "title": "Ars Technica",
+      "url": "https://feeds.arstechnica.com/arstechnica/index",
+      "site": "https://arstechnica.com",
+      "folder": "tech"
+    },
+    {
+      "id": "the-verge",
+      "title": "The Verge",
+      "url": "https://www.theverge.com/rss/index.xml",
+      "site": "https://www.theverge.com",
+      "folder": "tech",
+      "fullText": true
+    },
+    {
+      "id": "bbc-news",
+      "title": "BBC News",
+      "url": "https://feeds.bbci.co.uk/news/rss.xml",
+      "site": "https://www.bbc.com/news",
+      "folder": "news",
+      "fullText": true
+    },
+    {
+      "id": "npr-news",
+      "title": "NPR News",
+      "url": "https://feeds.npr.org/1001/rss.xml",
+      "site": "https://www.npr.org",
+      "folder": "news"
+    }
+  ],
+  "filters": [
+    {
+      "id": "example-hidden",
+      "name": "Example: hide crypto spam everywhere (disabled)",
+      "enabled": false,
+      "feeds": ["*"],
+      "exclude": { "title": ["crypto", "/\\bbtc\\b/i"], "links": ["coindesk.com"] },
+      "actions": { "hide": true }
+    },
+    {
+      "id": "example-whitelist",
+      "name": "Example: HN feed only shows AI/LLM stories (disabled)",
+      "enabled": false,
+      "feeds": ["hacker-news"],
+      "include": { "title": ["AI", "LLM", "GPT"] },
+      "actions": { "hide": true }
+    },
+    {
+      "id": "example-keep-unread",
+      "name": "Example: newsletters stay unread until you finish them (disabled)",
+      "enabled": false,
+      "feeds": ["some-newsletter-feed-id"],
+      "actions": { "keepUnread": true }
+    }
+  ]
+}
