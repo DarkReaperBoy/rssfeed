@@ -33,9 +33,9 @@ const state = {
 };
 const ui = Object.assign({
   theme: 'auto', layout: 'list', status: 'unread', dateRange: 'all',
-  showFiltered: false, openFolders: { 'tech': true }, sidebarOpen: false,
+  showFiltered: false, openFolders: {}, sidebarOpen: false,
   markReadOnOpen: true, markReadAfterSeconds: 0,
-  density: 'comfort', sortDir: 'newest',
+  density: 'comfort', sortDir: 'oldest',
   updatedOnly: false, dimRead: false, sortAZ: false, scrollTracking: false,
   titlesOnly: false, openOriginal: false, showFavicons: true, columnThumbs: true,
   bulkSelect: false, autoScroll: true, absoluteDates: false, fontSize: '14.5px',
@@ -64,6 +64,8 @@ function relTime(ts) {
   if (s < 3600) return Math.floor(s / 60) + 'm';
   if (s < 86400) return Math.floor(s / 3600) + 'h';
   if (s < 7 * 86400) return Math.floor(s / 86400) + 'd';
+  if (s < 30 * 86400) return Math.floor(s / (7 * 86400)) + 'w';
+  if (s < 365 * 86400) return Math.floor(s / (30 * 86400)) + 'mo';
   const d = new Date(ts);
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: d.getFullYear() === new Date().getFullYear() ? undefined : 'numeric' });
 }
@@ -351,7 +353,7 @@ function renderTree() {
     if (!kids.length) continue;
     const n = kids.reduce((s, id) => s + unreadCount(id), 0);
     if (ui.updatedOnly && n === 0) continue;
-    const open = ui.openFolders[folder.id] !== false;
+    const open = ui.openFolders[folder.id] === true;
     const dim = ui.dimRead && n === 0 ? 'dimmed' : '';
     html += `<div class="tree-folder ${open ? 'open' : ''}">
       <button class="tree-item ${state.scope === 'folder:' + folder.id ? 'active' : ''} ${n ? 'unread' : ''} ${dim}" data-folder="${esc(folder.id)}" data-scope="folder:${esc(folder.id)}">
@@ -442,17 +444,12 @@ function articleBody(a) {
   return html;
 }
 function readerBodyHtml(a, tab) {
-  if (tab === 'article') {
-    return a.text ? `<div class="reader-body">${a.text}</div>`
-      : '<div class="reader-pro-note">No extracted article text for this item.</div>';
-  }
   return `<div class="reader-body">${articleBody(a)}</div>`;
 }
 function readerHtml(a) {
   const feed = feedMeta(a._feed);
   const tab = state.readerTab || 'description';
   const idx = state.visible.indexOf(a);
-  const rt = readingTime(a);
   return `<div class="reader" data-id="${esc(a.id)}">
     <div class="reader-toolbar">
       <span class="spacer"></span>
@@ -463,17 +460,13 @@ function readerHtml(a) {
     </div>
     <h2 class="reader-title">${esc(a.title)}</h2>
     <div class="reader-sub">
-      <span class="sub-feed">${esc(feed.title)}<svg><use href="#i-chevron-down"/></svg></span>
+      <span class="sub-feed" data-scope="feed:${esc(a._feed)}" title="Show this feed">${esc(feed.title)}</span>
       ${a.author ? `<span>by ${esc(a.author)}</span>` : ''}
       <span title="${esc(fullTime(a.date))}">${esc(relTime(a.date))}</span>
-      ${rt ? `<span>${esc(rt)}</span>` : ''}
     </div>
     ${readerBodyHtml(a, tab)}
     ${attachmentsHtml(a)}
-    <div class="reader-tabs">
-      <button class="reader-tab ${tab === 'description' ? 'active' : ''}" data-act="rtab" data-rtab="description"><svg><use href="#i-all"/></svg>Description</button>
-      <button class="reader-tab ${tab === 'article' ? 'active' : ''}" data-act="rtab" data-rtab="article" title="Extracted article text"><svg><use href="#i-markread"/></svg>Article</button>
-    </div>
+
   </div>`;
 }
 function attachmentsHtml(a) {
@@ -752,7 +745,6 @@ function dispatchAct(act, id, el, e) {
   }
   else if (act === 'open-original') { /* anchor handles it */ }
   else if (act === 'collapse') { state.expandedId = null; renderList(); }
-  else if (act === 'rtab') { state.readerTab = el?.dataset?.rtab || 'description'; renderList(); }
   else if (act === 'prev' || act === 'next') {
     const i = state.visible.indexOf(a);
     const target = state.visible[act === 'prev' ? i - 1 : i + 1];
@@ -815,13 +807,18 @@ function bindEvents() {
     e.stopPropagation();
     dispatchAct(actBtn.dataset.act, state.expandedId, actBtn, e);
   });
-  $('#scroll-up').addEventListener('click', () => { const l = $('#list'); l.scrollTop -= Math.max(120, l.clientHeight * 0.85); });
-  $('#scroll-down').addEventListener('click', () => { const l = $('#list'); l.scrollTop += Math.max(120, l.clientHeight * 0.85); });
+  $('#scroll-up').addEventListener('click', () => {
+    const btn = $('#reader-slot [data-act="prev"]');
+    if (btn && !btn.disabled) btn.click();
+  });
+  $('#scroll-down').addEventListener('click', () => {
+    const btn = $('#reader-slot [data-act="next"]');
+    if (btn && !btn.disabled) btn.click();
+  });
 
   document.addEventListener('click', (e) => {
     if (!e.target.closest('#sidebar-menu') && !e.target.closest('#btn-sidebar-menu')) $('#sidebar-menu')?.classList.add('hidden');
     if (!e.target.closest('#header-menu') && !e.target.closest('#btn-more')) $('#header-menu')?.classList.add('hidden');
-    if (!e.target.closest('#title-menu') && !e.target.closest('#btn-title-menu')) $('#title-menu')?.classList.add('hidden');
     if (!e.target.closest('#mark-menu') && !e.target.closest('#btn-mark-all-split')) $('#mark-menu')?.classList.add('hidden');
     const markBtn = e.target.closest('[data-markread]');
     if (markBtn) {
@@ -943,16 +940,6 @@ function bindEvents() {
   });
   $('#scrim').addEventListener('click', () => { document.body.classList.remove('sidebar-open'); $('#scrim').classList.add('hidden'); });
 
-  $('#btn-title-menu').addEventListener('click', (e) => {
-    e.stopPropagation();
-    $('#title-menu').classList.toggle('hidden');
-  });
-  $('#title-menu').addEventListener('click', (e) => {
-    const item = e.target.closest('[data-title-act]');
-    if (!item) return;
-    $('#title-menu').classList.add('hidden');
-    if (item.dataset.titleAct === 'properties') showToast('Reader preferences are configured in config.json');
-  });
   $('#bulk-read').addEventListener('click', () => bulkMark(true));
   $('#bulk-unread').addEventListener('click', () => bulkMark(false));
   $('#bulk-clear').addEventListener('click', () => { state.bulkSel.clear(); renderList(); });

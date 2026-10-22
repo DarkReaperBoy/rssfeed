@@ -339,8 +339,9 @@ svg { width: 20px; height: 20px; fill: currentColor; flex: none; }
 /* scroll up/down circles (bottom-right, their scroll buttons) */
 #scroll-nav {
   position: absolute; right: 18px; bottom: 18px; z-index: 26;
-  display: flex; flex-direction: column; gap: 10px;
+  display: none; flex-direction: column; gap: 10px;
 }
+body.article-open #scroll-nav { display: flex; }
 .scroll-btn {
   width: 46px; height: 46px; border-radius: 50%;
   background: var(--bg); color: var(--text-dim);
@@ -494,7 +495,7 @@ body.bulk-mode .row .dot { visibility: hidden; }
 .view-expanded .row-actions { position: static; display: flex; justify-content: flex-end; margin: 6px auto 10px; max-width: var(--list-max); width: calc(100% - 40px); transform: none; }
 
 /* selected row highlight */
-.row.expanded { display: block; background: var(--bg-expanded); cursor: default; padding: 0; }
+.row.expanded { background: var(--bg-expanded); cursor: default; }
 .row.expanded:hover { background: var(--bg-expanded); }
 .row.expanded::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--accent); }
 .view-column .row.expanded { column-span: all; }

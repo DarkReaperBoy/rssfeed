@@ -124,6 +124,10 @@ function pickContent(item) {
     raw = Array.isArray(desc) ? (desc[0] || '') : (desc?._ || desc || '');
   }
   raw = typeof raw === 'string' ? raw : String(raw ?? '');
+  // Pretty-print plain-text descriptions (e.g. YouTube) as paragraphs.
+  if (raw && !/<[a-z][\s\S]*>/i.test(raw)) {
+    raw = raw.split(/\n{2,}/).map((p) => `<p>${p.replace(/\n/g, '<br>')}</p>`).join('');
+  }
   // Linkify bare URLs so embeds (YouTube etc.) can be upgraded client-side.
   if (raw && !/<a\s/i.test(raw)) {
     raw = raw.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1">$1</a>');
