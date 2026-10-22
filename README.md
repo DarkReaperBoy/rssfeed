@@ -6,6 +6,7 @@ A self-hosted RSS reader with **no server and no database**:
 - **GitHub Pages** serves the Inoreader-style UI
 - **`config.json`** is the entire configuration: settings, folders, feeds and content filters — plus an optional **`feeds.opml`** export (e.g. Inoreader's) that can provide the feed list, imported server-side by the fetcher
 - **Read/unread state** lives in your browser (`localStorage`) — nothing is ever auto-marked read; articles stay unread until you read or mark them. Note: articles older than `settings.retentionDays` are dropped from the data files for everyone — the fetcher can't see read state, so retention applies regardless of unread.
+- **Deep links**: the open article lives in the URL (`#article/<id>`) — refresh and you're still on it, and the browser Back/Forward buttons walk through the articles you opened (misclicked? Back). Article ids are stable random-looking hashes, so links survive the hourly refetches. Reset your feed state any time via **⋯ → Reset read state**.
 
 ## Setup (3 minutes)
 
@@ -108,6 +109,8 @@ Don't want to hand-write feeds? Export OPML from Inoreader (or any reader), save
 - **Unread is sacred**: nothing marks an article read except you (open, the tick button, bulk, or a `markRead` filter); `keepUnread` filters beat all of it
 - **Single read-state indicator**: the tick button on each row (✓ = read, ○ = unread); the reader title links to the original article
 - **No vanishing rows**: an article you just read stays in the Unread view (ticked) until you open another article or change the view
+- **Deep links + Back/Forward**: opening an article sets `#article/<id>` in the URL as a history entry — Back returns you to the previous article (also works for the reader's prev/next buttons); a refresh reopens the article straight from the URL; closing the reader (Escape/collapse/re-click) replaces the hash instead of stacking history
+- **Reset read state** (⋯ menu): forgets all read + keep-unread state in one confirmed click — everything goes back to unread
 - All/Unread/Read chips, date filters (today / 3 days / week / month), All·Unread·Today·Recently read views, newest/oldest sort
 - **All five Inoreader layouts**: List (Comfort/Compact/Ultra density), Expanded, Column, Cards, Magazine — light/dark/auto theme
 - Inline reading pane with prev/next, original site link, mark read/unread, "keep unread", attachments list

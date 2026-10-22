@@ -128,6 +128,7 @@ ok(!!$('#reader-slot .reader-body'), 'article opens');
 ok($('#reader-slot .reader-title a')?.href === firstLink, 'reader title links to the original article');
 ok($('#list .row').classList.contains('expanded'), 'open row is highlighted in the list');
 ok(Number($('#badge-all-items').textContent) === TOTAL - HIDDEN - 1, 'opening marks read');
+ok(window.location.hash === `#article/${firstId}`, 'opening an article puts its id in the URL (#article/<id>)');
 
 console.log('double-click keeps the read row');
 click($('#list .row')); // same row again → collapse
@@ -136,6 +137,7 @@ ok(!window.document.body.classList.contains('article-open'), 'reader closed');
 ok(rowCount() === TOTAL - HIDDEN, 'double-clicked article stays in the list (marked read, not removed)');
 ok(!$('#list .row').classList.contains('unread'), 'the row now shows as read');
 ok(Number($('#badge-all-items').textContent) === TOTAL - HIDDEN - 1, 'badge unchanged by the collapse');
+ok(!window.location.hash, 'collapsing the reader clears the hash (no history spam)');
 
 console.log('moving on re-filters the read row');
 const secondRow = $$('#list .row')[1];
@@ -145,6 +147,17 @@ await settle(50);
 ok(rowCount() === TOTAL - HIDDEN - 1, 'previously read article disappears when moving on');
 ok(!$(`#list .row[data-id="${firstId}"]`), 'old row is gone from the list');
 ok(window.document.body.classList.contains('article-open'), 'new article is selected');
+
+console.log('browser Back/Forward (deep-link history)');
+window.location.hash = `#article/${firstId}`; // Back = the previous article's hash
+window.dispatchEvent(new window.Event('hashchange')); // idempotent if jsdom already fired it
+await settle(50);
+ok($('#reader-slot .reader')?.dataset.id === firstId, 'Back reopens the previous article');
+ok($(`#list .row[data-id="${firstId}"]`), 'Backed-into article is in the list again (it was read)');
+window.location.hash = `#article/${secondId}`; // Forward
+window.dispatchEvent(new window.Event('hashchange'));
+await settle(50);
+ok($('#reader-slot .reader')?.dataset.id === secondId, 'Forward returns to the next article');
 
 console.log('mark unread');
 click(`#list .row[data-id="${secondId}"] [data-act="toggle-read"]`);
@@ -209,6 +222,65 @@ await settle(50);
 click('#menu-select-mode');
 await settle(20);
 ok(!$$('#list .row-check').length, 'bulk mode toggles off');
+
+console.log('reset read state (menu)');
+click('#btn-more');
+await settle(20);
+click('#menu-reset-read');
+await settle(20);
+ok(!$('#confirm-modal').classList.contains('hidden'), 'reset read state asks for confirmation');
+click('#confirm-yes');
+await settle(50);
+ok(Number($('#badge-all-items').textContent) === TOTAL - HIDDEN, 'reset makes every article unread');
+ok(window.localStorage.getItem('ghrss:read') === '{}', 'stored read state is emptied');
+ok(window.localStorage.getItem('ghrss:kept') === '{}', 'stored keep-unread state is emptied');
+
+console.log('refresh/restore: boot with #article/<id> in the URL');
+{
+  const dom2 = new JSDOM(html, { url: 'https://example.test/#article/fixture-hn-3', runScripts: 'outside-only', pretendToBeVisual: true });
+  const w2 = dom2.window;
+  w2.fetch = window.fetch; // same deterministic fixture backend
+  w2.eval(appSrc);
+  w2.document.dispatchEvent(new w2.Event('DOMContentLoaded', { bubbles: true }));
+  await settle(1200);
+  const reader2 = w2.document.querySelector('#reader-slot .reader');
+  ok(!!reader2 && reader2.dataset.id === 'fixture-hn-3', 'refresh reopens the article from the URL hash');
+  ok(w2.document.querySelector('#reader-slot .reader-title a')?.href === 'https://example.com/fixture-hn/3', 'the restored article is the right one');
+  ok(Number(w2.document.querySelector('#badge-all-items').textContent) === TOTAL - HIDDEN - 1, 'hash-restore marks it read exactly like a click');
+  ok(w2.location.hash === '#article/fixture-hn-3', 'the hash survives boot');
+  dom2.window.close();
+}
+
+console.log('feed-storage version reset');
+{
+  const dom3 = new JSDOM(html, { url: 'https://example.test/', runScripts: 'outside-only', pretendToBeVisual: true });
+  const w3 = dom3.window;
+  w3.fetch = window.fetch;
+  // a pre-version browser shows up with old feed state and UI prefs
+  w3.localStorage.setItem('ghrss:read', JSON.stringify({ 'fixture-hn-0': 123 }));
+  w3.localStorage.setItem('ghrss:kept', JSON.stringify({ 'fixture-hn-1': true }));
+  w3.localStorage.setItem('ghrss:ui', JSON.stringify({ layout: 'cards', sortDir: 'newest' }));
+  w3.eval(appSrc);
+  w3.document.dispatchEvent(new w3.Event('DOMContentLoaded', { bubbles: true }));
+  await settle(1200);
+  ok(!Object.keys(JSON.parse(w3.localStorage.getItem('ghrss:read') || '{}')).length, 'old-version feed storage is wiped on upgrade');
+  ok(w3.localStorage.getItem('ghrss:ver') === '2', 'the storage version is recorded');
+  ok(Number(w3.document.querySelector('#badge-all-items').textContent) === TOTAL - HIDDEN, 'all articles unread after the one-time reset');
+  ok(w3.document.querySelector('#list').classList.contains('view-cards'), 'UI prefs survive the feed-storage reset');
+  dom3.window.close();
+}
+{
+  const dom4 = new JSDOM(html, { url: 'https://example.test/', runScripts: 'outside-only', pretendToBeVisual: true });
+  const w4 = dom4.window;
+  w4.fetch = window.fetch;
+  w4.localStorage.setItem('ghrss:ver', '2'); // already on this version
+  w4.localStorage.setItem('ghrss:read', JSON.stringify({ 'fixture-hn-3': 123 }));
+  w4.eval(appSrc);
+  w4.document.dispatchEvent(new w4.Event('DOMContentLoaded', { bubbles: true }));
+  await settle(1200);
+  ok(Number(w4.document.querySelector('#badge-all-items').textContent) === TOTAL - HIDDEN - 1, 'same-version storage is kept (no re-reset)');
+  dom4.window.close();
+}
 
 console.log('');
 console.log(`${pass} passed, ${fail} failed`);

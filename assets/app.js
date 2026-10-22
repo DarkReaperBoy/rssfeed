@@ -7,7 +7,17 @@
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
-const LS_READ = 'ghrss:read', LS_KEPT = 'ghrss:kept', LS_UI = 'ghrss:ui';
+const LS_READ = 'ghrss:read', LS_KEPT = 'ghrss:kept', LS_UI = 'ghrss:ui', LS_VER = 'ghrss:ver';
+const STORAGE_VERSION = 2; // bump = one-time reset of the stored feed state (read + kept); UI prefs survive
+// One-time feed-storage reset: a browser that last visited before this version
+// starts fresh — read/keep-unread state is wiped once, then the version is recorded.
+try {
+  if (Number(localStorage.getItem(LS_VER)) !== STORAGE_VERSION) {
+    localStorage.removeItem(LS_READ);
+    localStorage.removeItem(LS_KEPT);
+    localStorage.setItem(LS_VER, String(STORAGE_VERSION));
+  }
+} catch {}
 
 const state = {
   config: null,
@@ -316,7 +326,7 @@ function computeVisible() {
   if (state.expandedId && !out.some((a) => a.id === state.expandedId)) {
     const open = findArticle(state.expandedId);
     if (open && !open._f?.hidden && scopeFilter(open) && dateRangeFilter(open)) out.push(open);
-    else if (!open) state.expandedId = null;
+    // a vanished or hidden open article is dropped — renderList clears it + the URL hash
   }
   state.visible = out;
   return out;
@@ -512,7 +522,7 @@ function renderList() {
   list.className = `view-${ui.layout}${ui.layout === 'list' ? ` density-${ui.density}` : ''}${ui.showFavicons ? '' : ' no-favicons'}`;
   document.body.classList.toggle('bulk-mode', !!ui.bulkSelect);
   updateBulkBar();
-  if (state.expandedId && !visible.some((a) => a.id === state.expandedId)) state.expandedId = null;
+  if (state.expandedId && !visible.some((a) => a.id === state.expandedId)) { state.expandedId = null; clearHashArticle(); }
   const keepScroll = list.scrollTop; // rebuilding the list must not yank it back to the top
   list.innerHTML = visible.map((a) => {
     let row = rowHtml(a);
@@ -704,7 +714,7 @@ function markScopeRead(scope, olderDays = 0) {
   }
   const snapshot = ids.map((id) => ({ id, ts: state.read[id] }));
   for (const id of ids) state.read[id] = Date.now();
-  saveRead(); state.expandedId = null; state.keepVisible.clear(); renderTree(); renderList();
+  saveRead(); clearHashArticle(); state.expandedId = null; state.keepVisible.clear(); renderTree(); renderList();
   const what = olderDays ? ` older than ${OLDER_LABELS[olderDays] || olderDays + ' days'}` : '';
   showToast(`Marked ${ids.length} article${ids.length === 1 ? '' : 's'}${what} as read`, 'Undo', () => {
     for (const { id, ts } of snapshot) { if (ts) state.read[id] = ts; else delete state.read[id]; }
@@ -757,6 +767,58 @@ function showToast(text, actionLabel, cb) {
 }
 function hideToast() { $('#toast').classList.add('hidden'); }
 
+/* ---------------- open/close article — URL-driven (#article/<id>) ----------------
+   The open article lives in the URL hash, so a refresh reopens it and the
+   browser Back/Forward buttons walk through opened articles (misclick → Back).
+   Opening pushes a history entry; closing replaces it (no "closed" spam). */
+const HASH_PREFIX = '#article/';
+const hashArticleId = () => {
+  const h = location.hash || '';
+  return h.startsWith(HASH_PREFIX) ? decodeURIComponent(h.slice(HASH_PREFIX.length)) : null;
+};
+function setHashArticle(id) {
+  const target = HASH_PREFIX + encodeURIComponent(id);
+  if ((location.hash || '') !== target) location.hash = target; // the assignment pushes a history entry
+}
+function clearHashArticle() {
+  if (!location.hash) return;
+  try { history.replaceState(null, '', location.pathname + location.search); } catch { location.hash = ''; }
+}
+function openArticle(id) {
+  const a = findArticle(id);
+  if (!a || a._f?.hidden) return false;
+  state.keepVisible.clear(); // opening another article re-filters rows read before it
+  state.expandedId = id;
+  renderList();
+  listScrollTo(id);
+  if (ui.autoScroll) { const ap = $('#article_pane'); if (ap) ap.scrollTop = 0; }
+  scheduleMarkRead(a);
+  return true;
+}
+function closeArticle(keep = true) {
+  if (!state.expandedId) return;
+  clearTimeout(state.markTimers.get(state.expandedId));
+  state.markTimers.delete(state.expandedId);
+  if (keep) state.keepVisible.add(state.expandedId); // closing keeps the just-read row in place
+  state.expandedId = null;
+  renderList();
+}
+function openViaHash(id) {
+  if (hashArticleId() === id) openArticle(id); // hash already points here (e.g. re-click after Back)
+  else setHashArticle(id);                     // hashchange opens it — one path for every open
+}
+function closeViaHash() { clearHashArticle(); closeArticle(true); }
+function syncFromHash(notify = true) {
+  const id = hashArticleId();
+  if (id) {
+    if (state.expandedId === id) return;
+    if (!openArticle(id)) { // left the retention window or hidden by a config filter
+      clearHashArticle();
+      if (notify) showToast('That article is no longer available (filtered or past the retention window)');
+    }
+  } else closeArticle(true); // Back from #article/<id> to the list closes the reader, row lingers
+}
+
 /* ---------------- interactions ---------------- */
 function dispatchAct(act, id, el, e) {
   const a = findArticle(id);
@@ -764,19 +826,11 @@ function dispatchAct(act, id, el, e) {
   if (act === 'toggle-read') { forceAllowed = true; markRead(id, !isRead(a)); forceAllowed = false; }
   else if (act === 'keep') { if (state.kept[id]) delete state.kept[id]; else state.kept[id] = true; saveKept(); renderList(); }
   else if (act === 'open-original') { /* anchor handles it */ }
-  else if (act === 'collapse') {
-    state.keepVisible.add(id); // closing the reader keeps the row — read, ticked, in place
-    state.expandedId = null; renderList();
-  }
+  else if (act === 'collapse') closeViaHash(); // closing keeps the row — read, ticked, in place
   else if (act === 'prev' || act === 'next') {
     const i = state.visible.indexOf(a);
     const target = state.visible[act === 'prev' ? i - 1 : i + 1];
-    if (target) {
-      state.keepVisible.clear(); // moving on re-filters rows read before this one
-      state.expandedId = target.id;
-      renderList(); scheduleMarkRead(target); listScrollTo(target.id);
-      if (ui.autoScroll) { const ap = $('#article_pane'); if (ap) ap.scrollTop = 0; }
-    }
+    if (target) openViaHash(target.id); // openArticle clears keepVisible — moving on refilters
   }
 }
 
@@ -814,20 +868,8 @@ function onListClick(e) {
     scheduleMarkRead(a);
     return;
   }
-  if (state.expandedId === id) { // collapse — keep the row around (marked read), don't yank it
-    clearTimeout(state.markTimers.get(id));
-    state.markTimers.delete(id);
-    state.keepVisible.add(id);
-    state.expandedId = null;
-    renderList();
-    return;
-  }
-  state.keepVisible.clear(); // opening another article re-filters rows read before it
-  state.expandedId = id;
-  renderList();
-  listScrollTo(id);
-  if (ui.autoScroll) { const ap = $('#article_pane'); if (ap) ap.scrollTop = 0; }
-  scheduleMarkRead(a);
+  if (state.expandedId === id) { closeViaHash(); return; } // collapse — the read row stays put
+  openViaHash(id); // expand — the one URL-driven path (hashchange opens it)
 }
 function listScrollTo(id) {
   const safe = (window.CSS && CSS.escape) ? CSS.escape(id) : String(id).replace(/"/g, '\\"');
@@ -867,6 +909,7 @@ function bindEvents() {
     const scopeBtn = e.target.closest('[data-scope]');
     if (scopeBtn) {
       state.scope = scopeBtn.dataset.scope;
+      clearHashArticle();
       state.expandedId = null;
       state.keepVisible.clear();
       document.body.classList.remove('sidebar-open');
@@ -889,6 +932,7 @@ function bindEvents() {
     if (v === 'today') state.scope = 'today';
     else if (v === 'recently-read') state.scope = 'recently-read';
     else { ui.status = v; if (state.scope !== 'all' && !state.scope.startsWith('feed:') && !state.scope.startsWith('folder:')) state.scope = 'all'; }
+    clearHashArticle();
     state.expandedId = null;
     state.keepVisible.clear(); // view change: lingering read rows re-filter out
     saveUi(); syncControls(); renderAll(); ensureScopeLoaded();
@@ -907,6 +951,16 @@ function bindEvents() {
     ui.bulkSelect = !ui.bulkSelect; state.bulkSel.clear(); saveUi(); syncControls(); renderList();
   });
   $('#menu-refresh').addEventListener('click', () => { $('#header-menu').classList.add('hidden'); refresh(true); });
+  window.addEventListener('hashchange', () => syncFromHash()); // Back/Forward between articles
+  $('#menu-reset-read').addEventListener('click', () => {
+    $('#header-menu').classList.add('hidden');
+    confirmDialog('Reset read state', 'Forget all read and keep-unread state? Every article goes back to unread.', () => {
+      state.read = Object.create(null); state.kept = Object.create(null);
+      state.keepVisible.clear(); state.bulkSel.clear();
+      saveRead(); saveKept(); renderTree(); renderList();
+      showToast('Feed state reset — every article is unread again');
+    });
+  });
 
   let searchTimer = null;
   $('#search-input').addEventListener('input', () => {
@@ -989,13 +1043,7 @@ function bindEvents() {
     $('#mark-menu')?.classList.add('hidden');
     document.body.classList.remove('sidebar-open');
     $('#scrim')?.classList.add('hidden');
-    if (state.expandedId) {
-      clearTimeout(state.markTimers.get(state.expandedId));
-      state.markTimers.delete(state.expandedId);
-      state.keepVisible.add(state.expandedId); // closing the reader keeps the row in place
-      state.expandedId = null;
-      renderList();
-    }
+    if (state.expandedId) closeViaHash(); // closing keeps the row in place and clears the hash
   });
 }
 
@@ -1167,8 +1215,15 @@ async function boot() {
   syncControls();
   renderAll();
   flashUpdated();
-  ensureScopeLoaded();
+  await ensureScopeLoaded();
   startPolling();
+  // Deep link: #article/<id> reopens that article after a refresh — behaving
+  // exactly like clicking the row (mark-read rules included).
+  const hid = hashArticleId();
+  if (hid && !openArticle(hid)) {
+    clearHashArticle();
+    showToast('That article is no longer available (filtered or past the retention window)');
+  }
 }
 
 document.addEventListener('DOMContentLoaded', boot);
