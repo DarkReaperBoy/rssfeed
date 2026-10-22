@@ -8,7 +8,7 @@
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const LS_READ = 'ghrss:read', LS_KEPT = 'ghrss:kept', LS_UI = 'ghrss:ui', LS_VER = 'ghrss:ver';
-const STORAGE_VERSION = 2; // bump = one-time reset of the stored feed state (read + kept); UI prefs survive
+const STORAGE_VERSION = 3; // bump = one-time reset of the stored feed state (read + kept); UI prefs survive
 // One-time feed-storage reset: a browser that last visited before this version
 // starts fresh — read/keep-unread state is wiped once, then the version is recorded.
 try {
@@ -859,7 +859,19 @@ const hashArticleId = () => {
 };
 function setHashArticle(id) {
   const target = HASH_PREFIX + encodeURIComponent(id);
-  if ((location.hash || '') !== target) location.hash = target; // the assignment pushes a history entry
+  if ((location.hash || '') === target) return; // already here
+  // pushState + a direct syncFromHash: opening no longer depends on the
+  // browser firing hashchange for a hash-only navigation (some WebViews and
+  // in-app browsers mishandle it — the reported "id not stored / Back broken"
+  // symptom). pushState is synchronous and fires no events; Back/Forward fire
+  // popstate + hashchange, both wired to the same idempotent sync.
+  try {
+    history.pushState(null, '', location.pathname + location.search + target);
+  } catch {
+    location.hash = target; // opaque-origin fallback: hashchange still opens it
+    return;
+  }
+  syncFromHash();
 }
 function clearHashArticle() {
   if (!location.hash) return;
@@ -1043,6 +1055,7 @@ function bindEvents() {
   });
   $('#menu-refresh').addEventListener('click', () => { $('#header-menu').classList.add('hidden'); refresh(true); });
   window.addEventListener('hashchange', () => syncFromHash()); // Back/Forward between articles
+  window.addEventListener('popstate', () => syncFromHash());   // belt-and-braces: sync is idempotent on double-fire
   $('#menu-reset-read').addEventListener('click', () => {
     $('#header-menu').classList.add('hidden');
     confirmDialog('Reset read state', 'Forget all read and keep-unread state? Every article goes back to unread.', () => {

@@ -2,13 +2,14 @@
 
 A self-hosted RSS reader with **no server and no database**:
 
-- **GitHub Actions** fetches every feed **hourly** (RSS + Atom + YouTube channels + 4chan boards), extracts clean full text, and publishes the site to the **`gh-pages` branch**
+- **GitHub Actions** fetches every feed **hourly** (RSS + Atom + YouTube channels + 4chan boards + Hacker News), extracts clean full text, and publishes the site to the **`gh-pages` branch**
 - **GitHub Pages** serves the Inoreader-style reader UI
 - **`config.json`** is the entire configuration: settings, folders, feeds, per-feed word filters and content filters — plus an optional **`feeds.opml`** export (e.g. Inoreader's) that can provide the feed list, imported server-side by the fetcher
-- **YouTube Shorts are banned by default** (`settings.dropShorts`) — shorts slop never enters your unread list
+- **YouTube Shorts are banned by default** (`settings.dropShorts`) — shorts slop never enters your unread list, and previously stored Shorts are purged from the retained data on every run (turning the filter on later cleans old articles too)
 - **4chan boards are first-class feeds** (`"type": "4chan"`, any board) with reply-count windows and word filtering — `/g/` threads with 300+ replies land in your folders like any other article
+- **Hacker News is a first-class feed** (`"type": "hackernews"`) with optional point + comment caps — e.g. only stories with **100+ points and 100+ comments**
 - **Read/unread state** lives in your browser (`localStorage`) — nothing is ever auto-marked read; articles stay unread until you read or mark them. Note: articles older than `settings.retentionDays` are dropped from the data files for everyone — the fetcher can't see read state, so retention applies regardless of unread (4chan feeds are exempt: they're live boards, threads leave when they 404).
-- **Deep links**: the open article lives in the URL (`#article/<id>`) — refresh and you're still on it, and the browser Back/Forward buttons walk through the articles you opened (misclicked? Back). Article ids are stable random-looking hashes, so links survive the hourly refetches. Reset your feed state any time via **⋯ → Reset read state**.
+- **Deep links**: the open article lives in the URL (`#article/<id>`) — refresh and you're still on it, and the browser Back/Forward buttons walk through the articles you opened (misclicked? Back). Opening uses an explicit `history.pushState` and both `popstate` + `hashchange` are wired to the same idempotent sync, so it works even in in-app browsers that mishandle hash-only navigations. Article ids are stable random-looking hashes, so links survive the hourly refetches. Reset your feed state any time via **⋯ → Reset read state**.
 
 ## Setup (3 minutes)
 
@@ -91,7 +92,7 @@ Add any board via 4chan's read-only JSON API (`a.4cdn.org` — the fetcher respe
   "minImages": 0, "maxImages": 0,  // optional image-count window
   "includeSticky": false,      // stickies are skipped by default (they're board rules)
   "includeClosed": false,      // closed threads skipped by default
-  "maxThreads": 30,            // optional cap on threads kept per fetch
+  "maxThreads": 30,            // optional cap on threads kept per fetch (no default — omit for every matching thread)
   "filter": {                  // word filtering, same as any feed (server-side)
     "exclude": { "title": ["general", "/\\bptg\\b/"] },
     "include": { "title": ["linux"] }
@@ -105,6 +106,34 @@ How it behaves:
 - **Live board**: every run replaces the thread list — a thread that 404'd leaves your reader instead of lingering. Thread numbers never change, so ids (and read state) are stable for surviving threads. `retentionDays` does not apply to 4chan feeds
 - **Stable deep links**: same `sha1` 16-hex id scheme as RSS articles — `#article/<id>` survives refetches
 - **Boards.json is checked once** for work-safe flags (links to `boards.4channel.org` vs `boards.4chan.org`) and board titles; unknown boards fail the feed with a sidebar warning
+
+### Hacker News as a feed
+
+Add HN via the official search API the site itself uses ([hn.algolia.com/api](https://hn.algolia.com/api) — no key, one request per fetch):
+
+```jsonc
+{
+  "id": "hackernews",
+  "type": "hackernews",
+  "title": "Hacker News",           // optional
+  "site": "https://news.ycombinator.com/",
+  "folder": "tech-news",
+  "minPoints": 100,                  // optional: stories need >= N points
+  "minComments": 100,                // optional: stories need >= N comments
+  "filter": {                        // word filtering, same as any feed (server-side)
+    "exclude": { "title": ["youtube"] }
+  }
+}
+```
+
+How the caps work:
+
+- **both set** → a story must meet **both** (the default config ships `100` + `100`)
+- **only one set** → the unset cap is ignored, only the set one applies
+- **neither set** → no filter: the live HN front page (~30 stories), like visiting the site
+- stories within the last `retentionDays` are queried newest-first; a story that later falls off the front page (or below the caps) lingers for `retentionDays` from its publish date — and its points/comments line stays current because fresh hits replace stored ones by id
+- ids are `sha1("hn|<objectID>")` — HN item numbers never change, so deep links and read state survive everything, even title edits
+- Ask HN / text posts have no external URL — those articles link to the HN discussion page itself
 
 ### Feeds from OPML (optional)
 
@@ -165,6 +194,8 @@ Don't want to hand-write feeds? Export OPML from Inoreader (or any reader), save
 - Multiple select (bulk mark read/unread with undo), badge-click mark-read with undo, mark-all with confirm
 - **Every preference lives in config.json** (see the settings block above) — re-read on every load; your own UI toggles (layout, status, date, sort, show-filtered, multi-select) persist in localStorage
 - **4chan boards**: any board as a feed, reply-count windows, sticky/closed skipping, per-board word filters, live thread lists, thumbnails — no API key, just `type: "4chan"`
+- **Hacker News**: point + comment caps (AND when both set, either one alone, live front page when neither), word filters, retention-merged stories with current points/comments — `type: "hackernews"`
+- Assets are served with a **`?v=` cache-buster** that changes whenever `index.html`/`assets/` change — a normal reload always picks up fresh code, no hard refresh needed after deploys
 - Powered by [rssfeed](https://github.com/DarkReaperBoy/rssfeed) — credit lives in the sidebar footer next to the "Updated X ago" line
 
 ## Local development

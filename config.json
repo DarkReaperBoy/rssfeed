@@ -38,14 +38,22 @@
   ],
   "feeds": [
     {
+      "id": "hackernews",
+      "type": "hackernews",
+      "title": "Hacker News",
+      "site": "https://news.ycombinator.com/",
+      "folder": "tech-news",
+      "minPoints": 100,
+      "minComments": 100
+    },
+    {
       "id": "4chan-g",
       "type": "4chan",
       "board": "g",
       "title": "/g/ - Technology",
       "site": "https://boards.4channel.org/g/",
       "folder": "ai-news",
-      "minReplies": 300,
-      "maxThreads": 30
+      "minReplies": 300
     },
     {
       "id": "ai-explained",
@@ -59,13 +67,6 @@
       "title": "AI Tools Search",
       "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCIgnGlGkVRhd4qNFcEwLL4A",
       "site": "https://www.youtube.com/channel/UCIgnGlGkVRhd4qNFcEwLL4A",
-      "folder": "ai-news"
-    },
-    {
-      "id": "angular-firebase",
-      "title": "Angular Firebase",
-      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCsBjURrPoezykLs9EqgamOA",
-      "site": "https://www.youtube.com/channel/UCsBjURrPoezykLs9EqgamOA",
       "folder": "ai-news"
     },
     {

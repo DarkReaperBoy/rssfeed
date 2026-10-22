@@ -2,9 +2,10 @@
 // Fetcher run by GitHub Actions (hourly). Keeps the configured retention window of
 // articles with no per-feed cap. Tracks fetch status per feed and purges feeds
 // removed from config.json / feeds.opml.
-// Also ingests two non-RSS sources, both configured as entries in config.feeds:
+// Also ingests three non-RSS sources, all configured as entries in config.feeds:
 //   - YouTube channel feeds: Shorts can be dropped (settings.dropShorts, default on)
 //   - 4chan boards: { "type": "4chan", "board": "g", minReplies: 300, ... } via a.4cdn.org
+//   - Hacker News: { "type": "hackernews", minPoints: 100, minComments: 100, ... } via hn.algolia.com
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -15,6 +16,7 @@ import { JSDOM } from 'jsdom';
 import { Readability } from '@mozilla/readability';
 import sanitizeHtml from 'sanitize-html';
 import { chanThreadsFromCatalog, chanThreadPasses, chanThreadToArticle } from './4chan.mjs';
+import { hnApiUrl, hnHitToArticle, hnFeedOptions } from './hackernews.mjs';
 
 const ROOT = new URL('..', import.meta.url).pathname;
 const DATA_DIR = path.join(ROOT, 'data');
@@ -291,9 +293,10 @@ function parseOpml(xml) {
   }
 }
 
+const isHnFeed = (f) => f?.type === 'hackernews' || f?.type === 'hn';
 async function resolveFeeds(config) {
-  const feedKey = (f) => f.url || (f.type === '4chan' ? `4chan:${String(f.board || '').toLowerCase().replace(/\//g, '')}` : `id:${f.id}`);
-  const usable = (f) => f && f.id && (f.url || f.type === '4chan');
+  const feedKey = (f) => f.url || (f.type === '4chan' ? `4chan:${String(f.board || '').toLowerCase().replace(/\//g, '')}` : isHnFeed(f) ? `hackernews:${f.id}` : `id:${f.id}`);
+  const usable = (f) => f && f.id && (f.url || f.type === '4chan' || isHnFeed(f));
   const configFeeds = (config.feeds || []).filter(usable);
   for (const f of config.feeds || []) if (!usable(f)) console.warn(`skip feed (no id/url): ${JSON.stringify(f)}`);
   const byId = new Map(configFeeds.map((f) => [f.id, f]));
@@ -521,6 +524,57 @@ async function main() {
       continue;
     }
 
+    if (isHnFeed(feed)) {
+      const effFeed = { ...feed, title: feed.title || 'Hacker News', site: feed.site || 'https://news.ycombinator.com/' };
+      const feedBlocks = compileFeedFilter(feed);
+      const { minPoints, minComments } = hnFeedOptions(feed);
+      let json;
+      try {
+        const res = await fetch(hnApiUrl(feed, { retentionDays, now }), {
+          headers: { 'User-Agent': UA, Accept: 'application/json' },
+          signal: AbortSignal.timeout(35000), redirect: 'follow',
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        json = await res.json();
+      } catch (err) {
+        failures++;
+        status.ok = false;
+        status.error = err.message;
+        status.consecutiveFailures = (prevStatus.consecutiveFailures || 0) + 1;
+        const keptFail = [...(prev.articles || [])].filter((a) => now - a.date < retainMs);
+        await fs.writeFile(file, JSON.stringify({ articles: keptFail }));
+        index.feeds[feed.id] = { ...summarizeFeed(effFeed, keptFail), status };
+        console.error(`[${feed.id}] FETCH FAILED: ${err.message} — keeping ${keptFail.length} stories from last ${retentionDays} days`);
+        continue;
+      }
+      status.ok = true;
+      status.lastSuccess = now;
+      status.consecutiveFailures = 0;
+      status.error = null;
+      const articles = [];
+      let filtered = 0;
+      for (const hit of json?.hits || []) {
+        if (!hit || !hit.objectID) continue;
+        const a = hnHitToArticle(hit, { now });
+        if (feedBlocks && feedFilterDrop(a, feedBlocks)) { filtered++; continue; }
+        a.content = sanitize(a.content);
+        articles.push(a);
+      }
+      // Same retention merge as RSS: a story that left the front page (or the
+      // caps window) lingers for retentionDays, and a fresh hit replaces the
+      // stored one by id — points/comment counts stay current.
+      const byId = new Map();
+      for (const a of [...(prev.articles || []), ...articles]) byId.set(a.id, a);
+      const merged = [...byId.values()].sort((a, b) => b.date - a.date).filter((a) => now - a.date < retainMs);
+      await fs.writeFile(file, JSON.stringify({ articles: merged }));
+      index.feeds[feed.id] = { ...summarizeFeed(effFeed, merged), status };
+      const capsDesc = minPoints && minComments
+        ? `${minPoints}+ points and ${minComments}+ comments`
+        : minPoints ? `${minPoints}+ points` : minComments ? `${minComments}+ comments` : 'front page';
+      console.log(`[${feed.id}] ${merged.length} stories (${capsDesc}, last ${retentionDays} days)${filtered ? ` (dropped ${filtered} by word filter)` : ''}`);
+      continue;
+    }
+
     let xml;
     try {
       const res = await fetch(feed.url, { headers: parser.options.headers, signal: AbortSignal.timeout(35000), redirect: 'follow' });
@@ -612,9 +666,12 @@ async function main() {
     if (shortsDropped) console.log(`[${feed.id}] dropped ${shortsDropped} YouTube short(s)`);
     if (filterDropped) console.log(`[${feed.id}] dropped ${filterDropped} article(s) by the feed's word filter`);
 
-    // Merge with previous so ids stay stable
+    // Merge with previous so ids stay stable — but previously stored Shorts
+    // must not resurrect: dropShorts is a live rule, so the retained set is
+    // purged through the same detector as the fresh items every run.
     const byId = new Map();
-    for (const a of [...(prev.articles || []), ...articles]) byId.set(a.id, a);
+    const prevList = ytShorts ? (prev.articles || []).filter((a) => !isShortItem(a.link, a.title, a.content)) : (prev.articles || []);
+    for (const a of [...prevList, ...articles]) byId.set(a.id, a);
     let merged = [...byId.values()].sort((a, b) => b.date - a.date);
     // Keep only the retention window, NO article limit
     merged = merged.filter((a) => now - a.date < retainMs);

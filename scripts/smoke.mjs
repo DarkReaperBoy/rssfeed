@@ -69,7 +69,7 @@ const TOTAL = Object.values(FIX).reduce((n, f) => n + f.articles.length, 0);
 const HIDDEN = 2;
 
 const html = (await fs.readFile(path.join(ROOT, 'index.html'), 'utf8'))
-  .replace(/<script src="assets\/app.js"><\/script>/, '');
+  .replace(/<script src="assets\/app\.js\?v=\d+"><\/script>/, '');
 const dom = new JSDOM(html, { url: 'https://example.test/', runScripts: 'outside-only', pretendToBeVisual: true });
 const { window } = dom;
 
@@ -158,6 +158,16 @@ window.location.hash = `#article/${secondId}`; // Forward
 window.dispatchEvent(new window.Event('hashchange'));
 await settle(50);
 ok($('#reader-slot .reader')?.dataset.id === secondId, 'Forward returns to the next article');
+
+console.log('popstate-driven navigation (WebView hardening)');
+window.location.hash = `#article/${firstId}`;
+window.dispatchEvent(new window.Event('popstate')); // environments that miss hashchange still sync via popstate
+await settle(50);
+ok($('#reader-slot .reader')?.dataset.id === firstId, 'popstate-driven Back reopens the article');
+window.location.hash = `#article/${secondId}`;
+window.dispatchEvent(new window.Event('popstate'));
+await settle(50);
+ok($('#reader-slot .reader')?.dataset.id === secondId, 'popstate-driven Forward returns to the article');
 
 console.log('mark unread');
 click(`#list .row[data-id="${secondId}"] [data-act="toggle-read"]`);
@@ -341,7 +351,7 @@ console.log('feed-storage version reset');
   w3.document.dispatchEvent(new w3.Event('DOMContentLoaded', { bubbles: true }));
   await settle(1200);
   ok(!Object.keys(JSON.parse(w3.localStorage.getItem('ghrss:read') || '{}')).length, 'old-version feed storage is wiped on upgrade');
-  ok(w3.localStorage.getItem('ghrss:ver') === '2', 'the storage version is recorded');
+  ok(w3.localStorage.getItem('ghrss:ver') === '3', 'the storage version is recorded');
   ok(Number(w3.document.querySelector('#badge-all-items').textContent) === TOTAL - HIDDEN, 'all articles unread after the one-time reset');
   ok(w3.document.querySelector('#list').classList.contains('view-cards'), 'UI prefs survive the feed-storage reset');
   dom3.window.close();
@@ -350,7 +360,7 @@ console.log('feed-storage version reset');
   const dom4 = new JSDOM(html, { url: 'https://example.test/', runScripts: 'outside-only', pretendToBeVisual: true });
   const w4 = dom4.window;
   w4.fetch = window.fetch;
-  w4.localStorage.setItem('ghrss:ver', '2'); // already on this version
+  w4.localStorage.setItem('ghrss:ver', '3'); // already on this version
   w4.localStorage.setItem('ghrss:read', JSON.stringify({ 'fixture-hn-3': 123 }));
   w4.eval(appSrc);
   w4.document.dispatchEvent(new w4.Event('DOMContentLoaded', { bubbles: true }));
@@ -362,7 +372,10 @@ console.log('feed-storage version reset');
 console.log('YouTube shorts detection (fetch.mjs)');
 {
   const fetchMod = await import('./fetch.mjs');
-  ok(fetchMod.isShortItem('https://www.youtube.com/shorts/abc123', 'x', '') === true, '/shorts/ link detected');
+  ok(fetchMod.isShortItem('https://www.youtube.com/shorts/abc', 'Whatever', '') === true, '/shorts/ link detected');
+  ok(fetchMod.isShortItem('https://www.youtube.com/shorts/abc', 'Old cached short', '<p>stored content</p>') === true, 'previously STORED shorts (merge purge) are detected by link');
+  ok(fetchMod.isShortItem('https://www.youtube.com/watch?v=abc', 'Old cached video', '<p>stored content with #shorts</p>') === true, 'previously stored #shorts-tagged articles are purged too');
+  ok(fetchMod.isShortItem('https://www.youtube.com/watch?v=abc', 'Real video', '<p>stored content</p>') === false, 'regular stored articles survive the merge purge');
   ok(fetchMod.isShortItem('https://www.youtube.com/watch?v=abc', 'My #SHORTS video', '') === true, '#shorts tag detected (case-insensitive)');
   ok(fetchMod.isShortItem('https://www.youtube.com/watch?v=abc', 'try #short thing', '') === true, '#short tag detected');
   ok(fetchMod.isShortItem('https://www.youtube.com/watch?v=abc', 'Short film review', 'in short, no') === false, 'plain "short" text is not a Short');
@@ -418,6 +431,34 @@ console.log('4chan catalog → articles (4chan.mjs)');
   const fetchMod = await import('./fetch.mjs');
   ok(fetchMod.feedFilterDrop(noSub, { include: fetchMod.compileBlockSrv({ title: ['building'] }), exclude: fetchMod.compileBlockSrv({ title: ['megathread'] }) }) === false, 'word filters work on 4chan threads (include+exclude pass)');
   ok(fetchMod.feedFilterDrop(noSub, { include: null, exclude: fetchMod.compileBlockSrv({ title: ['edition'] }) }) === true, 'word filters drop matching 4chan threads');
+}
+
+console.log('Hacker News → articles (hackernews.mjs)');
+{
+  const hn = await import('./hackernews.mjs');
+  const url = hn.hnApiUrl({ minPoints: 100, minComments: 100 }, { retentionDays: 30, now: 1746000000000 });
+  ok(url.startsWith('https://hn.algolia.com/api/v1/search_by_date?tags=story&numericFilters='), 'both caps → search_by_date over stories');
+  ok(url.includes('points%3E%3D100') && url.includes('num_comments%3E%3D100'), 'both cap conditions present (AND on the server)');
+  ok(url.includes('created_at_i%3E'), 'retention window bounds the query');
+  const uPoints = hn.hnApiUrl({ minPoints: 100 }, { retentionDays: 30, now: 1746000000000 });
+  ok(uPoints.includes('points%3E%3D100') && !uPoints.includes('num_comments'), 'only points set → comments condition omitted (ignore the unset cap)');
+  const uComments = hn.hnApiUrl({ minComments: 50 }, { retentionDays: 30, now: 1746000000000 });
+  ok(uComments.includes('num_comments%3E%3D50') && !uComments.includes('points'), 'only comments set → points condition omitted');
+  ok(hn.hnApiUrl({}, {}) === 'https://hn.algolia.com/api/v1/search?tags=front_page&hitsPerPage=100', 'no caps → the live HN front page');
+  const hit = { objectID: 50123456, title: 'Show HN: A & B <fast> tool', url: 'https://example.com/x', author: 'alice', points: 120, num_comments: 130, created_at: '2026-10-20T10:00:00Z', story_text: '<p>Hello &amp; welcome</p>' };
+  const a = hn.hnHitToArticle(hit, { now: 1746000000000 });
+  ok(a.id === hn.hnHitToArticle({ ...hit, points: 999, num_comments: 400, title: 'edited later' }, { now: 1 }).id, 'ids are objectID-based: edits/votes never rekey them');
+  ok(a.title.includes('Show HN: A & B'), 'title HTML is flattened');
+  ok(a.link === 'https://example.com/x', 'external url is the article link');
+  ok(a.author === 'alice', 'author carried');
+  ok(a.date === Date.parse('2026-10-20T10:00:00Z'), 'date parsed from created_at');
+  ok(a.content.includes('120 points · 130 comments') && a.content.includes('Discuss on Hacker News'), 'stats line + discussion link in the body');
+  ok(a.content.includes('Hello &amp; welcome'), 'story text passed through for the sanitize pipeline');
+  const ask = hn.hnHitToArticle({ objectID: 50999, title: 'Ask HN: best distro?', points: 10, num_comments: 5, created_at: '2026-10-21T10:00:00Z' }, { now: 1746000000000 });
+  ok(ask.link === 'https://news.ycombinator.com/item?id=50999', 'no-url stories (Ask HN) link to the HN item');
+  ok(ask.summary.includes('10 points'), 'summary carries stats when there is no story text');
+  const fetchMod2 = await import('./fetch.mjs');
+  ok(fetchMod2.feedFilterDrop(a, { include: null, exclude: fetchMod2.compileBlockSrv({ title: ['show hn'] }) }) === true, 'word filters work on HN stories like any feed');
 }
 
 console.log('');
