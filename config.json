@@ -450,52 +450,5 @@
       "folder": "tech-news"
     }
   ],
-  "filters": [
-    {
-      "id": "example-hidden",
-      "name": "Example: hide clickbait everywhere (disabled)",
-      "enabled": false,
-      "feeds": [
-        "*"
-      ],
-      "exclude": {
-        "title": [
-          "you won't believe",
-          "/\\bclick ?bait\\b/i"
-        ]
-      },
-      "actions": {
-        "hide": true
-      }
-    },
-    {
-      "id": "example-whitelist",
-      "name": "Example: AI Explained only shows AI/LLM videos (disabled)",
-      "enabled": false,
-      "feeds": [
-        "ai-explained"
-      ],
-      "include": {
-        "title": [
-          "AI",
-          "LLM",
-          "GPT"
-        ]
-      },
-      "actions": {
-        "hide": true
-      }
-    },
-    {
-      "id": "example-keep-unread",
-      "name": "Example: long reads stay unread until you finish them (disabled)",
-      "enabled": false,
-      "feeds": [
-        "chris-titus-tech"
-      ],
-      "actions": {
-        "keepUnread": true
-      }
-    }
-  ]
+  "filters": []
 }

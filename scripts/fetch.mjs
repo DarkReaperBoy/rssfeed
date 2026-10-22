@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// Fetcher run by GitHub Actions (hourly). Keeps last 30 days of articles with no per-feed cap.
-// Tracks fetch status per feed and purges feeds removed from config.
+// Fetcher run by GitHub Actions (hourly). Keeps the configured retention window of
+// articles with no per-feed cap. Tracks fetch status per feed and purges feeds
+// removed from config.json / feeds.opml.
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -179,15 +180,114 @@ function summarizeFeed(feed, articles) {
   };
 }
 
+/* ---- feeds.opml (optional): drop an OPML export at repo root and the fetcher
+   imports it server-side — e.g. Inoreader's export. config.feeds entries with
+   the same id (or url) override the imported fields; config-only feeds are
+   added. Folder titles become folder ids (slugs); config.folders overrides
+   names / adds maxAgeDays by id. ---- */
+const slugify = (s, fallback) => {
+  const out = String(s || '')
+    .toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '') // strip diacritics
+    .replace(/[^\w-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48);
+  return out || fallback;
+};
+
+function parseOpml(xml) {
+  const dom = new JSDOM(xml, { contentType: 'application/xml' });
+  try {
+    const doc = dom.window.document;
+    const root = doc.getElementsByTagName('body')[0] || doc.documentElement;
+    const feeds = [];
+    const folders = new Map(); // id -> {id, name}
+    const seenIds = new Set();
+    const uniqueId = (base) => { let id = base, i = 2; while (seenIds.has(id)) id = `${base}-${i++}`; seenIds.add(id); return id; };
+    const visit = (el, folderId) => {
+      for (const o of [...el.children]) {
+        if (String(o.nodeName || '').toLowerCase() !== 'outline') continue;
+        const xmlUrl = o.getAttribute('xmlUrl') || '';
+        const title = (o.getAttribute('title') || o.getAttribute('text') || '').trim();
+        if (xmlUrl) {
+          feeds.push({
+            id: uniqueId(slugify(title, `feed-${feeds.length}`)),
+            title: title || xmlUrl,
+            url: xmlUrl,
+            site: o.getAttribute('htmlUrl') || '',
+            folder: folderId || null,
+          });
+        } else {
+          const fid = uniqueId(slugify(title, `folder-${folders.size}`));
+          folders.set(fid, { id: fid, name: title || fid });
+          visit(o, fid);
+        }
+      }
+    };
+    visit(root, null);
+    if (!feeds.length) throw new Error('no outlines with xmlUrl found');
+    return { feeds, folders: [...folders.values()] };
+  } finally {
+    dom.window.close();
+  }
+}
+
+async function resolveFeeds(config) {
+  const configFeeds = (config.feeds || []).filter((f) => f && f.id && f.url);
+  for (const f of config.feeds || []) if (!f?.id || !f?.url) console.warn(`skip feed (no id/url): ${JSON.stringify(f)}`);
+  const byId = new Map(configFeeds.map((f) => [f.id, f]));
+  const byUrl = new Map(configFeeds.map((f) => [f.url, f]));
+  const feeds = [];
+  const seenUrls = new Set();
+  const seenIds = new Set();
+  const addFeed = (f) => {
+    if (seenUrls.has(f.url)) return; // same feed listed twice
+    seenUrls.add(f.url);
+    let id = f.id;
+    let i = 2;
+    while (seenIds.has(id)) id = `${f.id}-${i++}`;
+    seenIds.add(id);
+    feeds.push({ ...f, id });
+  };
+  let opmlFolders = [];
+  try {
+    const xml = await fs.readFile(path.join(ROOT, 'feeds.opml'), 'utf8');
+    const parsed = parseOpml(xml);
+    opmlFolders = parsed.folders;
+    const consumed = new Set();
+    for (const f of parsed.feeds) {
+      const ov = byId.get(f.id) || byUrl.get(f.url); // config.json wins per-field (incl. id)
+      if (ov) { consumed.add(ov); addFeed(Object.assign({}, f, ov)); }
+      else addFeed(f);
+    }
+    for (const f of configFeeds) if (!consumed.has(f)) addFeed(f);
+    console.log(`feeds.opml: imported ${parsed.feeds.length} feeds in ${parsed.folders.length} folders (merged with config.json: ${feeds.length} feeds total)`);
+  } catch (err) {
+    if (err.code === 'ENOENT') {
+      for (const f of configFeeds) addFeed(f); // no feeds.opml: config.json only
+    } else {
+      console.warn(`feeds.opml found but unreadable (${err.message}) — ignoring it`);
+      for (const f of configFeeds) addFeed(f);
+    }
+  }
+  // Folder registry for the UI sidebar: OPML titles + config.folders overrides by id.
+  const folderMap = new Map();
+  for (const f of opmlFolders) folderMap.set(f.id, { ...f });
+  for (const f of config.folders || []) if (f && f.id) folderMap.set(f.id, Object.assign({}, folderMap.get(f.id) || { id: f.id }, f));
+  return { feeds, folders: [...folderMap.values()] };
+}
+
 async function main() {
   const config = await loadJson(path.join(ROOT, 'config.json'), null);
-  if (!config?.feeds?.length) {
-    console.error('config.json missing or has no feeds');
+  if (!config) {
+    console.error('config.json missing or unreadable');
     process.exit(1);
   }
   const settings = config.settings || {};
   const fullTextDefault = !!settings.fullTextDefault;
   const retentionDays = Number(settings.retentionDays) > 0 ? Number(settings.retentionDays) : RETENTION_DAYS;
+  const { feeds, folders: folderDefs } = await resolveFeeds(config);
+  if (!feeds.length) {
+    console.error('no feeds found (config.json feeds or feeds.opml)');
+    process.exit(1);
+  }
 
   await fs.mkdir(DATA_DIR, { recursive: true });
   await fs.mkdir(FEEDS_DIR, { recursive: true });
@@ -199,16 +299,12 @@ async function main() {
   const prevIndex = await loadJson(path.join(DATA_DIR, 'index.json'), { generatedAt: 0, feeds: {} });
   const prevFeedMeta = prevIndex.feeds || {};
 
-  const index = { generatedAt: now, feeds: {} };
+  const index = { generatedAt: now, folders: folderDefs, feeds: {} };
   let failures = 0;
 
   const currentFeedIds = new Set();
 
-  for (const feed of config.feeds) {
-    if (!feed.id || !feed.url) {
-      console.warn(`skip (no id/url): ${JSON.stringify(feed)}`);
-      continue;
-    }
+  for (const feed of feeds) {
     currentFeedIds.add(feed.id);
 
     const file = path.join(FEEDS_DIR, `${feed.id}.json`);
@@ -239,7 +335,7 @@ async function main() {
           error: 'Feed disabled in config',
         },
       };
-      console.log(`[${feed.id}] disabled, keeping ${kept.length} articles (last 30 days)`);
+      console.log(`[${feed.id}] disabled, keeping ${kept.length} articles (last ${retentionDays} days)`);
       continue;
     }
 
@@ -260,7 +356,7 @@ async function main() {
         ...summarizeFeed(feed, kept),
         status,
       };
-      console.error(`[${feed.id}] FETCH FAILED: ${err.message} — keeping ${kept.length} articles from last 30 days (${status.consecutiveFailures} consecutive failures)`);
+      console.error(`[${feed.id}] FETCH FAILED: ${err.message} — keeping ${kept.length} articles from last ${retentionDays} days (${status.consecutiveFailures} consecutive failures)`);
       continue;
     }
 
@@ -278,7 +374,7 @@ async function main() {
         ...summarizeFeed(feed, kept),
         status,
       };
-      console.error(`[${feed.id}] PARSE FAILED: ${err.message} — keeping ${kept.length} articles from last 30 days`);
+      console.error(`[${feed.id}] PARSE FAILED: ${err.message} — keeping ${kept.length} articles from last ${retentionDays} days`);
       continue;
     }
 
@@ -329,7 +425,7 @@ async function main() {
     const byId = new Map();
     for (const a of [...(prev.articles || []), ...articles]) byId.set(a.id, a);
     let merged = [...byId.values()].sort((a, b) => b.date - a.date);
-    // Keep only last 30 days, NO article limit
+    // Keep only the retention window, NO article limit
     merged = merged.filter((a) => now - a.date < retainMs);
 
     await fs.writeFile(file, JSON.stringify({ articles: merged }));
@@ -337,7 +433,7 @@ async function main() {
       ...summarizeFeed(feed, merged),
       status,
     };
-    console.log(`[${feed.id}] ${merged.length} articles (last 30 days, no cap) from "${parsed.title || feed.title}"`);
+    console.log(`[${feed.id}] ${merged.length} articles (last ${retentionDays} days, no cap) from "${parsed.title || feed.title}"`);
   }
 
   // Purge removed sources

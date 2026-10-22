@@ -1,5 +1,5 @@
 // Smoke test: boot the real UI (index.html + app.js) in jsdom against
-// deterministic in-memory fixtures
+// deterministic in-memory fixtures.
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { JSDOM } from 'jsdom';
@@ -41,8 +41,9 @@ const FIX = {
 };
 
 const config = {
-  settings: { siteName: 'My Inoreader', theme: 'auto', view: 'list', refreshMinutes: 60 },
-  folders: [{ id: 'tech', name: 'Technology' }, { id: 'news', name: 'News' }],
+  // theme is a config-owned pref with no UI toggle — it must apply on EVERY load.
+  settings: { siteName: 'My Inoreader', theme: 'dark', view: 'list', refreshMinutes: 60, markReadOnOpen: true },
+  folders: [], // folder names come from the generated index.json (as with feeds.opml)
   feeds: [
     { id: 'fixture-hn', title: 'Hacker News', url: 'https://hnrss.test/frontpage', site: 'https://news.ycombinator.com', folder: 'tech' },
     { id: 'fixture-verge', title: 'The Verge', url: 'https://theverge.test/rss', site: 'https://www.theverge.com', folder: 'tech' },
@@ -55,10 +56,14 @@ const config = {
 };
 const index = {
   generatedAt: now,
+  folders: [{ id: 'tech', name: 'Technology' }, { id: 'news', name: 'News' }],
   feeds: Object.fromEntries(Object.entries(FIX).map(([id, f]) => [id, {
     title: f.title, site: f.site, folder: f.folder, folders: [f.folder],
     count: f.articles.length, newest: f.articles[0].date, oldest: f.articles.at(-1).date,
   }])),
+};
+const allFeeds = {
+  articles: Object.entries(FIX).flatMap(([id, f]) => f.articles.map((a) => ({ ...a, _feed: id }))),
 };
 const TOTAL = Object.values(FIX).reduce((n, f) => n + f.articles.length, 0);
 const HIDDEN = 2;
@@ -72,6 +77,7 @@ window.fetch = async (url) => {
   const p = String(url).split('?')[0];
   if (p === 'config.json') return { ok: true, status: 200, json: async () => structuredClone(config) };
   if (p === 'data/index.json') return { ok: true, status: 200, json: async () => structuredClone(index) };
+  if (p === 'data/all-feeds.json') return { ok: true, status: 200, json: async () => structuredClone(allFeeds) };
   const m = p.match(/^data\/feeds\/(.+)\.json$/);
   if (m && FIX[m[1]]) return { ok: true, status: 200, json: async () => structuredClone({ articles: FIX[m[1]].articles }) };
   return { ok: false, status: 404, statusText: 'Not Found', json: async () => { throw new Error('404'); } };
@@ -89,31 +95,61 @@ const click = (elOrSel) => {
   if (!el) throw new Error(`click target missing: ${elOrSel}`);
   el.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
 };
+const rowCount = () => $$('#list .row').length;
 
 console.log('boot');
 ok(!$('#feeds_nav').classList.contains('hidden'), 'feeds panel visible');
 ok(!!$('.tree-item[data-scope="all"]'), 'Newsfeed row renders');
+ok(!$('#parent_starred'), 'Starred sidebar row removed');
+ok(!$('#i-star'), 'star icon removed');
 ok($('#pdinner_today').classList.contains('hidden'), 'Today row hidden by default');
-ok($('#tree').textContent.includes('Technology'), 'folder renders');
+ok($('#tree').textContent.includes('Technology'), 'folder renders (from generated index.folders)');
 ok($('#tree').textContent.includes('Hacker News'), 'feeds render');
-ok($('#reader-placeholder').textContent.includes('Select an article'), 'reader placeholder present');
+ok(!$('#reader-placeholder'), 'reader placeholder removed');
+ok(window.document.documentElement.dataset.theme === 'dark', 'config settings apply on every load (theme)');
+ok(Number($('#badge-all-items').textContent) === TOTAL - HIDDEN, 'unread badge counts all feeds');
 
 console.log('list + filter');
 let rows = $$('#list .row');
 ok(rows.length === TOTAL - HIDDEN, `rows rendered (${rows.length})`);
+ok(!$$('#list .row .dot').length, 'blue unread dot removed');
+ok(!$$('#list .row .star-btn').length, 'star buttons removed');
+ok($$('#list .row [data-act="toggle-read"]').length === rows.length, 'every row has the read/unread tick');
+ok($$('#list .row [data-act="keep"]').length === rows.length, 'every row has keep-unread');
 ok($$('#list .row').filter((r) => r.querySelector('.feed-name')?.textContent === 'Hacker News' && /show hn/i.test(r.querySelector('.row-title').textContent)).length === 0, 'exclude filter hides matching articles');
 
 console.log('reading');
-const firstId = $('#list .row').dataset.id;
-click($('#list .row'));
+const firstRow = $('#list .row');
+const firstId = firstRow.dataset.id;
+const firstLink = firstRow.querySelector('[data-act="open-original"]').getAttribute('href');
+click(firstRow);
 await settle(50);
 ok(!!$('#reader-slot .reader-body'), 'article opens');
+ok($('#reader-slot .reader-title a')?.href === firstLink, 'reader title links to the original article');
+ok($('#list .row').classList.contains('expanded'), 'open row is highlighted in the list');
 ok(Number($('#badge-all-items').textContent) === TOTAL - HIDDEN - 1, 'opening marks read');
 
-console.log('mark unread');
-click(`#list .row[data-id="${firstId}"] [data-act="toggle-read"]`);
+console.log('double-click keeps the read row');
+click($('#list .row')); // same row again → collapse
 await settle(50);
-ok(Number($('#badge-all-items').textContent) === TOTAL - HIDDEN, 'mark unread restores count');
+ok(!window.document.body.classList.contains('article-open'), 'reader closed');
+ok(rowCount() === TOTAL - HIDDEN, 'double-clicked article stays in the list (marked read, not removed)');
+ok(!$('#list .row').classList.contains('unread'), 'the row now shows as read');
+ok(Number($('#badge-all-items').textContent) === TOTAL - HIDDEN - 1, 'badge unchanged by the collapse');
+
+console.log('moving on re-filters the read row');
+const secondRow = $$('#list .row')[1];
+const secondId = secondRow.dataset.id;
+click(secondRow);
+await settle(50);
+ok(rowCount() === TOTAL - HIDDEN - 1, 'previously read article disappears when moving on');
+ok(!$(`#list .row[data-id="${firstId}"]`), 'old row is gone from the list');
+ok(window.document.body.classList.contains('article-open'), 'new article is selected');
+
+console.log('mark unread');
+click(`#list .row[data-id="${secondId}"] [data-act="toggle-read"]`);
+await settle(50);
+ok(Number($('#badge-all-items').textContent) === TOTAL - HIDDEN - 1, 'mark unread restores count (the first article stays read)');
 
 console.log('mark-all split');
 click('#btn-mark-all-split');
@@ -121,33 +157,34 @@ await settle(20);
 ok(!$('#mark-menu').classList.contains('hidden'), 'mark menu opens');
 click('#mark-menu [data-older="1"]');
 await settle(50);
+ok($('#toast-text').textContent.includes('3 article'), 'older-than-a-day marks exactly 3 articles');
+ok(rowCount() === TOTAL - HIDDEN - 4, 'marked articles re-filter out of the unread view');
 click($('#toast-action'));
 await settle(50);
+ok(rowCount() === TOTAL - HIDDEN - 1, 'undo restores the rows');
 
 console.log('search');
 click('#search-open');
 await settle(20);
 ok(!$('#search-box').classList.contains('hidden'), 'search expands');
+const sinput = $('#search-input');
+sinput.value = 'AI model';
+sinput.dispatchEvent(new window.Event('input', { bubbles: true }));
+await settle(400);
+ok(rowCount() === 1, 'search narrows rows');
+click('#search-close');
+await settle(50);
+ok(rowCount() === TOTAL - HIDDEN - 1, 'closing search clears the active filter');
+ok($('#search-input').value === '', 'search input cleared');
 
 console.log('layouts');
 const layoutBtns = $$('#layouts [data-layout]');
-ok(layoutBtns.length >= 3, 'layout buttons present');
-const origLayout = layoutBtns.find(b=>b.classList.contains('active'))?.dataset.layout;
-click('#layouts [data-layout="expanded"]');
-await settle(50);
-ok($('#list').classList.contains('view-expanded'), 'expanded layout applies');
-click('#layouts [data-layout="cards"]');
-await settle(50);
-ok($('#list').classList.contains('view-cards'), 'cards layout applies');
-click('#layouts [data-layout="column"]');
-await settle(50);
-ok($('#list').classList.contains('view-column'), 'column layout applies');
-click('#layouts [data-layout="magazine"]');
-await settle(50);
-ok($('#list').classList.contains('view-magazine'), 'magazine layout applies');
-click('#layouts [data-layout="list"]');
-await settle(50);
-ok($('#list').classList.contains('view-list'), 'list layout restored');
+ok(layoutBtns.length === 5, 'all five layout buttons present');
+for (const l of ['expanded', 'cards', 'column', 'magazine', 'list']) {
+  click(`#layouts [data-layout="${l}"]`);
+  await settle(50);
+  ok($('#list').classList.contains(`view-${l}`), `${l} layout applies`);
+}
 
 console.log('header menus');
 click('#btn-more');
@@ -156,36 +193,22 @@ ok(!$('#header-menu').classList.contains('hidden'), 'header menu opens');
 click('#btn-more');
 await settle(20);
 
-console.log('star / saved flow');
-const firstRow = $(`#list .row[data-id="${firstId}"]`);
-click(firstRow.querySelector('.star-btn'));
-await settle(50);
-ok($('#badge-starred').textContent === '1', 'star badge shows 1');
-ok($(`#list .row[data-id="${firstId}"] .star-btn`).classList.contains('starred'), 'star button gets starred class');
-click('[data-scope="starred"]');
-await settle(200);
-ok($('#scope-title').textContent === 'Starred', 'starred scope opens');
-let starRows = $$('#list .row');
-ok(starRows.length === 1 && starRows[0].dataset.id === firstId, 'starred view shows the starred article');
-click(starRows[0].querySelector('.star-btn'));
-await settle(50);
-ok($$('#list .row').length === 0, 'unstar empties the starred view');
-click('[data-scope="all"]');
-await settle(50);
-ok($('#badge-starred').textContent === '', 'star badge cleared after unstar');
-
-console.log('search clear on close');
-click('#search-open');
+console.log('bulk select');
+click('#menu-select-mode');
 await settle(20);
-const sinput = $('#search-input');
-sinput.value = 'AI model';
-sinput.dispatchEvent(new window.Event('input', { bubbles: true }));
-await settle(400);
-ok($$('#list .row').length === 1, 'search narrows rows');
-click('#search-close');
+ok(window.document.body.classList.contains('bulk-mode'), 'bulk mode toggles on');
+click($$('#list .row')[1]);
+await settle(20);
+ok($('#bulk-count').textContent === '1', 'row click selects in bulk mode');
+click('#bulk-read');
 await settle(50);
-ok($$('#list .row').length === TOTAL - HIDDEN, 'closing search clears the active filter');
-ok($('#search-input').value === '', 'search input cleared');
+ok(rowCount() === TOTAL - HIDDEN - 2, 'bulk mark read removes the row from the unread view');
+ok($('#toast-text').textContent.includes('1 article'), 'bulk toast reports the count');
+click($('#toast-action'));
+await settle(50);
+click('#menu-select-mode');
+await settle(20);
+ok(!$$('#list .row-check').length, 'bulk mode toggles off');
 
 console.log('');
 console.log(`${pass} passed, ${fail} failed`);

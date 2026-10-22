@@ -11,24 +11,26 @@ A self-hosted, serverless RSS reader that is a **1:1 UI clone of Inoreader**, fe
 
 ## Architecture
 
-- **Fetching backend**: GitHub Actions (`.github/workflows/fetch.yml`) runs **hourly** (`cron: '0 * * * *'`), on `workflow_dispatch`, and **on every push to `main`** (`push: branches: [main]`). It runs `scripts/fetch.mjs`, which downloads every feed in `config.json`, extracts optional full-text, keeps **only the last 30 days with no per-feed article cap**, tracks per-feed fetch status (warning icon on failure), purges feeds removed from `config.json`, and writes static JSON into `data/`.
+- **Fetching backend**: GitHub Actions (`.github/workflows/fetch.yml`) runs **hourly** (`cron: '0 * * * *'`), on `workflow_dispatch`, and **on every push to `main`** (`push: branches: [main]`). It runs `scripts/fetch.mjs`, which downloads every feed (from `feeds.opml` when present, else `config.json` — see below), extracts optional full-text, keeps **only the last `settings.retentionDays` days with no per-feed article cap**, tracks per-feed fetch status (warning icon on failure), purges feeds removed from the source, and writes static JSON into `data/`.
 - **Publishing**: the same workflow assembles the site (`index.html`, `assets/`, `config.json`, `data/`) into `_site/` and **force-pushes it to the `gh-pages` branch**. GitHub Pages serves from `gh-pages` branch root. The default branch stays clean: source only, no data commits, no node artifacts.
 - **UI**: pure static site served by **GitHub Pages** (`index.html`, `assets/styles.css`, `assets/app.js`). No build step, no framework, no npm deps on the client.
 - **Never commit**: `node_modules/`, `_site/` (both in .gitignore). `package.json`/`package-lock.json` ARE committed (CI needs `npm ci`).
-- **Config**: a single `config.json` at repo root is the *entire* configuration: UI settings, folders, feeds, and **content filters** (inclusion + exclusion). Current folders/feeds were imported from the user's Inoreader OPML export (`~/Downloads/Inoreader Feeds 20261022.xml`): **6 folders, 59 feeds** (mostly YouTube channel Atom feeds + one rsshub proxy).
-- **Read/unread state**: `localStorage` only (per browser/device). Nothing auto-marks articles read — an article stays unread until the user reads or marks it. **Retention is date-based for everyone**: at fetch time everything older than `settings.retentionDays` is dropped (the fetcher cannot see read state), so unread articles older than the window disappear too. Stars (read-later) live in localStorage (`ghrss:starred`) and show in the **Starred** sidebar view (★ buttons on rows + in the reader).
+- **Config**: files in the repo are the *entire* configuration — there is no settings UI. `config.json` holds settings, folders, feed entries and **content filters** (inclusion + exclusion). Optionally, **`feeds.opml`** at repo root (e.g. an Inoreader export) provides the feed list server-side: the fetcher imports it (feed id = diacritic-stripped title slug, folder = enclosing outline title); `config.feeds` entries with the same id/url override the imported fields, config-only feeds are appended, and `config.folders` overrides folder names/`maxAgeDays` by id. Current live set: **6 folders, 59 feeds** in `config.json` (mostly YouTube channel Atom feeds); no `feeds.opml` committed yet.
+- **Read/unread state**: `localStorage` only (per browser/device). Nothing auto-marks articles read — an article stays unread until the user reads or marks it. **Retention is date-based for everyone**: at fetch time everything older than `settings.retentionDays` is dropped (the fetcher cannot see read state), so unread articles older than the window disappear too.
 
 There is deliberately **no server, no database, no auth, no token**. Anything that cannot work as static files + GitHub Actions is out of scope.
 
 ## Directory layout
 
 ```
-config.json            # THE config: settings + folders + feeds + filters (user-edited; feeds = OPML import)
-data/index.json        # generated locally/CI: per-feed metadata/counts, generatedAt timestamp
-data/feeds/<feedId>.json  # generated: { articles: [...] } newest-first
+config.json            # THE config: settings + folders + feed entries/overrides + filters (user-edited)
+feeds.opml             # OPTIONAL feed source (e.g. Inoreader export) — imported by the fetcher
+index.html             # UI shell — mirrors real Inoreader DOM ids (#wraper/#side-nav/#tree_pane/#header_pane/#reader_pane)
 assets/app.js          # entire UI logic (single file, plain ES2020, no modules)
 assets/styles.css      # Inoreader replica styling, light+dark themes
-index.html             # UI shell — mirrors real Inoreader DOM ids (#wraper/#side-nav/#tabs_pane/#tree_pane/#header_pane/#reader_pane)
+data/index.json        # generated locally/CI: folder registry + per-feed metadata/counts + generatedAt
+data/feeds/<feedId>.json  # generated: { articles: [...] } newest-first
+data/all-feeds.json    # generated: consolidated payload for fast first load
 scripts/fetch.mjs      # fetcher/extracter run by Actions (Node >= 20, ESM)
 scripts/smoke.mjs      # jsdom smoke test of the UI against deterministic fixtures (npm run test:ui)
 .github/workflows/fetch.yml  # hourly + push-triggered fetch + publish to gh-pages
@@ -41,13 +43,30 @@ package.json           # fetch-script deps only (rss-parser, jsdom, @mozilla/rea
 {
   "settings": {
     "siteName": "My Inoreader",
-    "theme": "auto",              // auto | light | dark (client default; user toggle overrides in localStorage)
-    "view": "list",               // list | expanded | column | cards | magazine
-    "retentionDays": 30,          // keep only articles from last 30 days — read and unread alike (fetcher has no read state)
+    "theme": "auto",              // auto | light | dark — config-owned (no UI toggle), re-applied every load
+    "view": "list",               // default layout for NEW visitors: list | expanded | column | cards | magazine
+    "retentionDays": 30,          // fetcher: keep only this window — read and unread alike (fetcher has no read state)
     "markReadOnOpen": true,       // client: mark read when article is expanded
     "markReadAfterSeconds": 0,    // client: delay before marking read (0 = immediate; cancelled if the article is closed first)
     "refreshMinutes": 60,         // client UI poll interval for data/index.json
-    "fullTextDefault": false      // extract full text for every feed unless feed.fullText overrides
+    "fullTextDefault": false,     // fetcher: extract full text for every feed unless feed.fullText overrides
+    "density": "comfort",          // list density: comfort | compact | ultra
+    "titlesOnly": false,           // hide row excerpts
+    "openOriginal": false,         // row click opens the original site instead of the reader
+    "showFavicons": true,          // favicons on rows
+    "sideFavicons": true,          // favicons in the sidebar
+    "compactSidebar": false,       // icons-only 72px sidebar
+    "absoluteDates": false,        // full timestamps instead of relative
+    "fontSize": "14.5px",          // article title font size
+    "columnThumbs": true,          // thumbnails in column view
+    "scrollTracking": false,       // mark items read when scrolled past
+    "autoScroll": true,            // reader starts at top on open
+    "updatedOnly": false,          // sidebar: only feeds with unread items
+    "dimRead": false,              // sidebar: dim rows with nothing unread
+    "sortAZ": false,               // sidebar sorted A–Z
+    "countersClickable": true,     // badge click marks that feed/folder read
+    "titleCounter": true,          // "(N)" unread prefix in the tab title
+    "showToday": false             // show the Today row in the sidebar
   },
   "folders": [
     { "id": "tech", "name": "Technology" },
@@ -68,6 +87,8 @@ package.json           # fetch-script deps only (rss-parser, jsdom, @mozilla/rea
   "filters": [ /* see below */ ]
 }
 ```
+
+**Settings ownership**: every settings key without an in-UI toggle (`CONFIG_KEYS` in app.js — theme, density, markReadOnOpen, markReadAfterSeconds, titlesOnly, openOriginal, showFavicons, sideFavicons, compactSidebar, absoluteDates, fontSize, columnThumbs, scrollTracking, autoScroll, updatedOnly, dimRead, sortAZ, countersClickable, titleCounter, showToday) is **re-applied from config.json on every page load** — config.json IS the settings UI. Keys with in-UI toggles (`view`→layout for new visitors, status, dateRange, sortDir, showFiltered, bulkSelect, openFolders, sidebarW) are the user's own, persist in `localStorage` (`ghrss:ui`), and are only seeded for brand-new visitors.
 
 ### Filters (Inoreader "rules"-like, but pure include/exclude, applied client-side)
 
@@ -98,10 +119,13 @@ Matcher semantics:
 
 `data/index.json`:
 ```json
-{ "generatedAt": 1730000000000, "feeds": {
-  "hacker-news": { "title": "Hacker News", "site": "...", "folder": "tech", "count": 200, "newest": 1730000000000, "status": { "ok": true, "lastAttempt": 1730000000000, "lastSuccess": 1730000000000, "consecutiveFailures": 0, "error": null } }
+{ "generatedAt": 1730000000000,
+  "folders": [{ "id": "tech", "name": "Technology" }],
+  "feeds": {
+  "hacker-news": { "title": "Hacker News", "site": "...", "folder": "tech", "folders": ["tech"], "count": 200, "newest": 1730000000000, "status": { "ok": true, "lastAttempt": 1730000000000, "lastSuccess": 1730000000000, "consecutiveFailures": 0, "error": null } }
 }}
 ```
+`folders` is the merged folder registry (feeds.opml folders + config.folders overrides by id) that the sidebar renders; the UI falls back to `config.folders` for data files generated before this field existed.
 
 `data/feeds/<feedId>.json`:
 ```json
@@ -127,8 +151,9 @@ Matcher semantics:
 - localStorage maps are kept on **null-prototype objects** so feed GUIDs like `constructor` or `__proto__` can't fake lookups or pollute prototypes.
 - **Embeds**: the client upgrades bare media links in article bodies to players — YouTube (watch/youtu.be → `youtube-nocookie.com/embed/<id>` iframe), Vimeo, SoundCloud (lazy iframe on click), direct audio/video → HTML5 player. Never fetch remote JS.
 - Favicons: `https://www.google.com/s2/favicons?domain=<host>&sz=64` (external, degrade to letter-tile on error).
-- **Unread is sacred**: nothing may mark an article read except (a) the user opening it (per settings), (b) user's explicit "mark all as read"/"mark read", or (c) a filter with `markRead: true`. `keepUnread` filters beat (a).
-- Read state lives in localStorage under namespace `ghrss:` (`ghrss:read` = {id: timestamp}, `ghrss:ui` = UI prefs, `ghrss:kept` = {id: true}, `ghrss:starred` = {id: feedId}). Article ids must be stable or read state is lost.
+- **Unread is sacred**: nothing may mark an article read except (a) the user opening it (per settings), (b) the user's explicit "mark all as read"/"mark read", or (c) a filter with `markRead: true`. `keepUnread` filters beat (a).
+- **No vanishing rows** (user requirement): a row the user just read lingers in the Unread view (tick flips to ✓) until they move on — opening another article, prev/next, a status/date-filter change, bulk mark or mark-all clears the linger set (`state.keepVisible`). Scroll tracking is exempt (those rows are already off-screen).
+- Read state lives in localStorage under namespace `ghrss:` (`ghrss:read` = {id: timestamp}, `ghrss:kept` = {id: true}, `ghrss:ui` = the user's OWN UI toggles only — config-owned prefs are never persisted there). Article ids must be stable or read state is lost.
 - The publish commit on `gh-pages` uses `[skip ci]` and `github-actions[bot]` identity. Fetch failures for one feed must not fail the run (log + continue). The default branch gets **no** CI commits.
 - Node >= 20 (global fetch). Fetcher must be idempotent and CI-friendly: no interactivity, exit 0 on partial failure, cap text-extraction fetches (~20 newest unextracted per feed per run).
 - **No duplicated navigation** (user requirement): the left rail (`#tabs_pane`) is a *module switcher* only (Newsfeed/Dashboards/Feeds/Saved/Automate/Search/Add feed + Audio player/Notifications/Support/Settings/profile/dock). Status views (All/Unread/Today/Recently read) live **only** in the header ⋯ menu; the sidebar tree holds **only** the opt-in Today row + Newsfeed + folders/feeds — exactly the real app's DOM.
@@ -139,18 +164,20 @@ Source material on the user's Desktop (OUTSIDE the project — do not delete): `
 
 Replicated 1:1 (structural, from their DOM/CSS):
 - `#wraper > #side-nav(#tabs_pane 72px rail: .tab-item icon tiles, active tile `#597fb8`, `.tabs-counter` badge `#597fb8` + `#134b91` outline; #tree_pane 310px with `#feeds_nav/#saved_nav/#automation_nav/#profile_nav/#placeholder_nav` panels, `#subscriptions_fieldset` = Today (`hidden` by default, settings toggle) + Newsfeed + `#tree`, drag `#sidebar_resizer`, foot `#last-updated`) > `#content-wrapper(#header_pane` sticky 50px: title + "N unread" + title dropdown (Feed properties / Set as start page / PRO-shielded items), split `✓|▾` mark-all `.btn-heading` group, expanding search, ⋯ menu with article-list status / multiple select / show filtered / refresh / 5 layouts / date / sort; `#reader_pane`)`.
-- Split list+reader: `#list-pane` + `#reader-slot` with "Select an article from the list" placeholder, reader toolbar with title/source/date/open-original and DESCRIPTION/TRANSCRIPT/TOPICS/ARTICLE tabs + mentions row, scroll up/down buttons.
-- List rows: `[dot][favicon+feed 130px][row-main(title + inline excerpt)][date right]` + hover control strip (star, open-in-new-tab, keep-unread, read toggle, ⋯). Per-row ⋯ menu and attachments.
+- Split list+reader: `#list-pane` + `#reader-slot` (the reader pane is simply empty until an article is opened — the "Select an article" placeholder text was removed at the user's request), reader toolbar (prev/next, open-original, close) + linked title + source/date/reading-time sub-row, scroll up/down buttons.
+- List rows: `[favicon+feed][row-main(title + inline excerpt)][date right]` + control strip (open-in-new-tab, keep-unread, read tick). Attachments list in the reader.
 - Mark-all split button `✓|▾` with dropdown: "Mark all as read" / "Older than a day…" / "Older than two days…" / "Older than three days…" / "Older than a week…" (marks matching older items read).
 - Design tokens: primary `#1875F3`, Roboto, headings `#081425/#1a2433`, gray `#71747a`, borders `#e9eaf0`, `.btn-heading` `#edeff2/#dee2e7/#cfd5dd`, reader column 870px.
-- Features: all 5 layouts + comfort/compact/ultra density + newest/oldest sort, search operators + OR, date filters, config include/exclude filters, badge-click mark-read + Undo toast, sidebar options menu (updated-only/dim-read/sort A–Z), scroll tracking, titles-only, open-original, bulk multi-select + bulk bar (row click selects in bulk mode), absolute dates, title font size, compact sidebar, tab-title unread counter, attachments list, mark-all confirm, **star/read-later: ★ button per row + in reader toolbar → Starred sidebar row (functional, count badge)**, **Estimated reading time in reader**. (Row ⋯ context menu, Copy link, and state export/import were removed with the settings modal — see Generated 2026-10-22 (11)/(22).)
+- Features: all 5 layouts + comfort/compact/ultra density + newest/oldest sort, search operators + OR, date filters, config include/exclude filters, badge-click mark-read + Undo toast, scroll tracking, titles-only, open-original, bulk multi-select + bulk bar (row click selects in bulk mode), absolute dates, title font size, compact sidebar, tab-title unread counter, attachments list, mark-all confirm, **Estimated reading time in reader**. The row's single read-state indicator is the tick button (✓/○) — the blue unread dot was removed at the user's request; the reader title links to the original article. (Row ⋯ context menu, Copy link, stars/read-later, and state export/import were removed — see Generated 2026-10-23 (2).)
 - Server-side-only items (Archive/Annotated/Web pages/Uploads, Rules/Filters/Spotlights/Email digests, Plans/Invite friends) render **inert** with tooltips — visible for 1:1 chrome, honest about being unavailable offline.
 
-**Out of scope** (cannot exist as static files, or explicitly unwanted): accounts/auth, real notification/rule/dashboard backends, tags, notes, keyboard shortcuts, AI summaries, translations, OPML import/export UI (the one-time import was done by the agent from the user's export), timezone pickers, popularity scores, custom CSS.
+**Out of scope** (cannot exist as static files, or explicitly unwanted): accounts/auth, real notification/rule/dashboard backends, tags, notes, keyboard shortcuts, AI summaries, translations, OPML import/export **UI** (file-based `feeds.opml` import IS supported — done by the fetcher, since the frontend never decides what to fetch), timezone pickers, popularity scores, custom CSS, stars/read-later (removed at the user's request — "useless").
 
-Smoke test: `node scripts/smoke.mjs` boots the real `index.html` + `app.js` in jsdom against **deterministic in-memory fixtures** (the real feed list is 59 YouTube feeds — disk data would make tests slow/network-dependent) and asserts chrome, filters, scopes, layouts, star/Starred flow, search-clear-on-close, panels, menus, and interactions (**29 assertions**, all passing).
+Smoke test: `node scripts/smoke.mjs` boots the real `index.html` + `app.js` in jsdom against **deterministic in-memory fixtures** (the real feed list is 59 YouTube feeds — disk data would make tests slow/network-dependent) and asserts chrome, filters, scopes, layouts, config-owns-settings (theme), double-click linger + move-on refilter, mark-all split with undo, search-clear-on-close, bulk select, panels, menus, and interactions (**48 assertions**, all passing).
 
 ## Generated
+
+- 2026-10-23 (2): User-feedback pass. **Removed**: star feature entirely (rows, reader, sidebar row, icon, CSS, docs — "useless"), blue unread dot (the tick button is the single read-state indicator), reader placeholder text, the 3 disabled example filters in config.json (`filters: []`). **Fixed (user reports)**: reader title now links to the original article; double-clicking an article no longer makes it disappear — a read row lingers in the Unread view until the user opens another article or changes the view (previously collapsing deleted the row, AND moving a→b wrongly kept the old row). **Fixed (rescan)**: config.json settings only applied on first visit (localStorage froze them forever) — config-owned prefs are now re-applied on every load and `ghrss:ui` stores only the user's own toggles; list scroll jumped to the top on every re-render (now preserved); Escape in the search box also closed the open article; dead `#sidebar-menu`/`#btn-sidebar-menu` handler + `ui.sidebarOpen` removed; fetcher logs hardcoded "30 days" while retentionDays is configurable; badge ✓-hover no longer advertises click-to-mark when `countersClickable: false`. **Added**: optional **`feeds.opml`** at repo root — fetcher-side OPML import (jsdom XML mode; id = diacritic-stripped title slug; config.feeds overrides by id/url; config.folders overrides by id; merged folder registry now written to `data/index.json.folders`, UI reads it with config fallback); verified by 18 standalone parser/merge tests. Smoke rewritten for the new behaviors: **48/48 passing**.
 
 - 2026-10-23: Senior-dev audit pass. **Fixed**: mobile scrim covered the sidebar (z-index) and stayed stuck after picking a feed; `decodeURIComponent` crash on malformed attachment names; attachments double-listing thumbnails + junk YouTube player-embed links; `markReadAfterSeconds` timer firing after the article was closed; stale `keepVisible` rows sticking in the unread view; closing search left the filter invisibly active; starred scope unreachable + ignored date/search filters; unknown `key:value` search tokens mangled (URLs); regex `g`-flag statefulness in config filters. **Hardened**: reader DOM sanitize strips feed `class`/`style`/`data:` hrefs, fetcher drops `<button>`/`<center>`/data-hrefs; localStorage maps are null-prototype (GUID `__proto__`/`constructor` safe). **Revived**: minimal Starred feature (★ on rows + reader, Starred sidebar row with count, empty state, reading time in reader). **Perf**: reader pane only rebuilds when the open article changes (embeds keep playing across re-renders); hourly poll re-downloads payloads only when `generatedAt` changes; search compiled once per render. **Removed dead**: shortHost, feedErrors, state.tab/railTab/menuId/readerTab, hide-read/copy-link dispatch branches, #row-menu, #set-* sync lines, export/import handlers, ~23 unused SVG symbols, ~140 lines dead CSS (rail/chips/reader-tabs/profile/stats/settings-modal leftovers), TEXT_EXTRACT_AGE_DAYS. **Docs**: removed lying `keepUnreadForever`/`articlesPerFeed` settings (fetcher can't see read state — retention is date-based for everyone), README/AGENTS updated accordingly. Smoke extended to 29 assertions (star flow, search clear) — 29/29 passing.
 
