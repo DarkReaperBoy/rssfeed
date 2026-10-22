@@ -2,7 +2,7 @@ name: Fetch feeds & publish
 
 on:
   schedule:
-    - cron: '0 * * * *'   # hourly, on the hour (UTC)
+    - cron: '0 5 * * *'   # daily at 9 AM Oman (GST, UTC+4)
   workflow_dispatch:        # manual run from the Actions tab
   push:
     branches: [main]        # every push to main deploys via CI/CD
