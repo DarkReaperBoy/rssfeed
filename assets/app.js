@@ -85,8 +85,9 @@ function faviconHtml(feed) {
 }
 const feedMeta = (id) => {
   const m = state.index?.feeds?.[id];
-  if (!m) return { title: id, site: '', folder: null, folders: [] };
+  if (!m) return { title: id, site: '', folder: null, folders: [], status: null };
   if (!m.folders) m.folders = m.folder ? [m.folder] : [];
+  if (!m.status) m.status = null;
   return m;
 };
 const feedTitle = (id) => feedMeta(id).title || id;
@@ -187,7 +188,14 @@ function feedIdsInScope() {
   const feeds = state.index?.feeds || {};
   if (state.scope === 'starred') return [];
   if (state.scope.startsWith('feed:')) return [state.scope.slice(5)];
-  if (state.scope.startsWith('folder:')) return Object.keys(feeds).filter((id) => feeds[id].folder === state.scope.slice(7));
+  if (state.scope.startsWith('folder:')) {
+    const fid = state.scope.slice(7);
+    return Object.keys(feeds).filter((id) => {
+      const m = feeds[id];
+      if (Array.isArray(m.folders)) return m.folders.includes(fid);
+      return m.folder === fid;
+    });
+  }
   return Object.keys(feeds);
 }
 async function loadAllFeeds(onChange) {
@@ -322,8 +330,17 @@ function renderTree() {
     const meta = feedMeta(id), n = unreadCount(id);
     if (ui.updatedOnly && n === 0) return '';
     const dim = ui.dimRead && n === 0 ? 'dimmed' : '';
-    return `<button class="tree-item ${state.scope === 'feed:' + id ? 'active' : ''} ${n ? 'unread' : ''} ${dim}" data-scope="feed:${esc(id)}" title="${esc(meta.title)}">
-      ${faviconHtml({ title: meta.title, site: meta.site })}<span class="label">${esc(meta.title)}</span>${n ? `<span class="badge" data-markread="feed:${esc(id)}" title="Mark as read">${n}</span>` : ''}
+    const st = meta.status || {};
+    const failed = st.ok === false && !st.disabled;
+    const disabled = !!st.disabled;
+    const warnTitle = failed
+      ? `Scrape failed (last hour attempt unsuccessful)${st.error ? ': ' + st.error : ''}${st.consecutiveFailures ? ' — ' + st.consecutiveFailures + ' consecutive failures' : ''}${st.lastSuccess ? ' — last success: ' + relTime(st.lastSuccess) + ' ago' : ''}`
+      : disabled
+        ? 'Feed disabled in config'
+        : esc(meta.title);
+    const warnIcon = failed ? '<span class="feed-warn" title="' + esc(warnTitle.replace(/"/g, '&quot;')) + '">⚠</span>' : disabled ? '<span class="feed-warn feed-warn-dim" title="' + esc(warnTitle.replace(/"/g, '&quot;')) + '">⚠</span>' : '';
+    return `<button class="tree-item ${state.scope === 'feed:' + id ? 'active' : ''} ${n ? 'unread' : ''} ${dim} ${failed ? 'feed-failed' : ''}" data-scope="feed:${esc(id)}" title="${esc(warnTitle)}">
+      ${faviconHtml({ title: meta.title, site: meta.site })}<span class="label">${esc(meta.title)}</span>${warnIcon}${n ? `<span class="badge" data-markread="feed:${esc(id)}" title="Mark as read">${n}</span>` : ''}
     </button>`;
   };
   for (const folder of folders) {
@@ -435,6 +452,7 @@ function readerHtml(a) {
   const feed = feedMeta(a._feed);
   const tab = state.readerTab || 'description';
   const idx = state.visible.indexOf(a);
+  const rt = readingTime(a);
   return `<div class="reader" data-id="${esc(a.id)}">
     <div class="reader-toolbar">
       <button class="icon-btn star-btn ${state.starred[a.id] ? 'starred' : ''}" data-act="star" title="Read later (star)"><svg><use href="#i-star"/></svg></button>
@@ -455,6 +473,7 @@ function readerHtml(a) {
       <span class="sub-feed">${esc(feed.title)}<svg><use href="#i-chevron-down"/></svg></span>
       ${a.author ? `<span>by ${esc(a.author)}</span>` : ''}
       <span title="${esc(fullTime(a.date))}">${esc(relTime(a.date))}</span>
+      ${rt ? `<span>${esc(rt)}</span>` : ''}
     </div>
     <div class="reader-mentions">
       <span class="node-ic"><svg><use href="#i-node"/></svg></span>
@@ -488,6 +507,15 @@ function attachmentsHtml(a) {
   </div>`;
 }
 function shortHost(url) { try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return 'original'; } }
+function readingTime(a) {
+  try {
+    const text = stripTags(a.text || a.content || a.summary || '');
+    const words = text.trim().split(/\s+/).filter(Boolean).length;
+    if (!words) return '';
+    const mins = Math.max(1, Math.round(words / 200));
+    return `${mins} min read`;
+  } catch { return ''; }
+}
 
 function renderList() {
   const list = $('#list');
@@ -724,6 +752,21 @@ function dispatchAct(act, id, el, e) {
     if (state.starred[id]) delete state.starred[id]; else state.starred[id] = a._feed;
     saveStarred(); renderTree(); renderList();
   }
+  else if (act === 'copy-link') {
+    if (a.link) {
+      try {
+        if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+          navigator.clipboard.writeText(a.link).then(() => showToast('Link copied to clipboard'));
+        } else {
+          const ta = document.createElement('textarea');
+          ta.value = a.link; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
+          showToast('Link copied to clipboard');
+        }
+      } catch (err) {
+        showToast('Failed to copy link');
+      }
+    }
+  }
   else if (act === 'open-original') { /* anchor handles it */ }
   else if (act === 'collapse') { state.expandedId = null; renderList(); }
   else if (act === 'row-menu' || act === 'reader-menu') openRowMenu(a, e);
@@ -749,6 +792,7 @@ function openRowMenu(a, e) {
     <button class="dropdown-item" data-act="hide-read"><span class="mi-icon"><svg><use href="#i-close"/></svg></span>Mark as read and hide</button>
     <div class="dropdown-line"></div>
     <button class="dropdown-item" data-act="star"><span class="mi-icon"><svg><use href="#i-star"/></svg></span>${state.starred[a.id] ? 'Remove star' : 'Star (read later)'}</button>
+    ${a.link ? `<button class="dropdown-item" data-act="copy-link"><span class="mi-icon"><svg><use href="#i-external"/></svg></span>Copy link</button>` : ''}
     ${a.link ? `<a class="dropdown-item" href="${esc(a.link)}" target="_blank" rel="noopener noreferrer"><span class="mi-icon"><svg><use href="#i-external"/></svg></span>Open original in new tab</a>` : ''}`;
   el.classList.remove('hidden');
   const r = el.getBoundingClientRect();
@@ -957,18 +1001,15 @@ function bindEvents() {
   });
   $('#scrim').addEventListener('click', () => { document.body.classList.remove('sidebar-open'); $('#scrim').classList.add('hidden'); });
 
-  // Rail: module tabs (their #top_tabs / #bottom_tabs) — swap sidebar panels,
-  // never duplicate the status views that live in the ⋯ menu.
+  // Rail: module tabs
   $('#tabs_pane').addEventListener('click', (e) => {
     const btn = e.target.closest('[data-tab]');
     if (!btn) return;
     e.stopPropagation();
     switchTab(btn.dataset.tab);
   });
-  $('#btn-manage').addEventListener('click', () => showToast('Subscriptions live in config.json — edit it on GitHub and the next fetch applies it.'));
-  $('#btn-new-folder').addEventListener('click', () => showToast('Folders live in config.json — add a folder there and assign feeds to it.'));
-  $('#btn-manage-account')?.addEventListener('click', () => showToast('Accounts need the real Inoreader servers — this reader is local.'));
-  $('#btn-profile-settings')?.addEventListener('click', openSettings);
+  $('#btn-manage')?.addEventListener('click', () => showToast('Subscriptions live in config.json — edit it on GitHub and the next fetch applies it.'));
+  $('#btn-new-folder')?.addEventListener('click', () => showToast('Folders live in config.json — add a folder there and assign feeds to it.'));
   $('#btn-title-menu').addEventListener('click', (e) => {
     e.stopPropagation();
     $('#title-menu').classList.toggle('hidden');
@@ -1015,6 +1056,46 @@ function bindEvents() {
       state.read = {}; saveRead(); renderAll();
     });
   });
+  $('#btn-export-state').addEventListener('click', () => {
+    try {
+      const data = {
+        version: 1,
+        exportedAt: Date.now(),
+        read: state.read || {},
+        kept: state.kept || {},
+        starred: state.starred || {},
+        ui: ui || {}
+      };
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `ghrss-state-${new Date().toISOString().slice(0,10)}.json`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast('State exported');
+    } catch (err) {
+      showToast('Failed to export state');
+    }
+  });
+  $('#btn-import-state').addEventListener('change', async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      if (data.read && typeof data.read === 'object') { state.read = data.read; saveRead(); }
+      if (data.kept && typeof data.kept === 'object') { state.kept = data.kept; saveKept(); }
+      if (data.starred && typeof data.starred === 'object') { state.starred = data.starred; saveStarred(); }
+      if (data.ui && typeof data.ui === 'object') { Object.assign(ui, data.ui); saveUi(); applyTheme(); syncControls(); applySidebarMode(); }
+      renderAll();
+      showToast('State imported');
+    } catch (err) {
+      showToast('Failed to import state');
+    } finally {
+      e.target.value = '';
+    }
+  });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') { closeModals(); if (state.expandedId) { state.expandedId = null; renderList(); } }
   });
@@ -1037,36 +1118,21 @@ function closeSearchFn() {
   $('#search-box').classList.add('hidden');
   $('#search-open').classList.remove('hidden');
 }
-const PLACEHOLDERS = {
-  dashboards: ['Dashboards', 'Dashboard widgets need server-side storage — not available in this offline reader.'],
-  audio: ['Audio player', 'Open an article with an audio enclosure to play it inside the reader.'],
-  notifications: ['Notifications', 'Notification rules run on the real Inoreader servers. Nothing here yet.'],
-  support: ['Support', 'This is a self-hosted reader. Config and feeds live in your GitHub repository.'],
-  'add-feed': ['Add feed', 'Subscriptions are managed in config.json in your repository — add the feed URL there and the next hourly fetch picks it up.'],
-};
 function switchTab(tab) {
   if (tab === 'dock') { document.body.classList.toggle('sidebar-collapsed'); return; }
   if (tab === 'settings') { openSettings(); return; }
   if (tab === 'search') { openSearchFn(); return; }
   state.railTab = tab;
   if (tab === 'home') { state.scope = 'all'; state.expandedId = null; }
-  if (tab === 'feeds' && state.scope === 'starred') { state.scope = 'all'; state.expandedId = null; } // leaving Saved view
+  if (tab === 'feeds' && state.scope === 'starred') { state.scope = 'all'; state.expandedId = null; }
   if (tab === 'saved') {
     state.scope = 'starred'; state.expandedId = null;
-    loadAllFeeds(() => { renderTree(); renderList(); }); // starred articles may live in unloaded feeds
+    loadAllFeeds(() => { renderTree(); renderList(); });
   }
-  const panel = tab === 'saved' ? 'saved_nav'
-    : tab === 'automation' ? 'automation_nav'
-    : tab === 'profile' ? 'profile_nav'
-    : tab === 'feeds' || tab === 'home' ? 'feeds_nav'
-    : 'placeholder_nav';
-  for (const id of ['feeds_nav', 'saved_nav', 'automation_nav', 'profile_nav', 'placeholder_nav']) {
-    document.getElementById(id).classList.toggle('hidden', id !== panel);
-  }
-  if (panel === 'placeholder_nav') {
-    const [t, m] = PLACEHOLDERS[tab] || ['Not available', ''];
-    $('#placeholder-title').textContent = t;
-    $('#placeholder-msg').textContent = m;
+  const panel = tab === 'saved' ? 'saved_nav' : (tab === 'feeds' || tab === 'home') ? 'feeds_nav' : null;
+  for (const id of ['feeds_nav', 'saved_nav']) {
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle('hidden', id !== panel);
   }
   $$('#tabs_pane [data-tab]').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
   renderAll();

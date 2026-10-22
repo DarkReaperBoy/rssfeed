@@ -1,8 +1,6 @@
 #!/usr/bin/env node
-// Fetcher run by GitHub Actions (hourly). Reads config.json, downloads every
-// enabled feed, optionally extracts clean full text (readability + sanitize),
-// merges with previously stored data, applies the retention window and writes
-// data/index.json + data/feeds/<id>.json. Never fails the run on a single feed.
+// Fetcher run by GitHub Actions (hourly). Keeps last 30 days of articles with no per-feed cap.
+// Tracks fetch status per feed and purges feeds removed from config.
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -16,9 +14,10 @@ const ROOT = new URL('..', import.meta.url).pathname;
 const DATA_DIR = path.join(ROOT, 'data');
 const FEEDS_DIR = path.join(DATA_DIR, 'feeds');
 const UA = 'Mozilla/5.0 (compatible; ghrss-fetcher/1.0; +https://github.com/)';
-const TEXT_EXTRACT_AGE_DAYS = 30;   // only extract text for articles newer than this
-const TEXT_EXTRACT_BUDGET = 20;     // max page fetches per feed per run
-const TEXT_EXTRACT_MIN_LEN = 400;   // don't bother extracting if the feed already gives this much text
+const TEXT_EXTRACT_AGE_DAYS = 30;
+const TEXT_EXTRACT_BUDGET = 20;
+const TEXT_EXTRACT_MIN_LEN = 400;
+const RETENTION_DAYS = 30;
 
 const parser = new Parser({
   timeout: 30000,
@@ -70,7 +69,7 @@ const stripTags = (html) =>
     .replace(/&quot;/gi, '"')
     .replace(/&#0?39;|&apos;/gi, "'")
     .replace(/&#x[0-9a-f]+;/gi, ' ')
-    .replace(/&#\d+;/g, ' ')
+    .replace(/&#\d+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 
@@ -99,7 +98,6 @@ async function extractFullText(link) {
   if (!html) return null;
   const dom = new JSDOM(html, { url: link, runScripts: 'outside-only' });
   try {
-    // Neutralize scripts before readability runs.
     for (const s of [...dom.window.document.querySelectorAll('script, noscript, iframe[src*="doubleclick"], ins')]) s.remove();
     const reader = new Readability(dom.window.document);
     const parsed = reader.parse();
@@ -141,6 +139,20 @@ async function loadJson(file, fallback) {
   try { return JSON.parse(await fs.readFile(file, 'utf8')); } catch { return fallback; }
 }
 
+function summarizeFeed(feed, articles) {
+  const sorted = [...articles].sort((a, b) => b.date - a.date);
+  const folders = Array.isArray(feed.folders) ? feed.folders.filter(Boolean) : (feed.folder ? [feed.folder] : []);
+  return {
+    title: feed.title || feed.id,
+    site: feed.site || '',
+    folder: folders[0] || null,
+    folders,
+    count: articles.length,
+    newest: sorted[0]?.date || null,
+    oldest: sorted[sorted.length - 1]?.date || null,
+  };
+}
+
 async function main() {
   const config = await loadJson(path.join(ROOT, 'config.json'), null);
   if (!config?.feeds?.length) {
@@ -148,28 +160,61 @@ async function main() {
     process.exit(1);
   }
   const settings = config.settings || {};
-  const perFeedCap = Math.max(50, Number(settings.articlesPerFeed) || 200);
-  const retentionDays = Number(settings.retentionDays);
-  const retainMs = retentionDays > 0 ? retentionDays * 864e5 : 0;
   const fullTextDefault = !!settings.fullTextDefault;
 
+  await fs.mkdir(DATA_DIR, { recursive: true });
   await fs.mkdir(FEEDS_DIR, { recursive: true });
+
   const now = Date.now();
+  const retainMs = RETENTION_DAYS * 86400000;
+
+  // Load previous index for status/history
+  const prevIndex = await loadJson(path.join(DATA_DIR, 'index.json'), { generatedAt: 0, feeds: {} });
+  const prevFeedMeta = prevIndex.feeds || {};
+
   const index = { generatedAt: now, feeds: {} };
   let failures = 0;
 
+  const currentFeedIds = new Set();
+
   for (const feed of config.feeds) {
-    if (!feed.id || !feed.url) { console.warn(`skip (no id/url): ${JSON.stringify(feed)}`); continue; }
-    if (feed.enabled === false) {
-      const prev = await loadJson(path.join(FEEDS_DIR, `${feed.id}.json`), null);
-      if (prev) index.feeds[feed.id] = summarizeFeed(feed, prev.articles, now);
-      console.log(`[${feed.id}] disabled, keeping ${prev?.articles?.length ?? 0} articles`);
+    if (!feed.id || !feed.url) {
+      console.warn(`skip (no id/url): ${JSON.stringify(feed)}`);
       continue;
     }
+    currentFeedIds.add(feed.id);
 
     const file = path.join(FEEDS_DIR, `${feed.id}.json`);
     const prev = await loadJson(file, { articles: [] });
     const prevById = new Map((prev.articles || []).map((a) => [a.id, a]));
+
+    const prevStatus = prevFeedMeta[feed.id]?.status || {};
+    const status = {
+      ok: true,
+      lastAttempt: now,
+      lastSuccess: prevStatus.lastSuccess || null,
+      consecutiveFailures: prevStatus.consecutiveFailures || 0,
+      error: null,
+    };
+
+    if (feed.enabled === false) {
+      // Keep existing articles but filter to 30 days
+      let kept = [...(prev.articles || [])].filter((a) => now - a.date < retainMs);
+      await fs.writeFile(file, JSON.stringify({ articles: kept }));
+      index.feeds[feed.id] = {
+        ...summarizeFeed(feed, kept),
+        status: {
+          ok: false,
+          disabled: true,
+          lastAttempt: now,
+          lastSuccess: status.lastSuccess,
+          consecutiveFailures: 0,
+          error: 'Feed disabled in config',
+        },
+      };
+      console.log(`[${feed.id}] disabled, keeping ${kept.length} articles (last 30 days)`);
+      continue;
+    }
 
     let xml;
     try {
@@ -178,8 +223,17 @@ async function main() {
       xml = await res.text();
     } catch (err) {
       failures++;
-      console.error(`[${feed.id}] FETCH FAILED: ${err.message} — keeping previous ${prev.articles?.length ?? 0} articles`);
-      if (prev.articles) index.feeds[feed.id] = summarizeFeed(feed, prev.articles, now);
+      status.ok = false;
+      status.error = err.message;
+      status.consecutiveFailures = (prevStatus.consecutiveFailures || 0) + 1;
+      // Keep previous articles, filter to 30 days
+      let kept = [...(prev.articles || [])].filter((a) => now - a.date < retainMs);
+      await fs.writeFile(file, JSON.stringify({ articles: kept }));
+      index.feeds[feed.id] = {
+        ...summarizeFeed(feed, kept),
+        status,
+      };
+      console.error(`[${feed.id}] FETCH FAILED: ${err.message} — keeping ${kept.length} articles from last 30 days (${status.consecutiveFailures} consecutive failures)`);
       continue;
     }
 
@@ -188,10 +242,24 @@ async function main() {
       parsed = await parser.parseString(xml);
     } catch (err) {
       failures++;
-      console.error(`[${feed.id}] PARSE FAILED: ${err.message}`);
-      if (prev.articles) index.feeds[feed.id] = summarizeFeed(feed, prev.articles, now);
+      status.ok = false;
+      status.error = `Parse error: ${err.message}`;
+      status.consecutiveFailures = (prevStatus.consecutiveFailures || 0) + 1;
+      let kept = [...(prev.articles || [])].filter((a) => now - a.date < retainMs);
+      await fs.writeFile(file, JSON.stringify({ articles: kept }));
+      index.feeds[feed.id] = {
+        ...summarizeFeed(feed, kept),
+        status,
+      };
+      console.error(`[${feed.id}] PARSE FAILED: ${err.message} — keeping ${kept.length} articles from last 30 days`);
       continue;
     }
+
+    // Success
+    status.ok = true;
+    status.lastSuccess = now;
+    status.consecutiveFailures = 0;
+    status.error = null;
 
     const wantText = feed.fullText ?? fullTextDefault;
     let textBudget = wantText ? TEXT_EXTRACT_BUDGET : 0;
@@ -206,7 +274,7 @@ async function main() {
       const summary = stripTags(content).slice(0, 300);
       let text = prevA?.text || null;
       const feedGivesEnough = stripTags(content).length >= TEXT_EXTRACT_MIN_LEN;
-      if (wantText && !text && !feedGivesEnough && textBudget > 0 && now - date < TEXT_EXTRACT_AGE_DAYS * 864e5 && link) {
+      if (wantText && !text && !feedGivesEnough && textBudget > 0 && now - date < TEXT_EXTRACT_AGE_DAYS * 86400000 && link) {
         textBudget--;
         try {
           text = await extractFullText(link);
@@ -229,35 +297,33 @@ async function main() {
       });
     }
 
-    // Merge with previous so ids stay stable and old-but-relevant items survive.
+    // Merge with previous so ids stay stable
     const byId = new Map();
     for (const a of [...(prev.articles || []), ...articles]) byId.set(a.id, a);
     let merged = [...byId.values()].sort((a, b) => b.date - a.date);
-    // Retention window: keep everything recent + the newest perFeedCap regardless of age.
-    if (retainMs > 0) merged = merged.filter((a) => now - a.date < retainMs);
-    if (merged.length > perFeedCap) merged = merged.slice(0, perFeedCap);
+    // Keep only last 30 days, NO article limit
+    merged = merged.filter((a) => now - a.date < retainMs);
 
     await fs.writeFile(file, JSON.stringify({ articles: merged }));
-    index.feeds[feed.id] = summarizeFeed(feed, merged, now);
-    console.log(`[${feed.id}] ${merged.length} articles (${(await fs.stat(file)).size / 1024 | 0} KB) from "${parsed.title || feed.title}"`);
+    index.feeds[feed.id] = {
+      ...summarizeFeed(feed, merged),
+      status,
+    };
+    console.log(`[${feed.id}] ${merged.length} articles (last 30 days, no cap) from "${parsed.title || feed.title}"`);
+  }
+
+  // Purge removed sources
+  for (const [oldId] of Object.entries(prevFeedMeta)) {
+    if (!currentFeedIds.has(oldId)) {
+      try {
+        await fs.unlink(path.join(FEEDS_DIR, `${oldId}.json`));
+        console.log(`[${oldId}] removed from config - purged feed data`);
+      } catch {}
+    }
   }
 
   await fs.writeFile(path.join(DATA_DIR, 'index.json'), JSON.stringify(index));
-  console.log(`done: ${Object.keys(index.feeds).length} feeds, ${failures} failure(s)`);
-}
-
-function summarizeFeed(feed, articles, now) {
-  const sorted = [...articles].sort((a, b) => b.date - a.date);
-  const folders = Array.isArray(feed.folders) ? feed.folders.filter(Boolean) : (feed.folder ? [feed.folder] : []);
-  return {
-    title: feed.title || feed.id,
-    site: feed.site || '',
-    folder: folders[0] || null,
-    folders,
-    count: articles.length,
-    newest: sorted[0]?.date || null,
-    oldest: sorted[sorted.length - 1]?.date || null,
-  };
+  console.log(`done: ${Object.keys(index.feeds).length} feeds, ${failures} failure(s), keeping last ${RETENTION_DAYS} days (no per-feed cap)`);
 }
 
 main().catch((err) => { console.error(err); process.exit(1); });

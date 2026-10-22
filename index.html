@@ -73,12 +73,6 @@
             <span class="tab-label">Newsfeed</span>
           </button>
         </li>
-        <li id="dashboard_tab" class="nav-item">
-          <button class="tab-item" data-tab="dashboards" title="Dashboards">
-            <i class="tab-icon"><svg><use href="#i-dashboard"/></svg></i>
-            <span class="tab-label">Dashboards</span>
-          </button>
-        </li>
         <li id="feeds_tab" class="nav-item">
           <button class="tab-item active" data-tab="feeds" title="Feeds">
             <i class="tab-icon"><svg><use href="#i-feeds"/></svg></i>
@@ -93,53 +87,18 @@
             <span class="tabs-counter" id="saved_tab_counter"></span>
           </button>
         </li>
-        <li id="automation_tab" class="nav-item">
-          <button class="tab-item" data-tab="automation" title="Automate">
-            <i class="tab-icon"><svg><use href="#i-automate"/></svg></i>
-            <span class="tab-label">Automate</span>
-          </button>
-        </li>
         <li id="search_tab" class="nav-item">
           <button class="tab-item" data-tab="search" title="Search">
             <i class="tab-icon"><svg><use href="#i-search"/></svg></i>
             <span class="tab-label">Search</span>
           </button>
         </li>
-        <li id="add_feed_tab" class="nav-item">
-          <button class="tab-item" data-tab="add-feed" title="Add feed">
-            <i class="tab-icon"><svg><use href="#i-plus-circle"/></svg></i>
-            <span class="tab-label">Add feed</span>
-          </button>
-        </li>
       </ul>
       <ul id="bottom_tabs">
-        <li id="audio_player_tab" class="nav-item">
-          <button class="tab-item" data-tab="audio" title="Audio player">
-            <i class="tab-icon"><svg><use href="#i-audio"/></svg></i>
-            <span class="tab-label">Audio player</span>
-          </button>
-        </li>
-        <li id="notifications_tab" class="nav-item">
-          <button class="tab-item" data-tab="notifications" title="Notifications">
-            <i class="tab-icon"><svg><use href="#i-bell"/></svg></i>
-            <span class="tab-label">Notifications</span>
-          </button>
-        </li>
-        <li id="support_tab" class="nav-item">
-          <button class="tab-item" data-tab="support" title="Support">
-            <i class="tab-icon"><svg><use href="#i-support"/></svg></i>
-            <span class="tab-label">Support</span>
-          </button>
-        </li>
         <li id="preferences_tab" class="nav-item">
           <button class="tab-item" id="btn-settings" data-tab="settings" title="Settings">
             <i class="tab-icon"><svg><use href="#i-sliders"/></svg></i>
             <span class="tab-label">Settings</span>
-          </button>
-        </li>
-        <li class="nav-item">
-          <button class="tab-item tab-item-profile" data-tab="profile" title="Inoreader account">
-            <span class="profile-picture">n</span>
           </button>
         </li>
         <li class="nav-item tree-pane-dock-toggle">
@@ -193,53 +152,7 @@
               <span class="badge" id="starred-count"></span>
             </button>
           </div>
-          <div class="parent_div"><span class="tree-item inert" title="Server-side feature — not available offline"><i class="sys-icon"><svg><use href="#i-saved"/></svg></i><span class="label">Archive</span></span></div>
-          <div class="parent_div"><span class="tree-item inert" title="Server-side feature — not available offline"><i class="sys-icon"><svg><use href="#i-saved"/></svg></i><span class="label">Annotated</span></span></div>
-          <div class="parent_div"><span class="tree-item inert" title="Server-side feature — not available offline"><i class="sys-icon"><svg><use href="#i-saved"/></svg></i><span class="label">Web pages</span></span></div>
-          <div class="parent_div"><span class="tree-item inert" title="Server-side feature — not available offline"><i class="sys-icon"><svg><use href="#i-saved"/></svg></i><span class="label">Uploads</span></span></div>
         </fieldset>
-      </div>
-
-      <div id="automation_nav" class="nav-panel hidden">
-        <div class="sidebar-head"><h6 class="sidebar-heading">Automate</h6></div>
-        <fieldset class="sidebar_fieldset">
-          <div class="parent_div"><span class="tree-item inert" title="Server-side feature (Pro) — not available offline"><i class="sys-icon"><svg><use href="#i-automate"/></svg></i><span class="label">Rules</span></span></div>
-          <div class="parent_div"><span class="tree-item inert" title="Server-side feature (Pro) — not available offline"><i class="sys-icon"><svg><use href="#i-automate"/></svg></i><span class="label">Filters</span></span></div>
-          <div class="parent_div"><span class="tree-item inert" title="Server-side feature (Pro) — not available offline"><i class="sys-icon"><svg><use href="#i-automate"/></svg></i><span class="label">Spotlights</span></span></div>
-          <div class="parent_div"><span class="tree-item inert" title="Server-side feature (Pro) — not available offline"><i class="sys-icon"><svg><use href="#i-automate"/></svg></i><span class="label">Email digests</span></span></div>
-        </fieldset>
-      </div>
-
-      <div id="profile_nav" class="nav-panel hidden">
-        <div class="profile-head">
-          <span class="profile-picture profile-picture-lg">n</span>
-          <div class="profile-meta">
-            <div class="profile-name">nako47</div>
-            <span class="profile-plan">Free</span>
-          </div>
-        </div>
-        <fieldset class="sidebar_fieldset">
-          <button class="tool-btn profile-manage" id="btn-manage-account">Manage account</button>
-          <div class="parent_div">
-            <button class="tree-item" data-scope="recently-read" title="Recently read">
-              <i class="sys-icon"><svg><use href="#i-read"/></svg></i><span class="label">Recently read</span>
-            </button>
-          </div>
-          <div class="parent_div"><span class="tree-item inert" title="Not available offline"><i class="sys-icon"><svg><use href="#i-sliders"/></svg></i><span class="label">Plans</span></span></div>
-          <div class="parent_div"><span class="tree-item inert" title="Not available offline"><i class="sys-icon"><svg><use href="#i-support"/></svg></i><span class="label">Invite friends</span></span></div>
-          <div class="parent_div">
-            <button class="tree-item" id="btn-profile-settings" title="Preferences">
-              <i class="sys-icon"><svg><use href="#i-settings"/></svg></i><span class="label">Preferences</span>
-            </button>
-          </div>
-        </fieldset>
-      </div>
-
-      <div id="placeholder_nav" class="nav-panel hidden">
-        <div class="placeholder-panel">
-          <h6 id="placeholder-title"></h6>
-          <p id="placeholder-msg"></p>
-        </div>
       </div>
 
       <div id="sidebar_resizer" title="Drag to resize"></div>
@@ -405,7 +318,9 @@
       <div id="stats-table"></div>
       <div class="modal-section">Data</div>
       <label class="row"><span>Clear read state</span><button id="btn-clear-read" class="tool-btn">Clear</button></label>
-      <p class="hint">Read/unread state is stored in this browser only (localStorage). Unread articles are kept by the fetcher until they age past <code>retentionDays</code> in config.</p>
+      <label class="row"><span>Export read/starred state</span><button id="btn-export-state" class="tool-btn">Export</button></label>
+      <label class="row"><span>Import read/starred state</span><input type="file" id="btn-import-state" accept="application/json" style="max-width:160px"></label>
+      <p class="hint">Read/unread/starred state is stored in this browser only (localStorage). Unread articles are kept by the fetcher until they age past <code>retentionDays</code> in config.</p>
     </div>
   </div>
 </div>

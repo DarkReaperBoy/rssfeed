@@ -4,7 +4,7 @@
     "theme": "auto",
     "view": "list",
     "articlesPerFeed": 200,
-    "retentionDays": 90,
+    "retentionDays": 30,
     "keepUnreadForever": true,
     "markReadOnOpen": true,
     "markReadAfterSeconds": 0,

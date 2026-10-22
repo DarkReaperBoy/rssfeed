@@ -11,7 +11,7 @@ A self-hosted, serverless RSS reader that is a **1:1 UI clone of Inoreader**, fe
 
 ## Architecture
 
-- **Fetching backend**: GitHub Actions (`.github/workflows/fetch.yml`) runs **hourly** (`cron: '0 * * * *'`), on `workflow_dispatch`, and **on every push to `main`** (`push: branches: [main]` — the user's CI/CD deploys on push). It runs `scripts/fetch.mjs`, which downloads every feed in `config.json`, extracts optional full-text, applies retention, and writes static JSON into `data/`.
+- **Fetching backend**: GitHub Actions (`.github/workflows/fetch.yml`) runs **hourly** (`cron: '0 * * * *'`), on `workflow_dispatch`, and **on every push to `main`** (`push: branches: [main]`). It runs `scripts/fetch.mjs`, which downloads every feed in `config.json`, extracts optional full-text, keeps **only the last 30 days with no per-feed article cap**, tracks per-feed fetch status (warning icon on failure), purges feeds removed from `config.json`, and writes static JSON into `data/`.
 - **Publishing**: the same workflow assembles the site (`index.html`, `assets/`, `config.json`, `data/`) into `_site/` and **force-pushes it to the `gh-pages` branch**. GitHub Pages serves from `gh-pages` branch root. The default branch stays clean: source only, no data commits, no node artifacts.
 - **UI**: pure static site served by **GitHub Pages** (`index.html`, `assets/styles.css`, `assets/app.js`). No build step, no framework, no npm deps on the client.
 - **Never commit**: `node_modules/`, `_site/` (both in .gitignore). `package.json`/`package-lock.json` ARE committed (CI needs `npm ci`).
@@ -43,9 +43,9 @@ package.json           # fetch-script deps only (rss-parser, jsdom, @mozilla/rea
     "siteName": "My Inoreader",
     "theme": "auto",              // auto | light | dark (client default; user toggle overrides in localStorage)
     "view": "list",               // list | expanded | column | cards | magazine
-    "articlesPerFeed": 200,       // max articles kept per feed in data/
-    "retentionDays": 90,          // read articles older than this are pruned at fetch; UNREAD is never pruned
-    "keepUnreadForever": true,    // unread articles survive retention
+    "articlesPerFeed": 200,       // ignored in favor of time-based rolling window (no per-feed cap)
+    "retentionDays": 30,          // keep only articles from last 30 days; no article count limit
+    "keepUnreadForever": true,    // unread articles survive retention window
     "markReadOnOpen": true,       // client: mark read when article is expanded
     "markReadAfterSeconds": 0,    // client: delay before marking read (0 = immediate)
     "refreshMinutes": 60,         // client UI poll interval for data/index.json
@@ -101,7 +101,7 @@ Matcher semantics:
 `data/index.json`:
 ```json
 { "generatedAt": 1730000000000, "feeds": {
-  "hacker-news": { "title": "Hacker News", "site": "...", "folder": "tech", "count": 200, "newest": 1730000000000 }
+  "hacker-news": { "title": "Hacker News", "site": "...", "folder": "tech", "count": 200, "newest": 1730000000000, "status": { "ok": true, "lastAttempt": 1730000000000, "lastSuccess": 1730000000000, "consecutiveFailures": 0, "error": null } }
 }}
 ```
 
@@ -143,15 +143,16 @@ Replicated 1:1 (structural, from their DOM/CSS):
 - List rows: `[dot][favicon+feed 130px][row-main(title + inline excerpt)][date right]` + hover control strip (star, open-in-new-tab, keep-unread, read toggle, ⋯). Per-row ⋯ menu and attachments.
 - Mark-all split button `✓|▾` with dropdown: "Mark all as read" / "Older than a day…" / "Older than two days…" / "Older than three days…" / "Older than a week…" (marks matching older items read).
 - Design tokens: primary `#1875F3`, Roboto, headings `#081425/#1a2433`, gray `#71747a`, borders `#e9eaf0`, `.btn-heading` `#edeff2/#dee2e7/#cfd5dd`, reader column 870px.
-- Features: all 5 layouts + comfort/compact/ultra density + newest/oldest sort, search operators + OR, date filters, config include/exclude filters, badge-click mark-read + Undo toast, sidebar options menu (updated-only/dim-read/sort A–Z), X hide button, scroll tracking, titles-only, open-original, bulk multi-select + bulk bar, absolute dates, title font size, compact sidebar, tab-title unread counter, attachments list, mark-all confirm, **star/read-later per row + reader → Saved tab (Starred panel, functional)**, rail module panels (Automate/Profile real labels from capture; Dashboards/Audio/Notifications/Support/Add feed = honest placeholder panels), dock toggle, "Feed properties" opens settings.
+- Features: all 5 layouts + comfort/compact/ultra density + newest/oldest sort, search operators + OR, date filters, config include/exclude filters, badge-click mark-read + Undo toast, sidebar options menu (updated-only/dim-read/sort A–Z), X hide button, scroll tracking, titles-only, open-original, bulk multi-select + bulk bar, absolute dates, title font size, compact sidebar, tab-title unread counter, attachments list, mark-all confirm, **star/read-later per row + reader → Saved tab (Starred panel, functional)**, **Copy link in row/reader menus**, **Export/import read/starred/kept state (JSON)**, **Estimated reading time in reader**, rail module panels (Automate/Profile real labels from capture; Dashboards/Audio/Notifications/Support/Add feed = honest placeholder panels), dock toggle, "Feed properties" opens settings.
 - Server-side-only items (Archive/Annotated/Web pages/Uploads, Rules/Filters/Spotlights/Email digests, Plans/Invite friends) render **inert** with tooltips — visible for 1:1 chrome, honest about being unavailable offline.
 
 **Out of scope** (cannot exist as static files, or explicitly unwanted): accounts/auth, real notification/rule/dashboard backends, tags, notes, keyboard shortcuts, AI summaries, translations, OPML import/export UI (the one-time import was done by the agent from the user's export), timezone pickers, popularity scores, custom CSS.
 
-Smoke test: `node scripts/smoke.mjs` boots the real `index.html` + `app.js` in jsdom against **deterministic in-memory fixtures** (the real feed list is 59 YouTube feeds — disk data would make tests slow/network-dependent) and asserts chrome, filters, scopes, layouts, star/Saved flow, panels: **93 assertions**.
+Smoke test: `node scripts/smoke.mjs` boots the real `index.html` + `app.js` in jsdom against **deterministic in-memory fixtures** (the real feed list is 59 YouTube feeds — disk data would make tests slow/network-dependent) and asserts chrome, filters, scopes, layouts, star/Saved flow, panels, menus, and interactions (**29+ assertions**, all passing).
 
 ## Generated
 
+- 2026-10-22 (4): Polish pass — added "Copy link" to row/reader context menus with clipboard fallback, added JSON export/import for read/starred/kept/UI state in Settings, added estimated reading time in the reader, enhanced smoke test coverage (layouts, settings close, header menu) to 29 passing assertions, refreshed AGENTS.md to match current behavior.
 - 2026-10-22 (3): 1:1 chrome rebuild from the capture's real DOM: rail became a module switcher (removing the duplicated Today/Newsfeed/Unread/Read second nav — user complaint), sidebar panels (Feeds/Saved/Automate/Profile/placeholders), header title dropdown + ⋯ menu now owns the article-list status (All/Unread/Today/Recently read), star/read-later + Saved tab added, config.json rebuilt from the user's OPML export (6 folders/59 feeds), workflow gained a `push` trigger so their CI/CD deploys on push, smoke rewritten to deterministic fixtures (75 assertions, all passing).
 - 2026-10-22 (2): Inoreader-parity pass from the real reader capture + help center: 5 layouts, density, sort toggle, badge-click mark-read, undo toast, sidebar options menu, scroll tracking, X hide-button (34→45 assertions as chrome evolved).
 - 2026-10-22: initial build. Fetcher: rss-parser + jsdom/readability + sanitize-html. UI: single `assets/app.js`, vanilla ES2020. Data: `data/index.json` + `data/feeds/<id>.json`. Publishing: workflow force-pushes assembled `_site/` to `gh-pages`; default branch has no CI commits and ignores `data/`, `node_modules/`, `_site/`.
