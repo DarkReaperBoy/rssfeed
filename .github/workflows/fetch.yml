@@ -42,6 +42,7 @@ jobs:
           cp -r assets _site/
           cp config.json _site/
           cp -r data _site/
+          touch _site/.nojekyll
 
       - name: Publish to gh-pages branch
         env:
