@@ -326,7 +326,7 @@ async function main() {
   const allArticles = [];
   for (const id of currentFeedIds) {
     const d = await loadJson(path.join(FEEDS_DIR, `${id}.json`), { articles: [] });
-    for (const a of (d.articles || [])) allArticles.push(a);
+    for (const a of (d.articles || [])) allArticles.push({ ...a, _feed: id });
   }
   await fs.writeFile(path.join(DATA_DIR, 'all-feeds.json'), JSON.stringify({ articles: allArticles }));
 
