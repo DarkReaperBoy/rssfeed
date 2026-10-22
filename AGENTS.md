@@ -167,7 +167,8 @@ Smoke test: `node scripts/smoke.mjs` boots the real `index.html` + `app.js` in j
 - 2026-10-22 (16): Final review of full captured HTML; no further structural changes. Smoke 20/20 passing.
 - 2026-10-22 (17): Fixed #content-wrapper grid-column (3→2) after rail removal; layout no longer broken. Smoke 20/20 passing.
 - 2026-10-22 (18): Added border-right to #side-nav for the missing sidebar divider. Smoke 20/20 passing.
-- 2026-10-22 (19): Added .nojekyll to publish step to disable Jekyll on GitHub Pages. Smoke 20/20 passing. Smoke still 29/29 passing.
+- 2026-10-22 (19): Added .nojekyll to publish step to disable Jekyll on GitHub Pages. Smoke 20/20 passing.
+- 2026-10-22 (20): Fetcher now writes consolidated data/all-feeds.json so the frontend loads one file. Smoke 20/20 passing. Smoke still 29/29 passing.
 - 2026-10-22 (3): 1:1 chrome rebuild from the capture's real DOM: rail became a module switcher (removing the duplicated Today/Newsfeed/Unread/Read second nav — user complaint), sidebar panels (Feeds/Saved/Automate/Profile/placeholders), header title dropdown + ⋯ menu now owns the article-list status (All/Unread/Today/Recently read), star/read-later + Saved tab added, config.json rebuilt from the user's OPML export (6 folders/59 feeds), workflow gained a `push` trigger so their CI/CD deploys on push, smoke rewritten to deterministic fixtures (75 assertions, all passing).
 - 2026-10-22 (2): Inoreader-parity pass from the real reader capture + help center: 5 layouts, density, sort toggle, badge-click mark-read, undo toast, sidebar options menu, scroll tracking, X hide-button (34→45 assertions as chrome evolved).
 - 2026-10-22: initial build. Fetcher: rss-parser + jsdom/readability + sanitize-html. UI: single `assets/app.js`, vanilla ES2020. Data: `data/index.json` + `data/feeds/<id>.json`. Publishing: workflow force-pushes assembled `_site/` to `gh-pages`; default branch has no CI commits and ignores `data/`, `node_modules/`, `_site/`.
