@@ -50,6 +50,7 @@
   <symbol id="i-close" viewBox="0 0 24 24"><path d="M18.3 5.7 12 12l6.3 6.3-1.4 1.4L10.6 13.4 4.3 19.7 2.9 18.3 9.2 12 2.9 5.7 4.3 4.3l6.3 6.3 6.3-6.3z"/></symbol>
   <symbol id="i-menu" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></symbol>
   <symbol id="i-eye" viewBox="0 0 24 24"><path d="M12 5C6 5 2 12 2 12s4 7 10 7 10-7 10-7-4-7-10-7zm0 11a4 4 0 1 1 0-8 4 4 0 0 1 0 8zm0-2a2 2 0 1 0 0-4 2 2 0 0 0 0 4z"/></symbol>
+  <symbol id="i-bulk" viewBox="0 0 24 24"><path fill-rule="evenodd" d="M4 4h16v16H4zm2 2v12h12V6zm2.5 6.5 2.5 2.5 4.5-4.5-1.4-1.4-3.1 3.1-1.1-1.1z"/></symbol>
   <symbol id="i-eyeoff" viewBox="0 0 24 24"><path d="M2 4.3 3.3 3 21 20.7 19.7 22l-3.1-3.1A11.6 11.6 0 0 1 12 19C6 19 2 12 2 12a17 17 0 0 1 4.2-5.2zM12 17a9.6 9.6 0 0 0 5.3-1.6L6.6 5.7A9.7 9.7 0 0 0 2 12s4 7 10 7zm9-5-2-1.4A11.9 11.9 0 0 0 12 5c-.8 0-1.6.1-2.3.3l-.9-.9A13.6 13.6 0 0 1 12 4c6 0 10 8 10 8a18.5 18.5 0 0 1-1 1.6z"/></symbol>
   <symbol id="i-prev" viewBox="0 0 24 24"><path d="M15.4 7.4 14 6l-6 6 6 6 1.4-1.4L10.8 12z"/></symbol>
   <symbol id="i-next" viewBox="0 0 24 24"><path d="M8.6 16.6 10 18l6-6-6-6-1.4 1.4L13.2 12z"/></symbol>
@@ -65,65 +66,11 @@
 <div id="wraper">
   <div id="side-nav">
 
-    <nav id="tabs_pane" aria-label="Sections">
-      <ul id="top_tabs">
-        <li id="home_tab" class="nav-item">
-          <button class="tab-item" data-tab="home" title="Newsfeed">
-            <i class="tab-icon"><svg><use href="#i-logo"/></svg></i>
-            <span class="tab-label">Newsfeed</span>
-          </button>
-        </li>
-        <li id="feeds_tab" class="nav-item">
-          <button class="tab-item active" data-tab="feeds" title="Feeds">
-            <i class="tab-icon"><svg><use href="#i-feeds"/></svg></i>
-            <span class="tab-label">Feeds</span>
-            <span class="tabs-counter" id="feed_tab_counter"></span>
-          </button>
-        </li>
-        <li id="saved_tab" class="nav-item">
-          <button class="tab-item" data-tab="saved" title="Saved">
-            <i class="tab-icon"><svg><use href="#i-saved"/></svg></i>
-            <span class="tab-label">Saved</span>
-            <span class="tabs-counter" id="saved_tab_counter"></span>
-          </button>
-        </li>
-        <li id="search_tab" class="nav-item">
-          <button class="tab-item" data-tab="search" title="Search">
-            <i class="tab-icon"><svg><use href="#i-search"/></svg></i>
-            <span class="tab-label">Search</span>
-          </button>
-        </li>
-      </ul>
-      <ul id="bottom_tabs">
-        <li id="preferences_tab" class="nav-item">
-          <button class="tab-item" id="btn-settings" data-tab="settings" title="Settings">
-            <i class="tab-icon"><svg><use href="#i-sliders"/></svg></i>
-            <span class="tab-label">Settings</span>
-          </button>
-        </li>
-        <li class="nav-item tree-pane-dock-toggle">
-          <button class="tab-item" id="dock-toggle" data-tab="dock" title="Hide sidebar">
-            <i class="tab-icon"><svg><use href="#i-dock"/></svg></i>
-          </button>
-        </li>
-      </ul>
-    </nav>
 
     <div id="tree_pane">
       <div id="feeds_nav" class="nav-panel">
         <div class="sidebar-head">
           <h6 class="sidebar-heading">Feeds</h6>
-          <span class="sidebar-tools">
-            <button id="btn-manage" class="icon-btn" title="Manage content"><svg><use href="#i-settings"/></svg></button>
-            <button id="btn-new-folder" class="icon-btn" title="Create folder"><svg><use href="#i-newfolder"/></svg></button>
-            <button id="btn-sidebar-menu" class="icon-btn" title="Sidebar options"><svg><use href="#i-menu"/></svg></button>
-          </span>
-          <div id="sidebar-menu" class="dropdown dropdown-side hidden">
-            <button class="dropdown-item" data-opt="updatedOnly"><span class="check"></span>Show updated subscriptions only</button>
-            <button class="dropdown-item" data-opt="dimRead"><span class="check"></span>Dim read subscriptions</button>
-            <div class="dropdown-line"></div>
-            <button class="dropdown-item" data-opt="sortAZ"><span class="check"></span>Sort alphabetically</button>
-          </div>
         </div>
 
         <fieldset id="subscriptions_fieldset">
@@ -140,18 +87,6 @@
             </button>
           </div>
           <div id="tree"></div>
-        </fieldset>
-      </div>
-
-      <div id="saved_nav" class="nav-panel hidden">
-        <div class="sidebar-head"><h6 class="sidebar-heading">Saved</h6></div>
-        <fieldset class="sidebar_fieldset">
-          <div class="parent_div">
-            <button class="tree-item" data-scope="starred" title="Starred">
-              <i class="sys-icon"><svg><use href="#i-star"/></svg></i><span class="label">Starred</span>
-              <span class="badge" id="starred-count"></span>
-            </button>
-          </div>
         </fieldset>
       </div>
 
@@ -174,9 +109,6 @@
             <div id="title-menu" class="dropdown dropdown-title hidden">
               <button class="dropdown-item" data-title-act="properties"><span class="mi-icon"><svg><use href="#i-settings"/></svg></span>Feed properties</button>
               <button class="dropdown-item" data-title-act="startpage"><span class="check"></span>Set as start page</button>
-              <div class="dropdown-line"></div>
-              <button class="dropdown-item" data-title-act="rule"><span>Create rule</span><span class="pro-badge" title="This feature is only available to Pro users">PRO</span></button>
-              <button class="dropdown-item" data-title-act="filter"><span>Filter feed</span><span class="pro-badge" title="This feature is only available to Pro users">PRO</span></button>
             </div>
           </div>
         </div>
@@ -194,8 +126,11 @@
                 <button class="dropdown-item" data-older="3">Older than three days</button>
                 <button class="dropdown-item" data-older="7">Older than a week</button>
                 <button class="dropdown-item" data-older="14">Older than two weeks</button>
+                <button class="dropdown-item" data-older="21">Older than three weeks</button>
+                <button class="dropdown-item" data-older="28">Older than four weeks</button>
               </div>
             </div>
+
             <div id="search-wrap">
               <button id="search-open" class="icon-btn" title="Search in current section"><svg><use href="#i-search"/></svg></button>
               <div id="search-box" class="hidden">
@@ -210,15 +145,15 @@
             <div id="header-menu" class="dropdown dropdown-more hidden">
               <div class="menu-label">Article list</div>
               <div id="status-items">
-                <button class="dropdown-item" data-status="all"><span class="check"></span>All articles</button>
-                <button class="dropdown-item" data-status="unread"><span class="check"></span>Unread articles</button>
-                <button class="dropdown-item" data-status="today"><span class="check"></span>Today</button>
-                <button class="dropdown-item" data-status="recently-read"><span class="check"></span>Recently read</button>
+                <button class="dropdown-item" data-status="all"><span class="mi-icon"><svg><use href="#i-all"/></svg></span><span class="check"></span>All articles</button>
+                <button class="dropdown-item" data-status="unread"><span class="mi-icon"><svg><use href="#i-unread"/></svg></span><span class="check"></span>Unread articles</button>
+                <button class="dropdown-item" data-status="today"><span class="mi-icon"><svg><use href="#i-today"/></svg></span><span class="check"></span>Today</button>
+                <button class="dropdown-item" data-status="recently-read"><span class="mi-icon"><svg><use href="#i-read"/></svg></span><span class="check"></span>Recently read</button>
               </div>
               <div class="dropdown-line"></div>
-              <button class="dropdown-item" id="menu-select-mode"><span class="check"></span>Multiple select</button>
-              <button class="dropdown-item" id="btn-show-filtered"><span class="check"></span>Show filtered-out articles</button>
-              <button class="dropdown-item" id="menu-refresh"><span class="mi-icon"><svg><use href="#i-refresh"/></svg></span>Refresh articles</button>
+              <button class="dropdown-item" id="menu-select-mode"><span class="mi-icon"><svg><use href="#i-bulk"/></svg></span><span class="check"></span>Multiple select</button>
+              <button class="dropdown-item" id="btn-show-filtered"><span class="mi-icon"><svg><use href="#i-eye"/></svg></span><span class="check"></span>Show filtered-out articles</button>
+              <button class="dropdown-item" id="menu-refresh"><span class="mi-icon"><svg><use href="#i-refresh"/></svg></span><span class="check"></span>Refresh articles</button>
               <div class="menu-label">View</div>
               <div class="menu-pad">
                 <div class="layouts" id="layouts">
@@ -242,8 +177,8 @@
               <div class="dropdown-line"></div>
               <div class="menu-label">Sort</div>
               <div id="sort-items">
-                <button class="dropdown-item" data-sort="newest"><span class="check"></span>Newest first</button>
-                <button class="dropdown-item" data-sort="oldest"><span class="check"></span>Oldest first</button>
+                <button class="dropdown-item" data-sort="newest"><span class="mi-icon"><svg><use href="#i-sort"/></svg></span><span class="check"></span>Newest first</button>
+                <button class="dropdown-item" data-sort="oldest"><span class="mi-icon"><svg><use href="#i-sort"/></svg></span><span class="check"></span>Oldest first</button>
               </div>
             </div>
           </div>
@@ -278,51 +213,6 @@
   <button class="tool-btn" id="bulk-read"><svg><use href="#i-read"/></svg>Mark read</button>
   <button class="tool-btn" id="bulk-unread"><svg><use href="#i-unread"/></svg>Mark unread</button>
   <button class="tool-btn" id="bulk-clear">Clear</button>
-</div>
-
-<div id="settings-modal" class="modal hidden" role="dialog" aria-modal="true">
-  <div class="modal-card">
-    <div class="modal-head"><h2>Settings</h2><button class="icon-btn modal-close"><svg><use href="#i-close"/></svg></button></div>
-    <div class="modal-body">
-      <p class="hint">Feeds, folders, filters and reader defaults live in <code>config.json</code> in your repository — edit it on GitHub and it applies on next load.</p>
-      <label class="row"><span>Theme</span>
-        <select id="set-theme"><option value="auto">Auto (system)</option><option value="light">Light</option><option value="dark">Dark</option></select>
-      </label>
-      <label class="row"><span>Default layout</span>
-        <select id="set-layout"><option value="list">List</option><option value="expanded">Expanded</option><option value="column">Column</option><option value="cards">Cards</option><option value="magazine">Magazine</option></select>
-      </label>
-      <label class="row"><span>List density</span>
-        <select id="set-density"><option value="comfort">Comfort</option><option value="compact">Compact</option><option value="ultra">Ultra</option></select>
-      </label>
-      <label class="row"><span>Mark read when opened</span><input type="checkbox" id="set-markread"></label>
-      <label class="row"><span>…after (seconds)</span><input type="number" id="set-markread-delay" min="0" max="600" step="1"></label>
-      <label class="row"><span>Scroll tracking — mark read as you scroll past</span><input type="checkbox" id="set-scroll-tracking"></label>
-      <div class="modal-section">Article listing</div>
-      <label class="row"><span>Show titles only (hide descriptions)</span><input type="checkbox" id="set-titles-only"></label>
-      <label class="row"><span>Open original webpages directly</span><input type="checkbox" id="set-open-original"></label>
-      <label class="row"><span>Show feed icons in list</span><input type="checkbox" id="set-show-favicons"></label>
-      <label class="row"><span>Column view thumbnails</span><input type="checkbox" id="set-column-thumbs"></label>
-      <label class="row"><span>Multiple select (bulk actions)</span><input type="checkbox" id="set-bulk-select"></label>
-      <label class="row"><span>Auto scroll opened article to top</span><input type="checkbox" id="set-auto-scroll"></label>
-      <label class="row"><span>Use absolute dates</span><input type="checkbox" id="set-absolute-dates"></label>
-      <label class="row"><span>Article titles font size</span>
-        <select id="set-font-size"><option value="13.5px">Small</option><option value="14.5px">Medium</option><option value="16px">Large</option><option value="18px">Extra large</option></select>
-      </label>
-      <div class="modal-section">Sidebar</div>
-      <label class="row"><span>Show favicons</span><input type="checkbox" id="set-side-favicons"></label>
-      <label class="row"><span>Compact sidebar (icons only)</span><input type="checkbox" id="set-compact-sidebar"></label>
-      <label class="row"><span>Clickable unread counters</span><input type="checkbox" id="set-counters-clickable"></label>
-      <label class="row"><span>Unread count in browser tab title</span><input type="checkbox" id="set-title-counter"></label>
-      <label class="row"><span>Show "Today" in sidebar</span><input type="checkbox" id="set-show-today"></label>
-      <div class="modal-section">Subscription stats</div>
-      <div id="stats-table"></div>
-      <div class="modal-section">Data</div>
-      <label class="row"><span>Clear read state</span><button id="btn-clear-read" class="tool-btn">Clear</button></label>
-      <label class="row"><span>Export read/starred state</span><button id="btn-export-state" class="tool-btn">Export</button></label>
-      <label class="row"><span>Import read/starred state</span><input type="file" id="btn-import-state" accept="application/json" style="max-width:160px"></label>
-      <p class="hint">Read/unread/starred state is stored in this browser only (localStorage). Unread articles are kept by the fetcher until they age past <code>retentionDays</code> in config.</p>
-    </div>
-  </div>
 </div>
 
 <div id="confirm-modal" class="modal hidden" role="dialog" aria-modal="true">

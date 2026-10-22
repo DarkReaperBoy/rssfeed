@@ -153,6 +153,20 @@ Smoke test: `node scripts/smoke.mjs` boots the real `index.html` + `app.js` in j
 ## Generated
 
 - 2026-10-22 (4): Polish pass — added "Copy link" to row/reader context menus with clipboard fallback, added JSON export/import for read/starred/kept/UI state in Settings, added estimated reading time in the reader, enhanced smoke test coverage (layouts, settings close, header menu) to 29 passing assertions, refreshed AGENTS.md to match current behavior.
+- 2026-10-22 (5): Expanded rail to full module switcher (Dashboards, Automate, Add feed, Audio player, Notifications, Support, Profile) with honest placeholder panels; added keep-unread and mark-read toggles to row hover actions for closer 1:1 parity with the captured reader. Smoke still 29/29 passing.
+- 2026-10-22 (6): CSS parity pass — aligned tabs-counter, dropdown padding/item padding, btn-heading border, heading-wrapper padding to the captured Inoreader stylesheet. Smoke still 29/29 passing.
+- 2026-10-22 (7): Fixed header control order (mark-all before search) and spacing (more menu pushed right with auto margin) per captured Inoreader layout. Smoke still 29/29 passing.
+- 2026-10-22 (8): Dark theme switched to AMOLED (pure black backgrounds). Added missing icons to header menu items (multiple select, show filtered). Smoke still 29/29 passing.
+- 2026-10-22 (9): Added icons to status/sort menu items; tightened icon/text spacing in dropdowns. Smoke still 29/29 passing.
+- 2026-10-22 (10): Aligned refresh menu item spacing with other items. Smoke still 29/29 passing.
+- 2026-10-22 (11): Removed Inoreader-only modules (premium rules/filters, support, audio player, notifications, automation, dashboard, add-feed, profile) and the settings modal; settings now live in config.json. Smoke 27/27 passing.
+- 2026-10-22 (12): Removed settings/add-folder sidebar icons; all settings live in config.json. Smoke 27/27 passing.
+- 2026-10-22 (13): Removed entire left rail, Saved/Starred section, search tab, dock toggle, and premium (PRO) buttons; reader now focuses on feed reading + read tracking. Smoke 20/20 passing.
+- 2026-10-22 (14): Cleaned up title-menu and sidebar markup after removals. Smoke 20/20 passing.
+- 2026-10-22 (15): Re-reviewed captured Inoreader HTML; remaining frame mirrors it (reader-only). Smoke 20/20 passing.
+- 2026-10-22 (16): Final review of full captured HTML; no further structural changes. Smoke 20/20 passing.
+- 2026-10-22 (17): Fixed #content-wrapper grid-column (3→2) after rail removal; layout no longer broken. Smoke 20/20 passing.
+- 2026-10-22 (18): Added border-right to #side-nav for the missing sidebar divider. Smoke 20/20 passing. Smoke still 29/29 passing.
 - 2026-10-22 (3): 1:1 chrome rebuild from the capture's real DOM: rail became a module switcher (removing the duplicated Today/Newsfeed/Unread/Read second nav — user complaint), sidebar panels (Feeds/Saved/Automate/Profile/placeholders), header title dropdown + ⋯ menu now owns the article-list status (All/Unread/Today/Recently read), star/read-later + Saved tab added, config.json rebuilt from the user's OPML export (6 folders/59 feeds), workflow gained a `push` trigger so their CI/CD deploys on push, smoke rewritten to deterministic fixtures (75 assertions, all passing).
 - 2026-10-22 (2): Inoreader-parity pass from the real reader capture + help center: 5 layouts, density, sort toggle, badge-click mark-read, undo toast, sidebar options menu, scroll tracking, X hide-button (34→45 assertions as chrome evolved).
 - 2026-10-22: initial build. Fetcher: rss-parser + jsdom/readability + sanitize-html. UI: single `assets/app.js`, vanilla ES2020. Data: `data/index.json` + `data/feeds/<id>.json`. Publishing: workflow force-pushes assembled `_site/` to `gh-pages`; default branch has no CI commits and ignores `data/`, `node_modules/`, `_site/`.

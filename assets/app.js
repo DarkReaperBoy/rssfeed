@@ -21,6 +21,7 @@ const state = {
   readerTab: 'description',
   menuId: null,
   visible: [],
+  keepVisible: new Set(),
   read: loadObj(LS_READ),    // {articleId: readTs}
   kept: loadObj(LS_KEPT),    // {articleId: true} — "keep unread"
   starred: loadObj(LS_STARRED), // {articleId: feedId} — Saved → Starred (read later)
@@ -286,7 +287,7 @@ function computeVisible() {
       if (a._f.hidden && !ui.showFiltered) continue;
       const read = isRead(a);
       if (state.scope !== 'recently-read') {
-        if (ui.status === 'unread' && read) continue;
+        if (ui.status === 'unread' && read && !state.keepVisible.has(a.id) && a.id !== state.expandedId) continue;
         if (ui.status === 'read' && !read) continue;
       }
       if (state.search && !searchMatches(a, state.search)) continue;
@@ -374,10 +375,10 @@ function renderTree() {
   $('#badge-all-items').textContent = totalUnread > 0 ? String(totalUnread) : '';
   $('#parent_all_articles').classList.toggle('selected_parent', state.scope === 'all');
   const railTotal = $('#feed_tab_counter');
-  railTotal.textContent = totalUnread > 999 ? '999+' : totalUnread ? String(totalUnread) : '';
+  if (railTotal) railTotal.textContent = totalUnread > 999 ? '999+' : totalUnread ? String(totalUnread) : '';
   const starN = Object.keys(state.starred).length;
-  $('#starred-count').textContent = starN ? String(starN) : '';
-  $('#saved_tab_counter').textContent = starN ? String(starN) : '';
+  const sc = $('#starred-count'); if (sc) sc.textContent = starN ? String(starN) : '';
+  const stc = $('#saved_tab_counter'); if (stc) stc.textContent = starN ? String(starN) : '';
   $$('[data-scope]').forEach((b) => b.classList.toggle('active', b.dataset.scope === state.scope));
 }
 
@@ -427,8 +428,9 @@ function rowHtml(a) {
     </div>
     <div class="row-actions">
       <span class="dot"></span>
-      <button class="icon-btn star-btn ${state.starred[a.id] ? 'starred' : ''}" data-act="star" title="Read later (star)"><svg><use href="#i-star"/></svg></button>
-      <a class="icon-btn" href="${esc(a.link || '#')}" target="_blank" rel="noopener noreferrer" title="Open original" data-act="open-original" onclick="event.stopPropagation()"><svg><use href="#i-external"/></svg></a>
+      <a class="icon-btn" href="${esc(a.link || '#')}" target="_blank" rel="noopener noreferrer" title="Open original in new tab" data-act="open-original" onclick="event.stopPropagation()"><svg><use href="#i-external"/></svg></a>
+      <button class="icon-btn" data-act="keep" title="Keep unread"><svg><use href="#i-${isKept(a) ? 'eye' : 'eyeoff'}"/></svg></button>
+      <button class="icon-btn" data-act="toggle-read" title="Mark read/unread"><svg><use href="#i-${isRead(a) ? 'unread' : 'read'}"/></svg></button>
       <button class="icon-btn" data-act="row-menu" title="More actions"><svg><use href="#i-dots"/></svg></button>
     </div>
   </article>`;
@@ -455,12 +457,6 @@ function readerHtml(a) {
   const rt = readingTime(a);
   return `<div class="reader" data-id="${esc(a.id)}">
     <div class="reader-toolbar">
-      <button class="icon-btn star-btn ${state.starred[a.id] ? 'starred' : ''}" data-act="star" title="Read later (star)"><svg><use href="#i-star"/></svg></button>
-      <button class="icon-btn" data-act="pro" title="Add tag — Pro on the real Inoreader"><svg><use href="#i-tag"/></svg></button>
-      <button class="icon-btn" data-act="pro" title="Important / priority marker — Pro"><svg><use href="#i-circle"/></svg></button>
-      <button class="icon-btn" data-act="pro" title="AI summary — Pro on the real Inoreader"><svg><use href="#i-sparkle"/></svg></button>
-      <button class="icon-btn" data-act="pro" title="Device / reader-app view — Pro"><svg><use href="#i-device"/></svg></button>
-      <button class="icon-btn" data-act="pro" title="Text-to-speech — Pro on the real Inoreader"><svg><use href="#i-audio"/></svg></button>
       <span class="spacer"></span>
       <button class="icon-btn" data-act="prev" title="Previous article" ${idx <= 0 ? 'disabled' : ''}><svg><use href="#i-prev"/></svg></button>
       <button class="icon-btn" data-act="next" title="Next article" ${idx >= state.visible.length - 1 ? 'disabled' : ''}><svg><use href="#i-next"/></svg></button>
@@ -475,12 +471,6 @@ function readerHtml(a) {
       <span title="${esc(fullTime(a.date))}">${esc(relTime(a.date))}</span>
       ${rt ? `<span>${esc(rt)}</span>` : ''}
     </div>
-    <div class="reader-mentions">
-      <span class="node-ic"><svg><use href="#i-node"/></svg></span>
-      <span>Mentions</span>
-      <span class="pro-badge" title="AI entity mentions are computed on Inoreader's servers (Pro)">PRO</span>
-      <button class="see-all" data-act="pro">See all</button>
-    </div>
     ${readerBodyHtml(a, tab)}
     ${attachmentsHtml(a)}
     <div class="reader-tabs">
@@ -488,7 +478,6 @@ function readerHtml(a) {
       <button class="reader-tab pro ${tab === 'transcript' ? 'active' : ''}" data-act="rtab" data-rtab="transcript" title="Auto transcripts are generated on Inoreader's servers (Pro)"><svg><use href="#i-list"/></svg>Transcript</button>
       <button class="reader-tab pro ${tab === 'topics' ? 'active' : ''}" data-act="rtab" data-rtab="topics" title="Topic extraction runs on Inoreader's servers (Pro)"><svg><use href="#i-node"/></svg>Topics</button>
       <button class="reader-tab ${tab === 'article' ? 'active' : ''}" data-act="rtab" data-rtab="article" title="Extracted article text"><svg><use href="#i-markread"/></svg>Article</button>
-      <button class="reader-upgrade" data-act="pro" title="Plans live on the real Inoreader"><svg><use href="#i-shield"/></svg>Upgrade now</button>
     </div>
   </div>`;
 }
@@ -678,7 +667,7 @@ function collectScopeIds(scope, olderDays = 0) {
   }
   return ids;
 }
-const OLDER_LABELS = { 1: 'a day', 2: 'two days', 3: 'three days', 7: 'a week', 14: 'two weeks' };
+const OLDER_LABELS = { 1: 'a day', 2: 'two days', 3: 'three days', 7: 'a week', 14: 'two weeks', 21: 'three weeks', 28: 'four weeks' };
 function markScopeRead(scope, olderDays = 0) {
   const ids = collectScopeIds(scope, olderDays);
   if (!ids.length) {
@@ -791,7 +780,6 @@ function openRowMenu(a, e) {
     <button class="dropdown-item" data-act="keep"><span class="mi-icon"><svg><use href="#i-${isKept(a) ? 'eye' : 'eyeoff'}"/></svg></span>${isKept(a) ? 'Allow auto mark-read' : 'Keep unread'}</button>
     <button class="dropdown-item" data-act="hide-read"><span class="mi-icon"><svg><use href="#i-close"/></svg></span>Mark as read and hide</button>
     <div class="dropdown-line"></div>
-    <button class="dropdown-item" data-act="star"><span class="mi-icon"><svg><use href="#i-star"/></svg></span>${state.starred[a.id] ? 'Remove star' : 'Star (read later)'}</button>
     ${a.link ? `<button class="dropdown-item" data-act="copy-link"><span class="mi-icon"><svg><use href="#i-external"/></svg></span>Copy link</button>` : ''}
     ${a.link ? `<a class="dropdown-item" href="${esc(a.link)}" target="_blank" rel="noopener noreferrer"><span class="mi-icon"><svg><use href="#i-external"/></svg></span>Open original in new tab</a>` : ''}`;
   el.classList.remove('hidden');
@@ -829,6 +817,7 @@ function onListClick(e) {
     scheduleMarkRead(a);
     return;
   }
+  if (state.expandedId && state.expandedId !== id) state.keepVisible.add(state.expandedId);
   if (state.expandedId === id) { state.expandedId = null; renderList(); return; }
   state.expandedId = id;
   state.readerTab = 'description';
@@ -881,6 +870,7 @@ function bindEvents() {
     if (scopeBtn) {
       state.scope = scopeBtn.dataset.scope;
       state.expandedId = null;
+      state.keepVisible.clear();
       document.body.classList.remove('sidebar-open');
       if (scopeBtn.dataset.folder) { // folder click also toggles expansion
         ui.openFolders[scopeBtn.dataset.folder] = !scopeBtn.parentElement.classList.contains('open');
@@ -949,9 +939,9 @@ function bindEvents() {
     if (!item) return;
     ui.sortDir = item.dataset.sort; saveUi(); syncControls(); renderList();
   });
-  $('#btn-sidebar-menu').addEventListener('click', (e) => {
+  $('#btn-sidebar-menu')?.addEventListener('click', (e) => {
     e.stopPropagation();
-    $('#sidebar-menu').classList.toggle('hidden');
+    $('#sidebar-menu')?.classList.toggle('hidden');
     syncSidebarMenu();
   });
 
@@ -988,7 +978,7 @@ function bindEvents() {
       document.addEventListener('mouseup', up);
     });
   }
-  $('#sidebar-menu').addEventListener('click', (e) => {
+  $('#sidebar-menu')?.addEventListener('click', (e) => {
     const item = e.target.closest('[data-opt]');
     if (!item) return;
     ui[item.dataset.opt] = !ui[item.dataset.opt];
@@ -1002,7 +992,7 @@ function bindEvents() {
   $('#scrim').addEventListener('click', () => { document.body.classList.remove('sidebar-open'); $('#scrim').classList.add('hidden'); });
 
   // Rail: module tabs
-  $('#tabs_pane').addEventListener('click', (e) => {
+  $('#tabs_pane')?.addEventListener('click', (e) => {
     const btn = e.target.closest('[data-tab]');
     if (!btn) return;
     e.stopPropagation();
@@ -1018,21 +1008,21 @@ function bindEvents() {
     const item = e.target.closest('[data-title-act]');
     if (!item) return;
     $('#title-menu').classList.add('hidden');
-    if (item.dataset.titleAct === 'properties') openSettings();
+    if (item.dataset.titleAct === 'properties') showToast('Reader preferences are configured in config.json');
     else showToast('Pro feature on the real Inoreader — not available offline.');
   });
-  $('.modal-close').addEventListener('click', closeModals);
-  $('#settings-modal').addEventListener('click', (e) => { if (e.target.id === 'settings-modal') closeModals(); });
+  $('.modal-close')?.addEventListener('click', closeModals);
+  const sm = $('#settings-modal'); if (sm) sm.addEventListener('click', (e) => { if (e.target.id === 'settings-modal') closeModals(); });
 
-  $('#set-theme').addEventListener('change', (e) => { ui.theme = e.target.value; saveUi(); applyTheme(); });
-  $('#set-layout').addEventListener('change', (e) => { ui.layout = e.target.value; saveUi(); syncControls(); renderList(); });
-  $('#set-markread').addEventListener('change', (e) => { ui.markReadOnOpen = e.target.checked; saveUi(); });
-  $('#set-markread-delay').addEventListener('change', (e) => { ui.markReadAfterSeconds = Math.max(0, Number(e.target.value) || 0); saveUi(); });
-  $('#set-density').addEventListener('change', (e) => { ui.density = e.target.value; saveUi(); renderList(); });
-  $('#set-scroll-tracking').addEventListener('change', (e) => { ui.scrollTracking = e.target.checked; saveUi(); setupScrollTracking(); });
-  const bindBool = (sel, key, after) => $(sel).addEventListener('change', (e) => {
+  $('#set-theme')?.addEventListener('change', (e) => { ui.theme = e.target.value; saveUi(); applyTheme(); });
+  $('#set-layout')?.addEventListener('change', (e) => { ui.layout = e.target.value; saveUi(); syncControls(); renderList(); });
+  $('#set-markread')?.addEventListener('change', (e) => { ui.markReadOnOpen = e.target.checked; saveUi(); });
+  $('#set-markread-delay')?.addEventListener('change', (e) => { ui.markReadAfterSeconds = Math.max(0, Number(e.target.value) || 0); saveUi(); });
+  $('#set-density')?.addEventListener('change', (e) => { ui.density = e.target.value; saveUi(); renderList(); });
+  $('#set-scroll-tracking')?.addEventListener('change', (e) => { ui.scrollTracking = e.target.checked; saveUi(); setupScrollTracking(); });
+  const bindBool = (sel, key, after) => { const el = $(sel); if (el) el.addEventListener('change', (e) => {
     ui[key] = e.target.checked; saveUi(); syncControls(); (after || renderList)();
-  });
+  }); };
   bindBool('#set-titles-only', 'titlesOnly');
   bindBool('#set-open-original', 'openOriginal');
   bindBool('#set-show-favicons', 'showFavicons');
@@ -1043,20 +1033,20 @@ function bindEvents() {
   bindBool('#set-compact-sidebar', 'compactSidebar', applySidebarMode);
   bindBool('#set-counters-clickable', 'countersClickable');
   bindBool('#set-show-today', 'showToday', renderAll);
-  $('#set-bulk-select').addEventListener('change', (e) => {
+  $('#set-bulk-select')?.addEventListener('change', (e) => {
     ui.bulkSelect = e.target.checked; saveUi(); state.bulkSel.clear(); syncControls(); renderList();
   });
-  $('#set-font-size').addEventListener('change', (e) => { ui.fontSize = e.target.value; saveUi(); syncControls(); });
+  $('#set-font-size')?.addEventListener('change', (e) => { ui.fontSize = e.target.value; saveUi(); syncControls(); });
 
   $('#bulk-read').addEventListener('click', () => bulkMark(true));
   $('#bulk-unread').addEventListener('click', () => bulkMark(false));
   $('#bulk-clear').addEventListener('click', () => { state.bulkSel.clear(); renderList(); });
-  $('#btn-clear-read').addEventListener('click', () => {
+  $('#btn-clear-read')?.addEventListener('click', () => {
     confirmDialog('Clear read state', 'Reset every article back to unread in this browser?', () => {
       state.read = {}; saveRead(); renderAll();
     });
   });
-  $('#btn-export-state').addEventListener('click', () => {
+  $('#btn-export-state')?.addEventListener('click', () => {
     try {
       const data = {
         version: 1,
@@ -1078,7 +1068,7 @@ function bindEvents() {
       showToast('Failed to export state');
     }
   });
-  $('#btn-import-state').addEventListener('change', async (e) => {
+  $('#btn-import-state')?.addEventListener('change', async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     try {
@@ -1120,7 +1110,6 @@ function closeSearchFn() {
 }
 function switchTab(tab) {
   if (tab === 'dock') { document.body.classList.toggle('sidebar-collapsed'); return; }
-  if (tab === 'settings') { openSettings(); return; }
   if (tab === 'search') { openSearchFn(); return; }
   state.railTab = tab;
   if (tab === 'home') { state.scope = 'all'; state.expandedId = null; }
@@ -1129,7 +1118,7 @@ function switchTab(tab) {
     state.scope = 'starred'; state.expandedId = null;
     loadAllFeeds(() => { renderTree(); renderList(); });
   }
-  const panel = tab === 'saved' ? 'saved_nav' : (tab === 'feeds' || tab === 'home') ? 'feeds_nav' : null;
+  const panel = tab === 'saved' ? 'saved_nav' : 'feeds_nav';
   for (const id of ['feeds_nav', 'saved_nav']) {
     const el = document.getElementById(id);
     if (el) el.classList.toggle('hidden', id !== panel);
@@ -1145,12 +1134,12 @@ function syncControls() {
   $('#date-range').value = ui.dateRange;
   $('#btn-show-filtered').classList.toggle('on', ui.showFiltered);
   $('#menu-select-mode').classList.toggle('on', !!ui.bulkSelect);
-  $('#set-theme').value = ui.theme;
-  $('#set-layout').value = ui.layout;
-  $('#set-density').value = ui.density || 'comfort';
-  $('#set-markread').checked = !!ui.markReadOnOpen;
-  $('#set-markread-delay').value = ui.markReadAfterSeconds || 0;
-  $('#set-scroll-tracking').checked = !!ui.scrollTracking;
+  if ($('#set-theme')) $('#set-theme').value = ui.theme;
+  if ($('#set-layout')) $('#set-layout').value = ui.layout;
+  if ($('#set-density')) $('#set-density').value = ui.density || 'comfort';
+  if ($('#set-markread')) $('#set-markread').checked = !!ui.markReadOnOpen;
+  if ($('#set-markread-delay')) $('#set-markread-delay').value = ui.markReadAfterSeconds || 0;
+  if ($('#set-scroll-tracking')) $('#set-scroll-tracking').checked = !!ui.scrollTracking;
   const bools = {
     '#set-titles-only': 'titlesOnly', '#set-open-original': 'openOriginal',
     '#set-show-favicons': 'showFavicons', '#set-column-thumbs': 'columnThumbs',
@@ -1160,7 +1149,7 @@ function syncControls() {
     '#set-title-counter': 'titleCounter', '#set-show-today': 'showToday',
   };
   for (const [sel, key] of Object.entries(bools)) { const el = $(sel); if (el) el.checked = !!ui[key]; }
-  $('#set-font-size').value = ui.fontSize || '14.5px';
+  if ($('#set-font-size')) $('#set-font-size').value = ui.fontSize || '14.5px';
   document.documentElement.style.setProperty('--title-size', ui.fontSize || '14.5px');
   applySidebarMode();
   syncSidebarMenu();
@@ -1216,9 +1205,13 @@ async function refresh(manual = false) {
     const index = await fetchJson('data/index.json');
     const changed = index.generatedAt !== state.index?.generatedAt;
     state.index = index;
-    // reload loaded feeds (new articles), keep the rest lazy
-    const loaded = [...state.feeds.keys()];
-    for (const id of loaded) { state.feeds.delete(id); await loadFeed(id); }
+    // Prefer the consolidated single-request payload for speed.
+    const consolidated = await loadConsolidatedIntoState();
+    if (!consolidated) {
+      // reload loaded feeds (new articles), keep the rest lazy
+      const loaded = [...state.feeds.keys()];
+      for (const id of loaded) { state.feeds.delete(id); await loadFeed(id); }
+    }
     if (changed || manual) { renderAll(); flashUpdated(); }
   } catch (err) {
     if (manual) flashUpdated('offline — showing last data');
@@ -1241,6 +1234,40 @@ async function ensureScopeLoaded() {
   renderAll();
 }
 
+/* ---------------- consolidated (all-feeds.json) loader ---------------- */
+async function loadConsolidatedIntoState() {
+  try {
+    const allData = await fetchJson('data/all-feeds.json');
+    if (!Array.isArray(allData?.articles) || !allData.articles.length || !state.index?.feeds) return false;
+    const grouped = new Map();
+    for (const a of allData.articles) {
+      const feedId = a._feed;
+      if (!feedId) continue;
+      if (!grouped.has(feedId)) grouped.set(feedId, []);
+      grouped.get(feedId).push(a);
+    }
+    state.feeds = new Map();
+    for (const [feedId, arts] of grouped.entries()) {
+      applyFiltersToFeed(feedId, arts);
+      state.feeds.set(feedId, arts);
+    }
+    const feedsMeta = { ...state.index.feeds };
+    for (const [feedId, arts] of state.feeds.entries()) {
+      const meta = feedsMeta[feedId];
+      if (meta) {
+        const sorted = [...arts].sort((x, y) => y.date - x.date);
+        meta.count = arts.length;
+        meta.newest = sorted[0]?.date || meta.newest;
+        meta.oldest = sorted[sorted.length - 1]?.date || meta.oldest;
+      }
+    }
+    state.index = { ...state.index, feeds: feedsMeta };
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /* ---------------- boot ---------------- */
 async function boot() {
   applyTheme();
@@ -1253,6 +1280,10 @@ async function boot() {
       if (s.view) ui.layout = s.view;
       ui.markReadOnOpen = s.markReadOnOpen !== false;
       ui.markReadAfterSeconds = Number(s.markReadAfterSeconds) || 0;
+      // Allow any config setting that maps to a UI pref to act as a default.
+      for (const [k, v] of Object.entries(s)) {
+        if (Object.prototype.hasOwnProperty.call(ui, k) && k !== 'view') ui[k] = v;
+      }
       saveUi();
     }
     baseTitle = state.config.settings?.siteName || 'My Inoreader';
@@ -1266,6 +1297,8 @@ async function boot() {
   }
   try {
     state.index = await fetchJson('data/index.json');
+    const consolidated = await loadConsolidatedIntoState();
+    if (consolidated) console.log(`Loaded consolidated all-feeds.json`);
   } catch {
     state.index = null;
   }

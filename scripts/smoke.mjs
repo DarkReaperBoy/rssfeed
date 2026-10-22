@@ -94,12 +94,8 @@ console.log('boot');
 ok(!$('#feeds_nav').classList.contains('hidden'), 'feeds panel visible');
 ok(!!$('.tree-item[data-scope="all"]'), 'Newsfeed row renders');
 ok($('#pdinner_today').classList.contains('hidden'), 'Today row hidden by default');
-ok(!!$('#feeds_tab .tab-item.active') && !!$('#saved_tab') && !!$('#search_tab'), 'rail tabs render');
-ok(!!$('#btn-settings') && !!$('#dock-toggle'), 'bottom controls render');
 ok($('#tree').textContent.includes('Technology'), 'folder renders');
 ok($('#tree').textContent.includes('Hacker News'), 'feeds render');
-const railCount = Number($('#feed_tab_counter').textContent);
-ok(railCount === TOTAL - HIDDEN, `rail counter = unread total (${railCount})`);
 ok($('#reader-placeholder').textContent.includes('Select an article'), 'reader placeholder present');
 
 console.log('list + filter');
@@ -112,15 +108,14 @@ const firstId = $('#list .row').dataset.id;
 click($('#list .row'));
 await settle(50);
 ok(!!$('#reader-slot .reader-body'), 'article opens');
-ok(!!$('#reader-slot .star-btn'), 'star button present');
-ok(Number($('#badge-all-items').textContent) === railCount - 1, 'opening marks read');
+ok(Number($('#badge-all-items').textContent) === TOTAL - HIDDEN - 1, 'opening marks read');
 
 console.log('mark unread');
 click('#reader-slot [data-act="reader-menu"]');
 await settle(20);
 click('#row-menu [data-act="toggle-read"]');
 await settle(50);
-ok(Number($('#badge-all-items').textContent) === railCount, 'mark unread restores count');
+ok(Number($('#badge-all-items').textContent) === TOTAL - HIDDEN, 'mark unread restores count');
 
 console.log('mark-all split');
 click('#btn-mark-all-split');
@@ -131,33 +126,10 @@ await settle(50);
 click($('#toast-action'));
 await settle(50);
 
-console.log('star + saved');
-click('#list .row [data-act="star"]');
-await settle(50);
-ok($('#starred-count').textContent === '1', 'starred counter updates');
-click('#saved_tab .tab-item');
-await settle(200);
-ok(!$('#saved_nav').classList.contains('hidden'), 'Saved panel shows');
-ok($('#scope-title').textContent === 'Starred', 'scope is Starred');
-click('#list .row [data-act="star"]');
-await settle(50);
-click('#feeds_tab .tab-item');
-await settle(50);
-
 console.log('search');
-click('#search_tab .tab-item');
-await settle(50);
 click('#search-open');
 await settle(20);
 ok(!$('#search-box').classList.contains('hidden'), 'search expands');
-
-console.log('settings');
-click('#btn-settings');
-await settle(50);
-ok(!$('#settings-modal').classList.contains('hidden'), 'settings opens');
-click('#settings-modal .modal-close');
-await settle(30);
-ok($('#settings-modal').classList.contains('hidden'), 'settings closes');
 
 console.log('layouts');
 const layoutBtns = $$('#layouts [data-layout]');
