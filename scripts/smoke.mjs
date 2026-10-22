@@ -111,9 +111,7 @@ ok(!!$('#reader-slot .reader-body'), 'article opens');
 ok(Number($('#badge-all-items').textContent) === TOTAL - HIDDEN - 1, 'opening marks read');
 
 console.log('mark unread');
-click('#reader-slot [data-act="reader-menu"]');
-await settle(20);
-click('#row-menu [data-act="toggle-read"]');
+click(`#list .row[data-id="${firstId}"] [data-act="toggle-read"]`);
 await settle(50);
 ok(Number($('#badge-all-items').textContent) === TOTAL - HIDDEN, 'mark unread restores count');
 
@@ -160,4 +158,5 @@ await settle(20);
 
 console.log('');
 console.log(`${pass} passed, ${fail} failed`);
+dom.window.close();
 process.exit(fail ? 1 : 0);

@@ -374,11 +374,6 @@ function renderTree() {
   $('#badge-today').textContent = todayN > 0 ? String(todayN) : '';
   $('#badge-all-items').textContent = totalUnread > 0 ? String(totalUnread) : '';
   $('#parent_all_articles').classList.toggle('selected_parent', state.scope === 'all');
-  const railTotal = $('#feed_tab_counter');
-  if (railTotal) railTotal.textContent = totalUnread > 999 ? '999+' : totalUnread ? String(totalUnread) : '';
-  const starN = Object.keys(state.starred).length;
-  const sc = $('#starred-count'); if (sc) sc.textContent = starN ? String(starN) : '';
-  const stc = $('#saved_tab_counter'); if (stc) stc.textContent = starN ? String(starN) : '';
   $$('[data-scope]').forEach((b) => b.classList.toggle('active', b.dataset.scope === state.scope));
 }
 
@@ -431,23 +426,26 @@ function rowHtml(a) {
       <a class="icon-btn" href="${esc(a.link || '#')}" target="_blank" rel="noopener noreferrer" title="Open original in new tab" data-act="open-original" onclick="event.stopPropagation()"><svg><use href="#i-external"/></svg></a>
       <button class="icon-btn" data-act="keep" title="Keep unread"><svg><use href="#i-${isKept(a) ? 'eye' : 'eyeoff'}"/></svg></button>
       <button class="icon-btn" data-act="toggle-read" title="Mark read/unread"><svg><use href="#i-${isRead(a) ? 'unread' : 'read'}"/></svg></button>
-      <button class="icon-btn" data-act="row-menu" title="More actions"><svg><use href="#i-dots"/></svg></button>
     </div>
   </article>`;
 }
-function articleBody(a) {
-  return a.content || a.text || `<p>${esc(a.summary || '')}</p>`;
+function ytId(url) {
+  const m = String(url || '').match(/(?:youtube\.com\/(?:watch\?.*?v=|embed\/|shorts\/)|youtu\.be\/)([\w-]{11})/);
+  return m ? m[1] : null;
 }
-const PRO_NOTES = {
-  transcript: 'Transcripts are generated on Inoreader\u2019s servers (Pro feature) — not available in this offline reader.',
-  topics: 'Topic extraction runs on Inoreader\u2019s servers (Pro feature) — not available offline.',
-};
+function articleBody(a) {
+  let html = a.content || a.text || `<p>${esc(a.summary || '')}</p>`;
+  // Ensure the main video is embeddable for YouTube articles.
+  if (a.link && ytId(a.link) && !html.includes(a.link)) {
+    html = `<p><a href="${esc(a.link)}">${esc(a.title || '')}</a></p>` + html;
+  }
+  return html;
+}
 function readerBodyHtml(a, tab) {
   if (tab === 'article') {
     return a.text ? `<div class="reader-body">${a.text}</div>`
-      : '<div class="reader-pro-note">No extracted article text for this item — the hourly fetch only extracts when the source page allows it.</div>';
+      : '<div class="reader-pro-note">No extracted article text for this item.</div>';
   }
-  if (tab !== 'description') return `<div class="reader-pro-note">${PRO_NOTES[tab] || ''}</div>`;
   return `<div class="reader-body">${articleBody(a)}</div>`;
 }
 function readerHtml(a) {
@@ -461,7 +459,6 @@ function readerHtml(a) {
       <button class="icon-btn" data-act="prev" title="Previous article" ${idx <= 0 ? 'disabled' : ''}><svg><use href="#i-prev"/></svg></button>
       <button class="icon-btn" data-act="next" title="Next article" ${idx >= state.visible.length - 1 ? 'disabled' : ''}><svg><use href="#i-next"/></svg></button>
       <a class="icon-btn" href="${esc(a.link || '#')}" target="_blank" rel="noopener noreferrer" title="Open original" data-act="open-original"><svg><use href="#i-external"/></svg></a>
-      <button class="icon-btn" data-act="reader-menu" title="More actions"><svg><use href="#i-dots"/></svg></button>
       <button class="icon-btn" data-act="collapse" title="Close reader"><svg><use href="#i-close"/></svg></button>
     </div>
     <h2 class="reader-title">${esc(a.title)}</h2>
@@ -475,8 +472,6 @@ function readerHtml(a) {
     ${attachmentsHtml(a)}
     <div class="reader-tabs">
       <button class="reader-tab ${tab === 'description' ? 'active' : ''}" data-act="rtab" data-rtab="description"><svg><use href="#i-all"/></svg>Description</button>
-      <button class="reader-tab pro ${tab === 'transcript' ? 'active' : ''}" data-act="rtab" data-rtab="transcript" title="Auto transcripts are generated on Inoreader's servers (Pro)"><svg><use href="#i-list"/></svg>Transcript</button>
-      <button class="reader-tab pro ${tab === 'topics' ? 'active' : ''}" data-act="rtab" data-rtab="topics" title="Topic extraction runs on Inoreader's servers (Pro)"><svg><use href="#i-node"/></svg>Topics</button>
       <button class="reader-tab ${tab === 'article' ? 'active' : ''}" data-act="rtab" data-rtab="article" title="Extracted article text"><svg><use href="#i-markread"/></svg>Article</button>
     </div>
   </div>`;
@@ -639,7 +634,8 @@ function findArticle(id) {
 function scheduleMarkRead(a) {
   clearTimeout(state.markTimers.get(a.id));
   state.markTimers.delete(a.id);
-  const delay = (Number(ui.markReadOnOpen ? ui.markReadAfterSeconds : 0) || 0) * 1000;
+  if (!ui.markReadOnOpen) return; // opening does not mark read when disabled
+  const delay = (Number(ui.markReadAfterSeconds) || 0) * 1000;
   const run = () => {
     state.markTimers.delete(a.id);
     if (!isRead(a) && !isKept(a) && !a._f?.keepUnread) { state.read[a.id] = Date.now(); saveRead(); renderTree(); renderList(); }
@@ -701,6 +697,8 @@ function bulkMark(on) {
   const snapshot = ids.map((id) => ({ id, ts: state.read[id] }));
   let n = 0;
   for (const id of ids) {
+    const a = findArticle(id);
+    if (on && (isKept(a) || a?._f?.keepUnread)) continue;
     if (on) state.read[id] = Date.now(); else delete state.read[id];
     n++;
   }
@@ -737,10 +735,6 @@ function dispatchAct(act, id, el, e) {
     renderList();
   }
   else if (act === 'keep') { if (state.kept[id]) delete state.kept[id]; else state.kept[id] = true; saveKept(); renderList(); }
-  else if (act === 'star') {
-    if (state.starred[id]) delete state.starred[id]; else state.starred[id] = a._feed;
-    saveStarred(); renderTree(); renderList();
-  }
   else if (act === 'copy-link') {
     if (a.link) {
       try {
@@ -758,9 +752,7 @@ function dispatchAct(act, id, el, e) {
   }
   else if (act === 'open-original') { /* anchor handles it */ }
   else if (act === 'collapse') { state.expandedId = null; renderList(); }
-  else if (act === 'row-menu' || act === 'reader-menu') openRowMenu(a, e);
   else if (act === 'rtab') { state.readerTab = el?.dataset?.rtab || 'description'; renderList(); }
-  else if (act === 'pro') showToast('Pro feature on the real Inoreader — runs on their servers, not available offline.');
   else if (act === 'prev' || act === 'next') {
     const i = state.visible.indexOf(a);
     const target = state.visible[act === 'prev' ? i - 1 : i + 1];
@@ -771,26 +763,6 @@ function dispatchAct(act, id, el, e) {
   }
 }
 
-function openRowMenu(a, e) {
-  const el = $('#row-menu');
-  const read = isRead(a);
-  state.menuId = a.id;
-  el.innerHTML = `
-    <button class="dropdown-item" data-act="toggle-read"><span class="mi-icon"><svg><use href="#i-${read ? 'unread' : 'read'}"/></svg></span>${read ? 'Mark unread' : 'Mark as read'}</button>
-    <button class="dropdown-item" data-act="keep"><span class="mi-icon"><svg><use href="#i-${isKept(a) ? 'eye' : 'eyeoff'}"/></svg></span>${isKept(a) ? 'Allow auto mark-read' : 'Keep unread'}</button>
-    <button class="dropdown-item" data-act="hide-read"><span class="mi-icon"><svg><use href="#i-close"/></svg></span>Mark as read and hide</button>
-    <div class="dropdown-line"></div>
-    ${a.link ? `<button class="dropdown-item" data-act="copy-link"><span class="mi-icon"><svg><use href="#i-external"/></svg></span>Copy link</button>` : ''}
-    ${a.link ? `<a class="dropdown-item" href="${esc(a.link)}" target="_blank" rel="noopener noreferrer"><span class="mi-icon"><svg><use href="#i-external"/></svg></span>Open original in new tab</a>` : ''}`;
-  el.classList.remove('hidden');
-  const r = el.getBoundingClientRect();
-  const w = r.width || 240, h = r.height || 210;
-  const x = Math.min(e?.clientX ?? 120, (window.innerWidth || 1280) - w - 8);
-  const y = Math.min(e?.clientY ?? 120, (window.innerHeight || 800) - h - 8);
-  el.style.left = `${Math.max(6, x)}px`;
-  el.style.top = `${Math.max(6, y)}px`;
-}
-function closeRowMenu() { $('#row-menu')?.classList.add('hidden'); }
 
 function onListClick(e) {
   const rowEl = e.target.closest('.row');
@@ -843,14 +815,6 @@ function bindEvents() {
     e.stopPropagation();
     dispatchAct(actBtn.dataset.act, state.expandedId, actBtn, e);
   });
-  $('#row-menu').addEventListener('click', (e) => {
-    const item = e.target.closest('[data-act]');
-    if (!item) return;
-    e.stopPropagation();
-    if (item.tagName === 'A') { closeRowMenu(); return; }
-    dispatchAct(item.dataset.act, state.menuId, item, e);
-    closeRowMenu();
-  });
   $('#scroll-up').addEventListener('click', () => { const l = $('#list'); l.scrollTop -= Math.max(120, l.clientHeight * 0.85); });
   $('#scroll-down').addEventListener('click', () => { const l = $('#list'); l.scrollTop += Math.max(120, l.clientHeight * 0.85); });
 
@@ -859,7 +823,6 @@ function bindEvents() {
     if (!e.target.closest('#header-menu') && !e.target.closest('#btn-more')) $('#header-menu')?.classList.add('hidden');
     if (!e.target.closest('#title-menu') && !e.target.closest('#btn-title-menu')) $('#title-menu')?.classList.add('hidden');
     if (!e.target.closest('#mark-menu') && !e.target.closest('#btn-mark-all-split')) $('#mark-menu')?.classList.add('hidden');
-    if (!e.target.closest('#row-menu') && !e.target.closest('[data-act="row-menu"]') && !e.target.closest('[data-act="reader-menu"]')) closeRowMenu();
     const markBtn = e.target.closest('[data-markread]');
     if (markBtn) {
       e.stopPropagation();
@@ -939,11 +902,6 @@ function bindEvents() {
     if (!item) return;
     ui.sortDir = item.dataset.sort; saveUi(); syncControls(); renderList();
   });
-  $('#btn-sidebar-menu')?.addEventListener('click', (e) => {
-    e.stopPropagation();
-    $('#sidebar-menu')?.classList.toggle('hidden');
-    syncSidebarMenu();
-  });
 
   // header: expanding search (their search-input-wrapper behavior)
   $('#search-open').addEventListener('click', openSearchFn);
@@ -978,12 +936,6 @@ function bindEvents() {
       document.addEventListener('mouseup', up);
     });
   }
-  $('#sidebar-menu')?.addEventListener('click', (e) => {
-    const item = e.target.closest('[data-opt]');
-    if (!item) return;
-    ui[item.dataset.opt] = !ui[item.dataset.opt];
-    saveUi(); syncSidebarMenu(); renderTree();
-  });
 
   $('#menu-toggle').addEventListener('click', () => {
     document.body.classList.toggle('sidebar-open');
@@ -991,15 +943,6 @@ function bindEvents() {
   });
   $('#scrim').addEventListener('click', () => { document.body.classList.remove('sidebar-open'); $('#scrim').classList.add('hidden'); });
 
-  // Rail: module tabs
-  $('#tabs_pane')?.addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-tab]');
-    if (!btn) return;
-    e.stopPropagation();
-    switchTab(btn.dataset.tab);
-  });
-  $('#btn-manage')?.addEventListener('click', () => showToast('Subscriptions live in config.json — edit it on GitHub and the next fetch applies it.'));
-  $('#btn-new-folder')?.addEventListener('click', () => showToast('Folders live in config.json — add a folder there and assign feeds to it.'));
   $('#btn-title-menu').addEventListener('click', (e) => {
     e.stopPropagation();
     $('#title-menu').classList.toggle('hidden');
@@ -1009,35 +952,7 @@ function bindEvents() {
     if (!item) return;
     $('#title-menu').classList.add('hidden');
     if (item.dataset.titleAct === 'properties') showToast('Reader preferences are configured in config.json');
-    else showToast('Pro feature on the real Inoreader — not available offline.');
   });
-  $('.modal-close')?.addEventListener('click', closeModals);
-  const sm = $('#settings-modal'); if (sm) sm.addEventListener('click', (e) => { if (e.target.id === 'settings-modal') closeModals(); });
-
-  $('#set-theme')?.addEventListener('change', (e) => { ui.theme = e.target.value; saveUi(); applyTheme(); });
-  $('#set-layout')?.addEventListener('change', (e) => { ui.layout = e.target.value; saveUi(); syncControls(); renderList(); });
-  $('#set-markread')?.addEventListener('change', (e) => { ui.markReadOnOpen = e.target.checked; saveUi(); });
-  $('#set-markread-delay')?.addEventListener('change', (e) => { ui.markReadAfterSeconds = Math.max(0, Number(e.target.value) || 0); saveUi(); });
-  $('#set-density')?.addEventListener('change', (e) => { ui.density = e.target.value; saveUi(); renderList(); });
-  $('#set-scroll-tracking')?.addEventListener('change', (e) => { ui.scrollTracking = e.target.checked; saveUi(); setupScrollTracking(); });
-  const bindBool = (sel, key, after) => { const el = $(sel); if (el) el.addEventListener('change', (e) => {
-    ui[key] = e.target.checked; saveUi(); syncControls(); (after || renderList)();
-  }); };
-  bindBool('#set-titles-only', 'titlesOnly');
-  bindBool('#set-open-original', 'openOriginal');
-  bindBool('#set-show-favicons', 'showFavicons');
-  bindBool('#set-column-thumbs', 'columnThumbs');
-  bindBool('#set-auto-scroll', 'autoScroll');
-  bindBool('#set-absolute-dates', 'absoluteDates');
-  bindBool('#set-side-favicons', 'sideFavicons', applySidebarMode);
-  bindBool('#set-compact-sidebar', 'compactSidebar', applySidebarMode);
-  bindBool('#set-counters-clickable', 'countersClickable');
-  bindBool('#set-show-today', 'showToday', renderAll);
-  $('#set-bulk-select')?.addEventListener('change', (e) => {
-    ui.bulkSelect = e.target.checked; saveUi(); state.bulkSel.clear(); syncControls(); renderList();
-  });
-  $('#set-font-size')?.addEventListener('change', (e) => { ui.fontSize = e.target.value; saveUi(); syncControls(); });
-
   $('#bulk-read').addEventListener('click', () => bulkMark(true));
   $('#bulk-unread').addEventListener('click', () => bulkMark(false));
   $('#bulk-clear').addEventListener('click', () => { state.bulkSel.clear(); renderList(); });
@@ -1096,9 +1011,6 @@ function applySidebarMode() {
   document.body.classList.toggle('compact-sidebar', !!ui.compactSidebar);
   document.body.classList.toggle('hide-side-favicons', !ui.sideFavicons);
 }
-function syncSidebarMenu() {
-  $$('#sidebar-menu [data-opt]').forEach((el) => el.classList.toggle('on', !!ui[el.dataset.opt]));
-}
 function openSearchFn() {
   $('#search-box').classList.remove('hidden');
   $('#search-open').classList.add('hidden');
@@ -1107,24 +1019,6 @@ function openSearchFn() {
 function closeSearchFn() {
   $('#search-box').classList.add('hidden');
   $('#search-open').classList.remove('hidden');
-}
-function switchTab(tab) {
-  if (tab === 'dock') { document.body.classList.toggle('sidebar-collapsed'); return; }
-  if (tab === 'search') { openSearchFn(); return; }
-  state.railTab = tab;
-  if (tab === 'home') { state.scope = 'all'; state.expandedId = null; }
-  if (tab === 'feeds' && state.scope === 'starred') { state.scope = 'all'; state.expandedId = null; }
-  if (tab === 'saved') {
-    state.scope = 'starred'; state.expandedId = null;
-    loadAllFeeds(() => { renderTree(); renderList(); });
-  }
-  const panel = tab === 'saved' ? 'saved_nav' : 'feeds_nav';
-  for (const id of ['feeds_nav', 'saved_nav']) {
-    const el = document.getElementById(id);
-    if (el) el.classList.toggle('hidden', id !== panel);
-  }
-  $$('#tabs_pane [data-tab]').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
-  renderAll();
 }
 function syncControls() {
   const status = state.scope === 'today' ? 'today' : state.scope === 'recently-read' ? 'recently-read' : state.scope === 'starred' ? 'all' : ui.status;
@@ -1152,7 +1046,6 @@ function syncControls() {
   if ($('#set-font-size')) $('#set-font-size').value = ui.fontSize || '14.5px';
   document.documentElement.style.setProperty('--title-size', ui.fontSize || '14.5px');
   applySidebarMode();
-  syncSidebarMenu();
 }
 
 /* Inoreader "scroll tracking": mark items read when scrolled past (opt-in) */
@@ -1174,20 +1067,6 @@ function setupScrollTracking() {
 }
 
 /* ---------------- settings / stats ---------------- */
-function openSettings() {
-  syncControls();
-  const feeds = state.index?.feeds || {};
-  let rows = '';
-  for (const [id, meta] of Object.entries(feeds)) {
-    const arts = state.feeds.get(id) || [];
-    const unread = arts.filter((a) => !isRead(a) && !a._f?.hidden).length;
-    rows += `<tr><td>${esc(meta.title)}</td><td>${meta.count ?? arts.length}</td><td>${unread}</td><td>${esc(relTime(meta.newest))}</td></tr>`;
-  }
-  $('#stats-table').innerHTML = rows
-    ? `<table><thead><tr><th>Feed</th><th>Kept</th><th>Unread</th><th>Newest</th></tr></thead><tbody>${rows}</tbody></table>`
-    : '<p class="hint">No data loaded yet.</p>';
-  $('#settings-modal').classList.remove('hidden');
-}
 function closeModals() { $$('.modal').forEach((m) => m.classList.add('hidden')); }
 function confirmDialog(title, text, onYes) {
   $('#confirm-title').textContent = title;

@@ -22,7 +22,7 @@ const RETENTION_DAYS = 30;
 const parser = new Parser({
   timeout: 30000,
   headers: { 'User-Agent': UA, Accept: 'application/rss+xml, application/atom+xml, application/xml;q=0.9, */*;q=0.8' },
-  customFields: { item: [['media:content', 'mediaContent', { keepArray: true }], ['media:thumbnail', 'mediaThumbnail']] },
+  customFields: { item: [['media:group', 'mediaGroup'], ['media:content', 'mediaContent', { keepArray: true }], ['media:thumbnail', 'mediaThumbnail']] },
 });
 
 const sanitizeOpts = {
@@ -118,8 +118,17 @@ function pickDate(item) {
 }
 
 function pickContent(item) {
-  const raw = item['content:encoded'] || item.content || item.description || item.summary || item.contentSnippet || '';
-  return typeof raw === 'string' ? raw : String(raw ?? '');
+  let raw = item['content:encoded'] || item.content || item.description || item.summary || item.contentSnippet || '';
+  if (!raw && item.mediaGroup) {
+    const desc = item.mediaGroup['media:description'];
+    raw = Array.isArray(desc) ? (desc[0] || '') : (desc?._ || desc || '');
+  }
+  raw = typeof raw === 'string' ? raw : String(raw ?? '');
+  // Linkify bare URLs so embeds (YouTube etc.) can be upgraded client-side.
+  if (raw && !/<a\s/i.test(raw)) {
+    raw = raw.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1">$1</a>');
+  }
+  return raw;
 }
 
 function pickEnclosures(item) {
@@ -131,6 +140,15 @@ function pickEnclosures(item) {
   for (const m of item.mediaContent || []) push(m.$?.url, m.$?.['media:content'] || m.$?.type);
   const thumb = item.mediaThumbnail?.$?.url;
   if (thumb) push(thumb, 'image/thumbnail');
+  // YouTube Atom feeds nest media inside media:group.
+  const mg = item.mediaGroup;
+  if (mg) {
+    for (const m of mg['media:content'] || []) push(m.$?.url, m.$?.type);
+    const t = (mg['media:thumbnail'] || [])[0]?.$?.url;
+    if (t) push(t, 'image/thumbnail');
+    const desc = mg['media:description'];
+    // nothing to push
+  }
   for (const l of item.links || []) if (l.rel === 'enclosure') push(l.href, l.type);
   return out;
 }
@@ -161,12 +179,13 @@ async function main() {
   }
   const settings = config.settings || {};
   const fullTextDefault = !!settings.fullTextDefault;
+  const retentionDays = Number(settings.retentionDays) > 0 ? Number(settings.retentionDays) : RETENTION_DAYS;
 
   await fs.mkdir(DATA_DIR, { recursive: true });
   await fs.mkdir(FEEDS_DIR, { recursive: true });
 
   const now = Date.now();
-  const retainMs = RETENTION_DAYS * 86400000;
+  const retainMs = retentionDays * 86400000;
 
   // Load previous index for status/history
   const prevIndex = await loadJson(path.join(DATA_DIR, 'index.json'), { generatedAt: 0, feeds: {} });
@@ -274,7 +293,7 @@ async function main() {
       const summary = stripTags(content).slice(0, 300);
       let text = prevA?.text || null;
       const feedGivesEnough = stripTags(content).length >= TEXT_EXTRACT_MIN_LEN;
-      if (wantText && !text && !feedGivesEnough && textBudget > 0 && now - date < TEXT_EXTRACT_AGE_DAYS * 86400000 && link) {
+      if (wantText && !text && !feedGivesEnough && textBudget > 0 && now - date < retentionDays * 86400000 && link) {
         textBudget--;
         try {
           text = await extractFullText(link);
@@ -331,7 +350,7 @@ async function main() {
   await fs.writeFile(path.join(DATA_DIR, 'all-feeds.json'), JSON.stringify({ articles: allArticles }));
 
   await fs.writeFile(path.join(DATA_DIR, 'index.json'), JSON.stringify(index));
-  console.log(`done: ${Object.keys(index.feeds).length} feeds, ${failures} failure(s), keeping last ${RETENTION_DAYS} days (no per-feed cap)`);
+  console.log(`done: ${Object.keys(index.feeds).length} feeds, ${failures} failure(s), keeping last ${retentionDays} days (no per-feed cap)`);
 }
 
 main().catch((err) => { console.error(err); process.exit(1); });
