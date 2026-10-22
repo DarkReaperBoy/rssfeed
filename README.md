@@ -27,9 +27,9 @@ That's it. Every hour the Action re-fetches feeds and force-updates `gh-pages` (
   "settings": {
     "siteName": "My Inoreader",
     "theme": "auto",              // auto | light | dark
-    "view": "list",               // list | compact | cards
-    "articlesPerFeed": 200,       // newest N kept per feed
-    "retentionDays": 90,          // everything older than this is pruned at fetch (0 = keep all)
+    "view": "list",               // list | expanded | column | cards | magazine
+    "articlesPerFeed": 200,       // ignored — time-based rolling window (no per-feed cap)
+    "retentionDays": 30,          // everything older than this is pruned at fetch
     "markReadOnOpen": true,       // opening an article marks it read
     "markReadAfterSeconds": 0,    // …after a delay instead
     "refreshMinutes": 60,         // UI polls data/index.json for refreshes
@@ -85,7 +85,7 @@ That's it. Every hour the Action re-fetches feeds and force-updates `gh-pages` (
 - Search with operators: `feed:bbc title:ai before:2026-01-01 after:2025-12-01 unread:true is:read`, plus `OR` groups
 - Full-text search across titles, authors, summaries and article bodies
 - Settings mirroring Inoreader preferences: titles-only, open-original mode, feed icons, scroll tracking, multiple select (bulk mark read/unread with undo), absolute dates, title font size, compact sidebar, tab-title unread counter, sidebar options (updated-only / dim read / sort A–Z)
-- Subscription stats + retention info in the settings panel
+- All preferences are configured in `config.json` (no in-app settings modal)
 
 ## Local development
 
