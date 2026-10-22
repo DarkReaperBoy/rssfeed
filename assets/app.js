@@ -12,14 +12,9 @@ const state = {
   config: null,
   index: null,
   feeds: new Map(),          // feedId -> articles[]
-  feedErrors: new Map(),     // feedId -> error message
   scope: 'all',
-  tab: 'feeds',
-  railTab: 'feeds',
   search: '',
   expandedId: null,
-  readerTab: 'description',
-  menuId: null,
   visible: [],
   keepVisible: new Set(),
   read: loadObj(LS_READ),    // {articleId: readTs}
@@ -44,7 +39,16 @@ const ui = Object.assign({
 // migrate pre-parity values
 if (ui.layout === 'compact') { ui.layout = 'list'; ui.density = 'compact'; }
 
-function loadObj(k) { try { return JSON.parse(localStorage.getItem(k)) || {}; } catch { return {}; } }
+function loadObj(k) {
+  // Null-prototype objects: feed GUIDs like "constructor"/"__proto__" can't
+  // fake lookups (isRead) or pollute prototypes through state maps.
+  const out = Object.create(null);
+  try {
+    const v = JSON.parse(localStorage.getItem(k));
+    if (v && typeof v === 'object') for (const key of Object.keys(v)) if (key !== '__proto__') out[key] = v[key];
+  } catch {}
+  return out;
+}
 function saveObj(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
 function saveRead() { saveObj(LS_READ, state.read); }
 function saveKept() { saveObj(LS_KEPT, state.kept); }
@@ -53,6 +57,7 @@ function saveUi() { saveObj(LS_UI, ui); }
 
 const isRead = (a) => !!state.read[a.id];
 const isKept = (a) => !!state.kept[a.id];
+const isStarred = (a) => !!state.starred[a.id];
 
 /* ---------------- utils ---------------- */
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -100,7 +105,7 @@ function compileMatcher(v) {
   const s = String(v);
   const m = s.match(/^\/(.+)\/([a-z]*)$/);
   if (m) {
-    try { return new RegExp(m[1], m[2] || 'i').test.bind(new RegExp(m[1], m[2] || 'i')); } catch { return () => false; }
+    try { const re = new RegExp(m[1], (m[2] || 'i').replace('g', '')); return (hay) => re.test(hay); } catch { return () => false; }
   }
   const lc = s.toLowerCase();
   return (hay) => String(hay || '').toLowerCase().includes(lc);
@@ -175,9 +180,8 @@ async function loadFeed(feedId) {
     const data = await fetchJson(`data/feeds/${encodeURIComponent(feedId)}.json`);
     applyFiltersToFeed(feedId, data.articles || []);
     state.feeds.set(feedId, data.articles || []);
-    state.feedErrors.delete(feedId);
-  } catch (err) {
-    state.feedErrors.set(feedId, err.message);
+    // fetch failures surface through index.json feed status (sidebar warning icon)
+  } catch {
   } finally {
     state.loading.delete(feedId);
   }
@@ -189,7 +193,7 @@ function loadFeedQueued(feedId, onChange) {
 }
 function feedIdsInScope() {
   const feeds = state.index?.feeds || {};
-  if (state.scope === 'starred') return [];
+  if (state.scope === 'starred') return Object.keys(feeds); // stars may live in any feed — load them all
   if (state.scope.startsWith('feed:')) return [state.scope.slice(5)];
   if (state.scope.startsWith('folder:')) {
     const fid = state.scope.slice(7);
@@ -219,18 +223,21 @@ function parseQuery(q) {
       else if (key === 'before' || key === 'until') { const t = Date.parse(val); if (!isNaN(t)) ops.before = t; }
       else if (key === 'after' || key === 'since') { const t = Date.parse(val); if (!isNaN(t)) ops.after = t; }
       else if (key === 'unread') ops.unread = val !== 'false';
-      else if (key === 'is' && val === 'read') ops.unread = false;
-      else rest.push(val);
+      else if (key === 'is' && (val === 'read' || val === 'unread')) ops.unread = val === 'unread';
+      else rest.push(m[0].toLowerCase()); // unknown operator: treat the whole token as a term
     } else rest.push((m[4] ?? m[5] ?? '').toLowerCase());
   }
   return { ops, terms: rest.filter(Boolean) };
 }
-function searchMatches(a, q) {
-  // OR-groups: "a b OR c" → (a AND b) OR (c). Operators apply inside a group.
-  return String(q).split(/\s+or\s+/i).some((group) => searchGroupMatches(a, group));
+function compileSearch(q) {
+  if (!q || !String(q).trim()) return null;
+  // OR-groups: "a b OR c" → (a AND b) OR (c). Parsed once per render, not per article.
+  return String(q).split(/\s+or\s+/i).map((group) => parseQuery(group));
 }
-function searchGroupMatches(a, q) {
-  const { ops, terms } = parseQuery(q);
+function searchMatchesCompiled(a, groups) {
+  return groups.some(({ ops, terms }) => searchGroupMatches(a, ops, terms));
+}
+function searchGroupMatches(a, ops, terms) {
   if (ops.feed.length && !ops.feed.some((f) => a._feed.toLowerCase().includes(f) || feedTitle(a._feed).toLowerCase().includes(f))) return false;
   if (ops.title.length && !ops.title.every((t) => (a.title || '').toLowerCase().includes(t))) return false;
   if (ops.before && !(a.date < ops.before)) return false;
@@ -270,11 +277,15 @@ function folderCutoff(feedId) {
 }
 function computeVisible() {
   const out = [];
+  const searchGroups = compileSearch(state.search);
   if (state.scope === 'starred') {
-    // Saved → Starred: every starred article, all statuses, newest first.
+    // Saved → Starred: every starred article, all statuses, date/search filters honored.
     for (const id of Object.keys(state.starred)) {
       const a = findArticle(id);
-      if (a) out.push(a);
+      if (!a) continue;
+      if (!dateRangeFilter(a)) continue;
+      if (searchGroups && !searchMatchesCompiled(a, searchGroups)) continue;
+      out.push(a);
     }
     out.sort((x, y) => (ui.sortDir === 'oldest' ? 1 : -1) * (x.date - y.date));
     state.visible = out;
@@ -292,7 +303,7 @@ function computeVisible() {
         if (ui.status === 'unread' && read && !state.keepVisible.has(a.id) && a.id !== state.expandedId) continue;
         if (ui.status === 'read' && !read) continue;
       }
-      if (state.search && !searchMatches(a, state.search)) continue;
+      if (state.search && !searchMatchesCompiled(a, searchGroups)) continue;
       out.push(a);
     }
   }
@@ -341,7 +352,7 @@ function renderTree() {
       : disabled
         ? 'Feed disabled in config'
         : esc(meta.title);
-    const warnIcon = failed ? '<span class="feed-warn" title="' + esc(warnTitle.replace(/"/g, '&quot;')) + '">⚠</span>' : disabled ? '<span class="feed-warn feed-warn-dim" title="' + esc(warnTitle.replace(/"/g, '&quot;')) + '">⚠</span>' : '';
+    const warnIcon = failed ? '<span class="feed-warn" title="' + esc(warnTitle) + '">⚠</span>' : disabled ? '<span class="feed-warn feed-warn-dim" title="' + esc(warnTitle) + '">⚠</span>' : '';
     return `<button class="tree-item ${state.scope === 'feed:' + id ? 'active' : ''} ${n ? 'unread' : ''} ${dim} ${failed ? 'feed-failed' : ''}" data-scope="feed:${esc(id)}" title="${esc(warnTitle)}">
       ${faviconHtml({ title: meta.title, site: meta.site })}<span class="label">${esc(meta.title)}</span>${warnIcon}${n ? `<span class="badge" data-markread="feed:${esc(id)}" title="Mark as read">${n}</span>` : ''}
     </button>`;
@@ -375,7 +386,8 @@ function renderTree() {
   for (const arts of state.feeds.values()) for (const a of arts) if (!isRead(a) && !a._f.hidden && a.date >= startOfToday()) todayN++;
   $('#badge-today').textContent = todayN > 0 ? String(todayN) : '';
   $('#badge-all-items').textContent = totalUnread > 0 ? String(totalUnread) : '';
-  $('#parent_all_articles').classList.toggle('selected_parent', state.scope === 'all');
+  const starN = Object.keys(state.starred).length;
+  $('#badge-starred').textContent = starN > 0 ? String(starN) : '';
   $$('[data-scope]').forEach((b) => b.classList.toggle('active', b.dataset.scope === state.scope));
 }
 
@@ -425,6 +437,7 @@ function rowHtml(a) {
     </div>
     <div class="row-actions">
       <span class="dot"></span>
+      <button class="icon-btn star-btn ${isStarred(a) ? 'starred' : ''}" data-act="star" title="${isStarred(a) ? 'Unstar' : 'Star (read later)'}"><svg><use href="#i-star"/></svg></button>
       <a class="icon-btn" href="${esc(a.link || '#')}" target="_blank" rel="noopener noreferrer" title="Open original in new tab" data-act="open-original" onclick="event.stopPropagation()"><svg><use href="#i-external"/></svg></a>
       <button class="icon-btn" data-act="keep" title="Keep unread"><svg><use href="#i-${isKept(a) ? 'eye' : 'eyeoff'}"/></svg></button>
       <button class="icon-btn" data-act="toggle-read" title="Mark read/unread"><svg><use href="#i-${isRead(a) ? 'unread' : 'read'}"/></svg></button>
@@ -443,16 +456,16 @@ function articleBody(a) {
   }
   return html;
 }
-function readerBodyHtml(a, tab) {
+function readerBodyHtml(a) {
   return `<div class="reader-body">${articleBody(a)}</div>`;
 }
 function readerHtml(a) {
   const feed = feedMeta(a._feed);
-  const tab = state.readerTab || 'description';
   const idx = state.visible.indexOf(a);
   return `<div class="reader" data-id="${esc(a.id)}">
     <div class="reader-toolbar">
       <span class="spacer"></span>
+      <button class="icon-btn star-btn ${isStarred(a) ? 'starred' : ''}" data-act="star" title="${isStarred(a) ? 'Unstar' : 'Star (read later)'}"><svg><use href="#i-star"/></svg></button>
       <button class="icon-btn" data-act="prev" title="Previous article" ${idx <= 0 ? 'disabled' : ''}><svg><use href="#i-prev"/></svg></button>
       <button class="icon-btn" data-act="next" title="Next article" ${idx >= state.visible.length - 1 ? 'disabled' : ''}><svg><use href="#i-next"/></svg></button>
       <a class="icon-btn" href="${esc(a.link || '#')}" target="_blank" rel="noopener noreferrer" title="Open original" data-act="open-original"><svg><use href="#i-external"/></svg></a>
@@ -463,19 +476,25 @@ function readerHtml(a) {
       <span class="sub-feed" data-scope="feed:${esc(a._feed)}" title="Show this feed">${esc(feed.title)}</span>
       ${a.author ? `<span>by ${esc(a.author)}</span>` : ''}
       <span title="${esc(fullTime(a.date))}">${esc(relTime(a.date))}</span>
+      ${readingTime(a) ? `<span>· ${esc(readingTime(a))}</span>` : ''}
     </div>
-    ${readerBodyHtml(a, tab)}
+    ${readerBodyHtml(a)}
     ${attachmentsHtml(a)}
 
   </div>`;
 }
 function attachmentsHtml(a) {
-  const enc = (a.enclosures || []).filter((e) => e.url && !/^image\/(?!.*thumbnail)/.test(e.type || ''));
-  const imgs = (a.enclosures || []).filter((e) => /^image\//.test(e.type || ''));
+  // Non-image enclosures as links; standalone images below (skip image/thumbnail —
+  // that one is already used as the row thumb, don't list it twice).
+  const enc = (a.enclosures || []).filter((e) => e.url && !/^image\//i.test(e.type || ''));
+  const imgs = (a.enclosures || []).filter((e) => e.url && /^image\//i.test(e.type || '') && e.type !== 'image/thumbnail');
   if (!enc.length && !imgs.length) return '';
   const label = (e) => {
     const kind = (e.type || '').split('/')[0];
-    const name = decodeURIComponent(e.url.split('/').pop().split('?')[0] || '').slice(0, 90);
+    const raw = (e.url.split('/').pop() || '').split('?')[0] || '';
+    let name = raw;
+    try { name = decodeURIComponent(raw); } catch { /* malformed percent-encoding — keep raw */ }
+    name = name.slice(0, 90);
     return kind && kind !== 'image' ? `${kind.toUpperCase()} · ${name}` : name;
   };
   return `<div class="reader-attachments">
@@ -483,7 +502,6 @@ function attachmentsHtml(a) {
     ${imgs.map((e) => `<a href="${esc(e.url)}" target="_blank" rel="noopener noreferrer"><img src="${esc(e.url)}" alt="">${esc(label(e))}</a>`).join('')}
   </div>`;
 }
-function shortHost(url) { try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return 'original'; } }
 function readingTime(a) {
   try {
     const text = stripTags(a.text || a.content || a.summary || '');
@@ -511,10 +529,15 @@ function renderList() {
   setupScrollTracking();
   const unread = visible.filter((a) => !isRead(a)).length;
   $('#scope-title').textContent = scopeTitle();
-  $('#scope-count').textContent = `${unread} unread`; // their header: "Newsfeed" + "81 unread"
+  $('#scope-count').textContent = state.scope === 'starred'
+    ? `${visible.length} starred`
+    : state.scope === 'recently-read'
+      ? `${visible.length} recently read`
+      : `${unread} unread`; // their header: "Newsfeed" + "81 unread"
   updateTitleCounter();
   renderEmpty(visible);
 }
+let readerKey = ''; // article id:fetchedAt — rebuild the reader pane only when the open article changes
 function renderReaderPane(visible) {
   // Split frame (ss1/ss3): list stays put, the article opens in the right pane.
   const slot = $('#reader-slot'), ph = $('#reader-placeholder');
@@ -522,17 +545,29 @@ function renderReaderPane(visible) {
   const open = state.expandedId ? findArticle(state.expandedId) : null;
   const show = !!(open && visible.includes(open) && !open._f?.hidden);
   if (show) {
-    slot.innerHTML = readerHtml(open);
-    slot.classList.remove('hidden');
-    ph.classList.add('hidden');
-    document.body.classList.add('article-open');
-    slot.querySelectorAll('.reader-body').forEach((el) => { sanitizeReaderDom(el); upgradeEmbeds(el); });
+    const key = `${open.id}:${open.fetchedAt || 0}`;
+    if (key !== readerKey) {
+      readerKey = key;
+      slot.innerHTML = readerHtml(open);
+      slot.classList.remove('hidden');
+      ph.classList.add('hidden');
+      document.body.classList.add('article-open');
+      slot.querySelectorAll('.reader-body').forEach((el) => { sanitizeReaderDom(el); upgradeEmbeds(el); });
+    } else {
+      // Same article: don't nuke playing embeds — only sync control state.
+      const i = state.visible.indexOf(open);
+      const prev = slot.querySelector('[data-act="prev"]'), next = slot.querySelector('[data-act="next"]');
+      if (prev) prev.disabled = i <= 0;
+      if (next) next.disabled = i >= state.visible.length - 1;
+      const sb = slot.querySelector('.star-btn');
+      if (sb) sb.classList.toggle('starred', !!state.starred[open.id]);
+    }
   } else {
+    readerKey = '';
     slot.innerHTML = '';
     slot.classList.add('hidden');
     ph.classList.remove('hidden');
     document.body.classList.remove('article-open');
-    if (!state.expandedId) state.readerTab = 'description';
   }
 }
 function renderEmpty(visible) {
@@ -544,6 +579,8 @@ function renderEmpty(visible) {
     el.innerHTML = `<h3>No data yet</h3><p>The hourly GitHub Action builds <code>data/</code>. Trigger it once: <strong>Actions → Fetch feeds → Run workflow</strong>, or wait for the next hour.</p>`;
   } else if (state.search) {
     el.innerHTML = `<h3>No matches</h3><p>Nothing matched <code>${esc(state.search)}</code> in this view.<br>Operators: <code>feed:name</code> <code>title:word</code> <code>before:2026-01-01</code> <code>after:2026-01-01</code> <code>unread:true</code> <code>is:read</code></p>`;
+  } else if (state.scope === 'starred') {
+    el.innerHTML = `<h3>No starred articles</h3><p>Star articles with the ★ button in the list or reader. Stars live in this browser and show up here.</p>`;
   } else if (ui.status === 'unread') {
     el.innerHTML = `<h3>All caught up 🎉</h3><p>No unread articles here${ui.dateRange !== 'all' ? ' for this time range' : ''}.</p>`;
   } else {
@@ -554,10 +591,6 @@ function renderEmpty(visible) {
 /* ---------------- embeds (YouTube/Vimeo/SoundCloud/audio/video) ---------------- */
 function upgradeEmbeds(root) {
   if (!root) return;
-  const yt = (url) => {
-    const m = url.match(/(?:youtube\.com\/(?:watch\?.*?v=|embed\/|shorts\/)|youtu\.be\/)([\w-]{11})/);
-    return m ? m[1] : null;
-  };
   const vimeo = (url) => { const m = url.match(/vimeo\.com\/(\d+)/); return m ? m[1] : null; };
   const audioRe = /\.(mp3|m4a|oga|ogg|wav|aac)(\?|$)/i;
   const videoRe = /\.(mp4|webm|ogv|mov)(\?|$)/i;
@@ -567,7 +600,7 @@ function upgradeEmbeds(root) {
     if (/^https?:/.test(url) === false) continue;
     const wrap = document.createElement('div');
     wrap.className = 'embed';
-    const id = yt(url);
+    const id = ytId(url);
     if (id) {
       wrap.innerHTML = `<button class="embed-facade" title="Play video"><img loading="lazy" src="https://i.ytimg.com/vi/${id}/hqdefault.jpg" alt="Play video"></button>`;
       wrap.querySelector('button').addEventListener('click', () => {
@@ -598,13 +631,22 @@ function upgradeEmbeds(root) {
 /* ---------------- client-side sanitization (defense in depth) ---------------- */
 function sanitizeReaderDom(root) {
   if (!root) return;
-  root.querySelectorAll('script, style, link, meta, form, input, button[data-blocked], object, embed').forEach((n) => n.remove());
+  root.querySelectorAll('script, style, link, meta, form, input, button, object, embed, [data-blocked-embed]').forEach((n) => n.remove());
   root.querySelectorAll('*').forEach((el) => {
+    // Feed-supplied classes/styles could hijack app CSS (.hidden, .row, fixed overlays…)
+    el.removeAttribute('class');
+    el.removeAttribute('style');
     for (const attr of [...el.attributes]) {
       const name = attr.name.toLowerCase();
-      if (name.startsWith('on') || name === 'srcdoc' || (name === 'href' && /^\s*javascript:/i.test(attr.value))) el.removeAttribute(attr.name);
+      if (name.startsWith('on') || name === 'srcdoc') el.removeAttribute(attr.name);
     }
-    if (el.tagName === 'IFRAME') {
+    const tag = el.tagName;
+    if (tag === 'A') {
+      const href = (el.getAttribute('href') || '').trim();
+      if (/^(javascript|data|vbscript):/i.test(href)) el.removeAttribute('href');
+      else if (/^https?:/i.test(href)) { el.setAttribute('target', '_blank'); el.setAttribute('rel', 'noopener noreferrer'); }
+    }
+    if (tag === 'IFRAME') {
       const src = el.getAttribute('src') || '';
       if (!/^https:\/\/(www\.)?(youtube-nocookie\.com\/embed\/|player\.vimeo\.com\/video\/|w\.soundcloud\.com\/)/.test(src)) el.remove();
     }
@@ -612,6 +654,7 @@ function sanitizeReaderDom(root) {
 }
 
 /* ---------------- read state actions ---------------- */
+let forceAllowed = false; // explicit user clicks override keepUnread
 function markRead(id, on = true) {
   const a = findArticle(id);
   if (!on) delete state.read[id];
@@ -619,7 +662,6 @@ function markRead(id, on = true) {
   else state.read[id] = Date.now();
   saveRead(); renderTree(); renderList();
 }
-let forceAllowed = false; // explicit user clicks override keepUnread
 function findArticle(id) {
   for (const arts of state.feeds.values()) { const a = arts.find((x) => x.id === id); if (a) return a; }
   return null;
@@ -631,6 +673,7 @@ function scheduleMarkRead(a) {
   const delay = (Number(ui.markReadAfterSeconds) || 0) * 1000;
   const run = () => {
     state.markTimers.delete(a.id);
+    if (delay > 0 && state.expandedId !== a.id) return; // article was closed before the delay elapsed
     if (!isRead(a) && !isKept(a) && !a._f?.keepUnread) { state.read[a.id] = Date.now(); saveRead(); renderTree(); renderList(); }
   };
   if (delay <= 0) run();
@@ -665,7 +708,7 @@ function markScopeRead(scope, olderDays = 0) {
   }
   const snapshot = ids.map((id) => ({ id, ts: state.read[id] }));
   for (const id of ids) state.read[id] = Date.now();
-  saveRead(); state.expandedId = null; renderTree(); renderList();
+  saveRead(); state.expandedId = null; state.keepVisible.clear(); renderTree(); renderList();
   const what = olderDays ? ` older than ${OLDER_LABELS[olderDays] || olderDays + ' days'}` : '';
   showToast(`Marked ${ids.length} article${ids.length === 1 ? '' : 's'}${what} as read`, 'Undo', () => {
     for (const { id, ts } of snapshot) { if (ts) state.read[id] = ts; else delete state.read[id]; }
@@ -696,6 +739,7 @@ function bulkMark(on) {
     n++;
   }
   state.bulkSel.clear();
+  state.keepVisible.clear();
   saveRead(); renderTree(); renderList();
   showToast(`${on ? 'Marked' : 'Unmarked'} ${n} article${n === 1 ? '' : 's'}${on ? ' as read' : ' as unread'}`, 'Undo', () => {
     for (const { id, ts } of snapshot) { if (ts) state.read[id] = ts; else delete state.read[id]; }
@@ -722,35 +766,20 @@ function dispatchAct(act, id, el, e) {
   const a = findArticle(id);
   if (!a) return;
   if (act === 'toggle-read') { forceAllowed = true; markRead(id, !isRead(a)); forceAllowed = false; }
-  else if (act === 'hide-read') {
-    forceAllowed = true; markRead(id, true); forceAllowed = false;
-    if (state.expandedId === id) state.expandedId = null;
-    renderList();
-  }
   else if (act === 'keep') { if (state.kept[id]) delete state.kept[id]; else state.kept[id] = true; saveKept(); renderList(); }
-  else if (act === 'copy-link') {
-    if (a.link) {
-      try {
-        if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
-          navigator.clipboard.writeText(a.link).then(() => showToast('Link copied to clipboard'));
-        } else {
-          const ta = document.createElement('textarea');
-          ta.value = a.link; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
-          showToast('Link copied to clipboard');
-        }
-      } catch (err) {
-        showToast('Failed to copy link');
-      }
-    }
+  else if (act === 'star') {
+    if (state.starred[id]) delete state.starred[id]; else state.starred[id] = a._feed;
+    saveStarred(); renderTree(); renderList();
   }
   else if (act === 'open-original') { /* anchor handles it */ }
-  else if (act === 'collapse') { state.expandedId = null; renderList(); }
+  else if (act === 'collapse') { state.keepVisible.delete(id); state.expandedId = null; renderList(); }
   else if (act === 'prev' || act === 'next') {
     const i = state.visible.indexOf(a);
     const target = state.visible[act === 'prev' ? i - 1 : i + 1];
     if (target) {
-      state.expandedId = target.id; state.readerTab = 'description';
+      state.expandedId = target.id;
       renderList(); scheduleMarkRead(target); listScrollTo(target.id);
+      if (ui.autoScroll) { const ap = $('#article_pane'); if (ap) ap.scrollTop = 0; }
     }
   }
 }
@@ -776,15 +805,30 @@ function onListClick(e) {
     dispatchAct(actBtn.dataset.act, id, actBtn, e);
     return;
   }
+  if (ui.bulkSelect) { // bulk mode: clicking anywhere on the row toggles selection
+    if (state.bulkSel.has(id)) state.bulkSel.delete(id); else state.bulkSel.add(id);
+    rowEl.classList.toggle('selected', state.bulkSel.has(id));
+    const chk = rowEl.querySelector('.row-check');
+    if (chk) chk.checked = state.bulkSel.has(id);
+    updateBulkBar();
+    return;
+  }
   if (ui.openOriginal && a.link) { // "Open original webpages directly"
     window.open(a.link, '_blank', 'noopener');
     scheduleMarkRead(a);
     return;
   }
-  if (state.expandedId && state.expandedId !== id) state.keepVisible.add(state.expandedId);
-  if (state.expandedId === id) { state.expandedId = null; renderList(); return; }
+  // Only the previously open row lingers in the unread view — replace, not accumulate.
+  if (state.expandedId && state.expandedId !== id) state.keepVisible = new Set([state.expandedId]);
+  if (state.expandedId === id) { // collapse
+    clearTimeout(state.markTimers.get(id));
+    state.markTimers.delete(id);
+    state.keepVisible.delete(id);
+    state.expandedId = null;
+    renderList();
+    return;
+  }
   state.expandedId = id;
-  state.readerTab = 'description';
   renderList();
   listScrollTo(id);
   if (ui.autoScroll) { const ap = $('#article_pane'); if (ap) ap.scrollTop = 0; }
@@ -832,6 +876,7 @@ function bindEvents() {
       state.expandedId = null;
       state.keepVisible.clear();
       document.body.classList.remove('sidebar-open');
+      $('#scrim').classList.add('hidden'); // don't leave a stuck overlay after picking a feed (mobile)
       if (scopeBtn.dataset.folder) { // folder click also toggles expansion
         ui.openFolders[scopeBtn.dataset.folder] = !scopeBtn.parentElement.classList.contains('open');
         saveUi();
@@ -849,7 +894,7 @@ function bindEvents() {
     const v = item.dataset.status;
     if (v === 'today') state.scope = 'today';
     else if (v === 'recently-read') state.scope = 'recently-read';
-    else { ui.status = v; if (state.scope !== 'all' && state.scope !== 'feed:' && !state.scope.startsWith('feed:') && !state.scope.startsWith('folder:')) state.scope = 'all'; }
+    else { ui.status = v; if (state.scope !== 'all' && !state.scope.startsWith('feed:') && !state.scope.startsWith('folder:')) state.scope = 'all'; }
     state.expandedId = null;
     saveUi(); syncControls(); renderAll(); ensureScopeLoaded();
     $('#header-menu').classList.add('hidden');
@@ -869,16 +914,15 @@ function bindEvents() {
   $('#menu-refresh').addEventListener('click', () => { $('#header-menu').classList.add('hidden'); refresh(true); });
 
   let searchTimer = null;
-  $('#search-input').addEventListener('input', (e) => {
+  $('#search-input').addEventListener('input', () => {
     clearTimeout(searchTimer);
     searchTimer = setTimeout(async () => {
-      state.search = e.target.value.trim();
+      state.search = $('#search-input').value.trim();
       renderList();
       if (state.search) {
-        // search everything: load remaining feeds, then re-render
+        // search everything: load remaining feeds, then re-render once
         const missing = Object.keys(state.index?.feeds || {}).filter((id) => !state.feeds.has(id));
-        if (missing.length) { await loadAllFeeds(() => renderList()); renderTree(); }
-        renderList();
+        if (missing.length) { await loadAllFeeds(() => {}); renderTree(); renderList(); }
       }
     }, 200);
   });
@@ -943,53 +987,20 @@ function bindEvents() {
   $('#bulk-read').addEventListener('click', () => bulkMark(true));
   $('#bulk-unread').addEventListener('click', () => bulkMark(false));
   $('#bulk-clear').addEventListener('click', () => { state.bulkSel.clear(); renderList(); });
-  $('#btn-clear-read')?.addEventListener('click', () => {
-    confirmDialog('Clear read state', 'Reset every article back to unread in this browser?', () => {
-      state.read = {}; saveRead(); renderAll();
-    });
-  });
-  $('#btn-export-state')?.addEventListener('click', () => {
-    try {
-      const data = {
-        version: 1,
-        exportedAt: Date.now(),
-        read: state.read || {},
-        kept: state.kept || {},
-        starred: state.starred || {},
-        ui: ui || {}
-      };
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `ghrss-state-${new Date().toISOString().slice(0,10)}.json`;
-      document.body.appendChild(a); a.click(); document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      showToast('State exported');
-    } catch (err) {
-      showToast('Failed to export state');
-    }
-  });
-  $('#btn-import-state')?.addEventListener('change', async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const text = await file.text();
-      const data = JSON.parse(text);
-      if (data.read && typeof data.read === 'object') { state.read = data.read; saveRead(); }
-      if (data.kept && typeof data.kept === 'object') { state.kept = data.kept; saveKept(); }
-      if (data.starred && typeof data.starred === 'object') { state.starred = data.starred; saveStarred(); }
-      if (data.ui && typeof data.ui === 'object') { Object.assign(ui, data.ui); saveUi(); applyTheme(); syncControls(); applySidebarMode(); }
-      renderAll();
-      showToast('State imported');
-    } catch (err) {
-      showToast('Failed to import state');
-    } finally {
-      e.target.value = '';
-    }
-  });
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') { closeModals(); if (state.expandedId) { state.expandedId = null; renderList(); } }
+    if (e.key !== 'Escape') return;
+    closeModals();
+    $('#header-menu')?.classList.add('hidden');
+    $('#mark-menu')?.classList.add('hidden');
+    document.body.classList.remove('sidebar-open');
+    $('#scrim')?.classList.add('hidden');
+    if (state.expandedId) {
+      clearTimeout(state.markTimers.get(state.expandedId));
+      state.markTimers.delete(state.expandedId);
+      state.keepVisible.delete(state.expandedId);
+      state.expandedId = null;
+      renderList();
+    }
   });
 }
 
@@ -1006,6 +1017,9 @@ function openSearchFn() {
 function closeSearchFn() {
   $('#search-box').classList.add('hidden');
   $('#search-open').classList.remove('hidden');
+  const inp = $('#search-input');
+  if (inp) inp.value = '';
+  if (state.search) { state.search = ''; renderList(); } // closing search also clears the active filter
 }
 function syncControls() {
   const status = state.scope === 'today' ? 'today' : state.scope === 'recently-read' ? 'recently-read' : state.scope === 'starred' ? 'all' : ui.status;
@@ -1015,22 +1029,6 @@ function syncControls() {
   $('#date-range').value = ui.dateRange;
   $('#btn-show-filtered').classList.toggle('on', ui.showFiltered);
   $('#menu-select-mode').classList.toggle('on', !!ui.bulkSelect);
-  if ($('#set-theme')) $('#set-theme').value = ui.theme;
-  if ($('#set-layout')) $('#set-layout').value = ui.layout;
-  if ($('#set-density')) $('#set-density').value = ui.density || 'comfort';
-  if ($('#set-markread')) $('#set-markread').checked = !!ui.markReadOnOpen;
-  if ($('#set-markread-delay')) $('#set-markread-delay').value = ui.markReadAfterSeconds || 0;
-  if ($('#set-scroll-tracking')) $('#set-scroll-tracking').checked = !!ui.scrollTracking;
-  const bools = {
-    '#set-titles-only': 'titlesOnly', '#set-open-original': 'openOriginal',
-    '#set-show-favicons': 'showFavicons', '#set-column-thumbs': 'columnThumbs',
-    '#set-bulk-select': 'bulkSelect', '#set-auto-scroll': 'autoScroll',
-    '#set-absolute-dates': 'absoluteDates', '#set-side-favicons': 'sideFavicons',
-    '#set-compact-sidebar': 'compactSidebar', '#set-counters-clickable': 'countersClickable',
-    '#set-title-counter': 'titleCounter', '#set-show-today': 'showToday',
-  };
-  for (const [sel, key] of Object.entries(bools)) { const el = $(sel); if (el) el.checked = !!ui[key]; }
-  if ($('#set-font-size')) $('#set-font-size').value = ui.fontSize || '14.5px';
   document.documentElement.style.setProperty('--title-size', ui.fontSize || '14.5px');
   applySidebarMode();
 }
@@ -1048,7 +1046,7 @@ function setupScrollTracking() {
       if (!a || isRead(a) || isKept(a) || a._f?.keepUnread || a._f?.hidden) continue;
       state.read[a.id] = Date.now(); dirty = true;
     }
-    if (dirty) { saveRead(); renderTree(); renderList(); }
+    if (dirty) { dirty = false; saveRead(); renderTree(); renderList(); }
   }, { threshold: 0 });
   $$('#list .row').forEach((r) => scrollObserver.observe(r));
 }
@@ -1060,9 +1058,15 @@ function confirmDialog(title, text, onYes) {
   $('#confirm-text').textContent = text;
   $('#confirm-modal').classList.remove('hidden');
   const yes = $('#confirm-yes'), no = $('#confirm-no');
-  const done = () => { yes.onclick = null; no.onclick = null; $('#confirm-modal').classList.add('hidden'); };
+  const prevFocus = document.activeElement;
+  const done = () => {
+    yes.onclick = null; no.onclick = null;
+    $('#confirm-modal').classList.add('hidden');
+    if (prevFocus && prevFocus.focus) prevFocus.focus();
+  };
   yes.onclick = () => { done(); onYes(); };
   no.onclick = done;
+  yes.focus();
 }
 
 /* ---------------- refresh / polling ---------------- */
@@ -1071,6 +1075,7 @@ async function refresh(manual = false) {
     const index = await fetchJson('data/index.json');
     const changed = index.generatedAt !== state.index?.generatedAt;
     state.index = index;
+    if (!changed && !manual) return; // poll only re-downloads payloads when data actually changed
     // Prefer the consolidated single-request payload for speed.
     const consolidated = await loadConsolidatedIntoState();
     if (!consolidated) {
@@ -1078,15 +1083,18 @@ async function refresh(manual = false) {
       const loaded = [...state.feeds.keys()];
       for (const id of loaded) { state.feeds.delete(id); await loadFeed(id); }
     }
-    if (changed || manual) { renderAll(); flashUpdated(); }
+    renderAll();
+    flashUpdated();
   } catch (err) {
     if (manual) flashUpdated('offline — showing last data');
   }
 }
 function flashUpdated(msg) {
   const el = $('#last-updated');
-  el.textContent = msg || `Updated ${relTime(state.index?.generatedAt || Date.now())} ago`;
-  el.title = fullTime(state.index?.generatedAt);
+  if (msg) { el.textContent = msg; el.title = ''; return; }
+  const ts = state.index?.generatedAt;
+  el.textContent = ts ? `Updated ${relTime(ts) === 'now' ? 'just now' : relTime(ts) + ' ago'}` : 'No data yet';
+  el.title = ts ? fullTime(ts) : '';
 }
 function startPolling() {
   clearInterval(state.refreshTimer);
@@ -1144,8 +1152,6 @@ async function boot() {
     if (!localStorage.getItem(LS_UI)) { // seed defaults from config on first run
       if (s.theme) ui.theme = s.theme;
       if (s.view) ui.layout = s.view;
-      ui.markReadOnOpen = s.markReadOnOpen !== false;
-      ui.markReadAfterSeconds = Number(s.markReadAfterSeconds) || 0;
       // Allow any config setting that maps to a UI pref to act as a default.
       for (const [k, v] of Object.entries(s)) {
         if (Object.prototype.hasOwnProperty.call(ui, k) && k !== 'view') ui[k] = v;
@@ -1163,8 +1169,7 @@ async function boot() {
   }
   try {
     state.index = await fetchJson('data/index.json');
-    const consolidated = await loadConsolidatedIntoState();
-    if (consolidated) console.log(`Loaded consolidated all-feeds.json`);
+    await loadConsolidatedIntoState();
   } catch {
     state.index = null;
   }

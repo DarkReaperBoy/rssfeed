@@ -156,6 +156,37 @@ ok(!$('#header-menu').classList.contains('hidden'), 'header menu opens');
 click('#btn-more');
 await settle(20);
 
+console.log('star / saved flow');
+const firstRow = $(`#list .row[data-id="${firstId}"]`);
+click(firstRow.querySelector('.star-btn'));
+await settle(50);
+ok($('#badge-starred').textContent === '1', 'star badge shows 1');
+ok($(`#list .row[data-id="${firstId}"] .star-btn`).classList.contains('starred'), 'star button gets starred class');
+click('[data-scope="starred"]');
+await settle(200);
+ok($('#scope-title').textContent === 'Starred', 'starred scope opens');
+let starRows = $$('#list .row');
+ok(starRows.length === 1 && starRows[0].dataset.id === firstId, 'starred view shows the starred article');
+click(starRows[0].querySelector('.star-btn'));
+await settle(50);
+ok($$('#list .row').length === 0, 'unstar empties the starred view');
+click('[data-scope="all"]');
+await settle(50);
+ok($('#badge-starred').textContent === '', 'star badge cleared after unstar');
+
+console.log('search clear on close');
+click('#search-open');
+await settle(20);
+const sinput = $('#search-input');
+sinput.value = 'AI model';
+sinput.dispatchEvent(new window.Event('input', { bubbles: true }));
+await settle(400);
+ok($$('#list .row').length === 1, 'search narrows rows');
+click('#search-close');
+await settle(50);
+ok($$('#list .row').length === TOTAL - HIDDEN, 'closing search clears the active filter');
+ok($('#search-input').value === '', 'search input cleared');
+
 console.log('');
 console.log(`${pass} passed, ${fail} failed`);
 dom.window.close();

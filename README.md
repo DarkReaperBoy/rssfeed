@@ -5,7 +5,7 @@ A self-hosted RSS reader with **no server and no database**:
 - **GitHub Actions** fetches every feed **hourly** (RSS + Atom), extracts clean full text, and publishes the site to the **`gh-pages` branch**
 - **GitHub Pages** serves the Inoreader-style UI
 - **`config.json`** is the entire configuration: settings, folders, feeds and content filters
-- **Read/unread state** lives in your browser (`localStorage`) — unread articles are never auto-pruned; they stay unread until you read or mark them
+- **Read/unread state** lives in your browser (`localStorage`) — nothing is ever auto-marked read; articles stay unread until you read or mark them. Note: articles older than `settings.retentionDays` are dropped from the data files for everyone — the fetcher can't see read state, so retention applies regardless of unread.
 
 ## Setup (3 minutes)
 
@@ -28,10 +28,9 @@ That's it. Every hour the Action re-fetches feeds and force-updates `gh-pages` (
     "siteName": "My Inoreader",
     "theme": "auto",              // auto | light | dark
     "view": "list",               // list | expanded | column | cards | magazine
-    "articlesPerFeed": 200,       // ignored — time-based rolling window (no per-feed cap)
-    "retentionDays": 30,          // everything older than this is pruned at fetch
+    "retentionDays": 30,          // everything older than this is pruned at fetch (read and unread alike)
     "markReadOnOpen": true,       // opening an article marks it read
-    "markReadAfterSeconds": 0,    // …after a delay instead
+    "markReadAfterSeconds": 0,    // …after a delay instead (cancelled if you close it first)
     "refreshMinutes": 60,         // UI polls data/index.json for refreshes
     "fullTextDefault": false      // extract full article text for every feed
   },
@@ -68,7 +67,7 @@ That's it. Every hour the Action re-fetches feeds and force-updates `gh-pages` (
 ```
 
 - Plain strings are **case-insensitive substrings**; `/pattern/flags` strings are **regexes**
-- Fields: `title`, `content`, `content`/`summary` text, `authors`, `links`
+- Fields: `title`, `content` (body + summary text), `authors`, `links`
 - Within a field entries are OR'ed, across fields AND'ed
 - No `include`/`exclude` at all → the filter matches **everything in scope** (e.g. `keepUnread` for a newsletter feed)
 - Filters are read by the UI on every load — edits apply immediately, no refetch needed
@@ -76,13 +75,13 @@ That's it. Every hour the Action re-fetches feeds and force-updates `gh-pages` (
 ## Features
 
 - Folders + feeds with live unread counts (folder & global totals) — **click a counter to mark that section read** (with Undo)
-- **Unread is sacred**: nothing marks an article read except you (open, mark buttons, bulk, or a `markRead` filter). Unread articles are never removed by retention within the kept window
+- **Unread is sacred**: nothing marks an article read except you (open, mark buttons, bulk, or a `markRead` filter). Stars (★ on rows and in the reader) save articles for later — the Starred sidebar view lists them; stars live in `localStorage`
 - All/Unread/Read chips, date filters (today / 3 days / week / month), All·Unread·Today·Recently read views, newest/oldest sort
 - **All five Inoreader layouts**: List (Comfort/Compact/Ultra density), Expanded, Column, Cards, Magazine — light/dark/auto theme
 - Inline reading pane with prev/next, original site link, mark read/unread, "keep unread", attachments list
 - **Text view**: feeds with `fullText` get readability-extracted clean article text (vs. truncated feed content)
 - **Embeds**: YouTube/Vimeo click-to-play (privacy `youtube-nocookie`), SoundCloud, inline audio/video players
-- Search with operators: `feed:bbc title:ai before:2026-01-01 after:2025-12-01 unread:true is:read`, plus `OR` groups
+- Search with operators: `feed:bbc title:ai before:2026-01-01 after:2025-12-01 unread:true is:read is:unread`, plus `OR` groups
 - Full-text search across titles, authors, summaries and article bodies
 - Settings mirroring Inoreader preferences: titles-only, open-original mode, feed icons, scroll tracking, multiple select (bulk mark read/unread with undo), absolute dates, title font size, compact sidebar, tab-title unread counter, sidebar options (updated-only / dim read / sort A–Z)
 - All preferences are configured in `config.json` (no in-app settings modal)

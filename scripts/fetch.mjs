@@ -14,7 +14,6 @@ const ROOT = new URL('..', import.meta.url).pathname;
 const DATA_DIR = path.join(ROOT, 'data');
 const FEEDS_DIR = path.join(DATA_DIR, 'feeds');
 const UA = 'Mozilla/5.0 (compatible; ghrss-fetcher/1.0; +https://github.com/)';
-const TEXT_EXTRACT_AGE_DAYS = 30;
 const TEXT_EXTRACT_BUDGET = 20;
 const TEXT_EXTRACT_MIN_LEN = 400;
 const RETENTION_DAYS = 30;
@@ -27,7 +26,7 @@ const parser = new Parser({
 
 const sanitizeOpts = {
   allowedTags: sanitizeHtml.defaults.allowedTags.concat([
-    'img', 'h1', 'h2', 'figure', 'figcaption', 'picture', 'source', 'video', 'audio', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'hr', 'br', 'blockquote', 'pre', 'code', 'iframe', 'button', 'span', 'center',
+    'img', 'h1', 'h2', 'figure', 'figcaption', 'picture', 'source', 'video', 'audio', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'hr', 'br', 'blockquote', 'pre', 'code', 'iframe', 'span',
   ]),
   allowedAttributes: {
     ...sanitizeHtml.defaults.allowedAttributes,
@@ -39,7 +38,8 @@ const sanitizeOpts = {
     iframe: ['src', 'width', 'height', 'frameborder', 'allow', 'allowfullscreen', 'loading', 'title'],
     '*': ['class', 'style'],
   },
-  allowedSchemes: ['http', 'https', 'mailto', 'data'],
+  // No global 'data' scheme: <a href="data:text/html,…"> must never survive (only images get data:).
+  allowedSchemes: ['http', 'https', 'mailto'],
   allowedSchemesByTag: { img: ['http', 'https', 'data'], iframe: ['https'], video: ['https'], audio: ['https'] },
   allowProtocolRelative: false,
   transformTags: {
@@ -137,11 +137,17 @@ function pickContent(item) {
 
 function pickEnclosures(item) {
   const out = [];
+  // Player-embed URLs (YouTube / flash) are not real attachments — listing them
+  // showed a junk "APPLICATION · <id>" link on every YouTube article.
+  const EMBED_JUNK = /(?:youtube\.com\/(?:v|e|embed|watch)|youtu\.be\/|googlevideo\.com\/)/i;
   const push = (url, type) => {
-    if (url && /^https?:\/\//.test(url)) out.push({ url, type: (type || '').split(';')[0].trim() });
+    if (!url || !/^https?:\/\//.test(url)) return;
+    if (/x-shockwave-flash/i.test(type || '')) return;
+    if (EMBED_JUNK.test(url)) return;
+    out.push({ url, type: (type || '').split(';')[0].trim() });
   };
   for (const e of item.enclosures || []) push(e.url, e.type);
-  for (const m of item.mediaContent || []) push(m.$?.url, m.$?.['media:content'] || m.$?.type);
+  for (const m of item.mediaContent || []) push(m.$?.url, m.$?.type);
   const thumb = item.mediaThumbnail?.$?.url;
   if (thumb) push(thumb, 'image/thumbnail');
   // YouTube Atom feeds nest media inside media:group.
@@ -150,8 +156,6 @@ function pickEnclosures(item) {
     for (const m of mg['media:content'] || []) push(m.$?.url, m.$?.type);
     const t = (mg['media:thumbnail'] || [])[0]?.$?.url;
     if (t) push(t, 'image/thumbnail');
-    const desc = mg['media:description'];
-    // nothing to push
   }
   for (const l of item.links || []) if (l.rel === 'enclosure') push(l.href, l.type);
   return out;
@@ -294,9 +298,10 @@ async function main() {
       const date = pickDate(item) || now;
       const content = pickContent(item);
       const prevA = prevById.get(id);
-      const summary = stripTags(content).slice(0, 300);
+      const plain = stripTags(content);
+      const summary = plain.slice(0, 300);
       let text = prevA?.text || null;
-      const feedGivesEnough = stripTags(content).length >= TEXT_EXTRACT_MIN_LEN;
+      const feedGivesEnough = plain.length >= TEXT_EXTRACT_MIN_LEN;
       if (wantText && !text && !feedGivesEnough && textBudget > 0 && now - date < retentionDays * 86400000 && link) {
         textBudget--;
         try {
