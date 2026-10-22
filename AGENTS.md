@@ -1,6 +1,6 @@
-# AGENTS.md — GitHub-Actions RSS Reader ("Inoreader on Pages")
+# AGENTS.md — GitHub-Actions RSS Reader ("rssfeed on Pages")
 
-A self-hosted, serverless RSS reader that is a **1:1 UI clone of Inoreader**, fed by the user's real subscriptions.
+A self-hosted, serverless RSS reader that is a **1:1 UI clone of Inoreader**, fed by the user's real subscriptions (RSS/Atom + YouTube channels + 4chan boards).
 
 > **Maintenance rule for agents:** this file must stay truthful. Whenever you
 > change behavior, schemas, file layout or scope, update the relevant section
@@ -11,11 +11,11 @@ A self-hosted, serverless RSS reader that is a **1:1 UI clone of Inoreader**, fe
 
 ## Architecture
 
-- **Fetching backend**: GitHub Actions (`.github/workflows/fetch.yml`) runs **hourly** (`cron: '0 * * * *'`), on `workflow_dispatch`, and **on every push to `main`** (`push: branches: [main]`). It runs `scripts/fetch.mjs`, which downloads every feed (from `feeds.opml` when present, else `config.json` — see below), extracts optional full-text, keeps **only the last `settings.retentionDays` days with no per-feed article cap**, tracks per-feed fetch status (warning icon on failure), purges feeds removed from the source, and writes static JSON into `data/`.
+- **Fetching backend**: GitHub Actions (`.github/workflows/fetch.yml`) runs **hourly** (`cron: '0 * * * *'`), on `workflow_dispatch`, and **on every push to `main`** (`push: branches: [main]`). It runs `scripts/fetch.mjs`, which downloads every feed (from `feeds.opml` when present, else `config.json` — see below), drops **YouTube Shorts** (`settings.dropShorts`, default on: `/shorts/` links + `#short(s)` tags), ingests **4chan boards** (`"type": "4chan"`, any board, via `a.4cdn.org` — ≤1 req/s, `If-Modified-Since`, live-replace semantics, see Conventions), applies optional **per-feed word filters** at ingest, extracts optional full-text, keeps **only the last `settings.retentionDays` days with no per-feed article cap** (4chan feeds exempt — they replace wholesale), tracks per-feed fetch status (warning icon on failure), purges feeds removed from the source, and writes static JSON into `data/`.
 - **Publishing**: the same workflow assembles the site (`index.html`, `assets/`, `config.json`, `data/`) into `_site/` and **force-pushes it to the `gh-pages` branch**. GitHub Pages serves from `gh-pages` branch root. The default branch stays clean: source only, no data commits, no node artifacts.
 - **UI**: pure static site served by **GitHub Pages** (`index.html`, `assets/styles.css`, `assets/app.js`). No build step, no framework, no npm deps on the client.
 - **Never commit**: `node_modules/`, `_site/` (both in .gitignore). `package.json`/`package-lock.json` ARE committed (CI needs `npm ci`).
-- **Config**: files in the repo are the *entire* configuration — there is no settings UI. `config.json` holds settings, folders, feed entries and **content filters** (inclusion + exclusion). Optionally, **`feeds.opml`** at repo root (e.g. an Inoreader export) provides the feed list server-side: the fetcher imports it (feed id = diacritic-stripped title slug, folder = enclosing outline title); `config.feeds` entries with the same id/url override the imported fields, config-only feeds are appended, and `config.folders` overrides folder names/`maxAgeDays` by id. Current live set: **6 folders, 59 feeds** in `config.json` (mostly YouTube channel Atom feeds); no `feeds.opml` committed yet.
+- **Config**: files in the repo are the *entire* configuration — there is no settings UI. `config.json` holds settings, folders, feed entries (incl. 4chan boards and per-feed `filter` blocks) and **content filters** (inclusion + exclusion). Optionally, **`feeds.opml`** at repo root (e.g. an Inoreader export) provides the feed list server-side: the fetcher imports it (feed id = diacritic-stripped title slug, folder = enclosing outline title); `config.feeds` entries with the same id/url override the imported fields, config-only feeds are appended, and `config.folders` overrides folder names/`maxAgeDays` by id. Current live set: **6 folders, 60 feeds** in `config.json` (59 YouTube channel Atom feeds + one 4chan board, `/g/` with `minReplies: 300` in the *AI News* folder); no `feeds.opml` committed yet.
 - **Read/unread state**: `localStorage` only (per browser/device). Nothing auto-marks articles read — an article stays unread until the user reads or marks it. **Retention is date-based for everyone**: at fetch time everything older than `settings.retentionDays` is dropped (the fetcher cannot see read state), so unread articles older than the window disappear too. The stored feed state is **versioned** (`ghrss:ver` ← `STORAGE_VERSION` in app.js): a browser arriving on a different version gets its read/keep-unread state wiped once (a deployable reset), and the ⋯ menu's **Reset read state** offers the same wipe on demand.
 
 There is deliberately **no server, no database, no auth, no token**. Anything that cannot work as static files + GitHub Actions is out of scope.
@@ -30,8 +30,8 @@ assets/app.js          # entire UI logic (single file, plain ES2020, no modules)
 assets/styles.css      # Inoreader replica styling, light+dark themes
 data/index.json        # generated locally/CI: folder registry + per-feed metadata/counts + generatedAt
 data/feeds/<feedId>.json  # generated: { articles: [...] } newest-first
-data/all-feeds.json    # generated: consolidated payload for fast first load
-scripts/fetch.mjs      # fetcher/extracter run by Actions (Node >= 20, ESM)
+scripts/fetch.mjs      # fetcher/extracter run by Actions (Node >= 20, ESM; importable for tests — main() only runs as CLI)
+scripts/4chan.mjs      # 4chan catalog→article helpers (pure functions; fetcher owns I/O + sanitization)
 scripts/smoke.mjs      # jsdom smoke test of the UI against deterministic fixtures (npm run test:ui)
 .github/workflows/fetch.yml  # hourly + push-triggered fetch + publish to gh-pages
 package.json           # fetch-script deps only (rss-parser, jsdom, @mozilla/readability, sanitize-html)
@@ -42,14 +42,15 @@ package.json           # fetch-script deps only (rss-parser, jsdom, @mozilla/rea
 ```jsonc
 {
   "settings": {
-    "siteName": "My Inoreader",
+    "siteName": "My RSSFeed",
     "theme": "auto",              // auto | light | dark — config-owned (no UI toggle), re-applied every load
     "view": "list",               // default layout for NEW visitors: list | expanded | column | cards | magazine
-    "retentionDays": 30,          // fetcher: keep only this window — read and unread alike (fetcher has no read state)
+    "retentionDays": 30,          // fetcher: keep only this window — read and unread alike (fetcher has no read state); 4chan feeds exempt
     "markReadOnOpen": true,       // client: mark read when article is expanded
     "markReadAfterSeconds": 0,    // client: delay before marking read (0 = immediate; cancelled if the article is closed first)
     "refreshMinutes": 60,         // client UI poll interval for data/index.json
     "fullTextDefault": false,     // fetcher: extract full text for every feed unless feed.fullText overrides
+    "dropShorts": true,            // fetcher: drop YouTube Shorts (/shorts/ links + #short(s) tags); per-feed "dropShorts": false opts a channel back in
     "density": "comfort",          // list density: comfort | compact | ultra
     "titlesOnly": false,           // hide row excerpts
     "openOriginal": false,         // row click opens the original site instead of the reader
@@ -64,7 +65,7 @@ package.json           # fetch-script deps only (rss-parser, jsdom, @mozilla/rea
     "updatedOnly": false,          // sidebar: only feeds with unread items
     "dimRead": false,              // sidebar: dim rows with nothing unread
     "sortAZ": false,               // sidebar sorted A–Z
-    "countersClickable": true,     // badge click marks that feed/folder read
+    "countersClickable": true,     // badge click (incl. Newsfeed/Today ticks) marks that section read
     "titleCounter": true,          // "(N)" unread prefix in the tab title
     "showToday": false             // show the Today row in the sidebar
   },
@@ -76,12 +77,29 @@ package.json           # fetch-script deps only (rss-parser, jsdom, @mozilla/rea
     {
       "id": "hacker-news",        // unique, kebab-case, = data/feeds/<id>.json filename
       "title": "Hacker News",
-      "url": "https://...",       // RSS or Atom
+      "url": "https://...",       // RSS or Atom (omit for type: "4chan")
       "site": "https://...",      // site root (favicons, attribution)
       "folder": "tech",           // optional; use folder (string) OR folders (array) — a feed may sit in several folders
       "folders": ["tech", "news"],
       "fullText": true,           // optional; overrides settings.fullTextDefault
-      "enabled": true             // optional; false => fetcher skips it
+      "dropShorts": false,         // optional; overrides settings.dropShorts (YouTube feeds only)
+      "enabled": true,             // optional; false => fetcher skips it
+      "filter": {                  // optional; server-side ingest filter — same matcher semantics as config.filters, applied by the fetcher (dropped items never enter the data)
+        "include": { "title": ["release"] },
+        "exclude": { "title": ["sponsored"] }
+      }
+    },
+    {
+      "id": "4chan-g",            // 4chan boards are feeds: any board, reply window, word filters (see Conventions)
+      "type": "4chan",
+      "board": "g",
+      "title": "/g/ - Technology",
+      "site": "https://boards.4channel.org/g/",
+      "folder": "ai-news",
+      "minReplies": 300,           // only threads with >= N replies; maxReplies/minImages/maxImages optional windows
+      "includeSticky": false,      // stickies (board rules) skipped by default; includeClosed likewise
+      "maxThreads": 30,            // optional cap per fetch
+      "filter": { "exclude": { "title": ["/\\bptg\\b/"] } }
     }
   ],
   "filters": [ /* see below */ ]
@@ -114,6 +132,8 @@ Matcher semantics:
 - Within one field, entries are OR'ed. Across non-empty fields, conditions are AND'ed (an article must satisfy every provided field of the block).
 - An exclusion block matches → the `actions` apply. If `include` is present, articles **not** matching it are also excluded (whitelist behavior) and `actions` apply to them too.
 - The UI always reads filters from `config.json` (never baked into data/), so filter edits take effect without waiting for a refetch. Counts are computed client-side from local read state.
+- **Per-feed `filter`** (in the feed entry) is the fetcher-side equivalent with the same matcher semantics (fields: `title`, `content`, `author`, `link` — OR within a field, AND across fields, `/regex/flags` supported): it runs at ingest time and dropped items never enter the data files. Global `config.filters` scope by feed id, so 4chan feeds (e.g. `"feeds": ["4chan-g"]`) are filterable client-side too.
+- **`settings.dropShorts`** (default `true`) drops YouTube Shorts at fetch time for YouTube feeds only (detected via `/shorts/` item links — confirmed against live feeds — plus `#short`/`#shorts` tags in title/description). Per-feed `"dropShorts": false` restores a channel. This is a fetch-time drop (not a client filter) because Shorts slop shouldn't even reach the data files.
 
 ## data/ schemas (generated — never hand-edit)
 
@@ -128,20 +148,21 @@ Matcher semantics:
 `folders` is the merged folder registry (feeds.opml folders + config.folders overrides by id) that the sidebar renders; the UI falls back to `config.folders` for data files generated before this field existed.
 
 `data/feeds/<feedId>.json`:
-```json
+```jsonc
 { "articles": [ {
-  "id": "stable-id",       // sha1(link|title), first 16 hex — stable across refetches; read state keys on it and the URL hash deep-links it (#article/<id>)
+  "id": "stable-id",       // sha1(link|title) for RSS; sha1(link) for 4chan (thread numbers never change) — first 16 hex, stable across refetches; read state keys on it and the URL hash deep-links it (#article/<id>)
   "title": "...",
   "link": "https://...",
-  "author": "...",
-  "date": 1730000000000,   // ms epoch; fallback = fetch time
+  "author": "...",           // 4chan: null for Anonymous posts
+  "date": 1730000000000,   // ms epoch; fallback = fetch time; 4chan = OP post time
   "summary": "plain text snippet for lists",
-  "content": "<p>feed-provided HTML (sanitized)</p>",
+  "content": "<p>feed-provided HTML (sanitized)</p>",  // 4chan: OP image (thumb→full link) + OP comment + "N replies · M images · Open the thread"
   "text": "<p>readability-extracted full text (sanitized), optional</p>",
-  "enclosures": [{ "url": "https://...mp3", "type": "audio/mpeg" }],
+  "enclosures": [{ "url": "https://...mp3", "type": "audio/mpeg" }],  // 4chan: [{ url: "https://i.4cdn.org/<board>/<tim>s.jpg", type: "image/thumbnail" }]
   "fetchedAt": 1730000000000
 } ] }
 ```
+Feed status in `data/index.json` carries `lastModified` for 4chan feeds (the catalog's `Last-Modified`, replayed as `If-Modified-Since`; a 304 keeps the previous file).
 
 ## Conventions & constraints
 
@@ -151,13 +172,17 @@ Matcher semantics:
 - localStorage maps are kept on **null-prototype objects** so feed GUIDs like `constructor` or `__proto__` can't fake lookups or pollute prototypes.
 - **Embeds**: the client upgrades bare media links in article bodies to players — YouTube (watch/youtu.be → `youtube-nocookie.com/embed/<id>` iframe), Vimeo, SoundCloud (lazy iframe on click), direct audio/video → HTML5 player. Never fetch remote JS.
 - Favicons: `https://www.google.com/s2/favicons?domain=<host>&sz=64` (external, degrade to letter-tile on error).
-- **Unread is sacred**: nothing may mark an article read except (a) the user opening it (per settings), (b) the user's explicit "mark all as read"/"mark read", or (c) a filter with `markRead: true`. `keepUnread` filters beat (a).
+- **Unread is sacred**: nothing may mark an article read except (a) the user opening it (per settings), (b) the user's explicit "mark all as read"/"mark read", or (c) a filter with `markRead: true`. `keepUnread` filters — and the user's explicit keep-unread flags (`ghrss:kept`) — beat (a) AND (c): the client skips re-ingest for kept articles, so an automation never eats an article the user pinned.
 - **No vanishing rows** (user requirement): a row the user just read lingers in the Unread view (tick flips to ✓) until they move on — opening another article, prev/next, a status/date-filter change, bulk mark or mark-all clears the linger set (`state.keepVisible`). Scroll tracking is exempt (those rows are already off-screen).
+- **Mark-all ⇄ mark-as-unread** (user requirement): the top ✓ button is the SAME button in two modes. When the current scope is fully caught up (no unread, not filter-hidden, all scope feeds settled — `allReadInScope`), it flips: title → "Mark all as unread", icon → unread circle, the ▾ dropdown label → "Mark as unread articles" and its Older-than items restore by age (`markScopeUnread`, with Undo). It only happens when *everything* is read — any unread article keeps the mark-as-read mode. `state.settled` tracks feeds that finished loading (or 404'd) so the mode never flips prematurely on lazy-loaded scopes. The "All caught up 🎉" empty state advertises the flipped button.
+- **Folders select, chevrons expand** (user requirement): clicking a folder row selects the folder (shows its articles) and does NOT expand it — the `svg.chev` inside the row is the one true expand/collapse control (own delegated click branch, `renderTree`-only re-render, selection untouched).
+- **Sidebar ticks**: every unread badge is a mark-read tick — folder rows, feed rows, and the Newsfeed (`data-markread="all"`) + Today (`data-markread="today"`) rows; the CSS ✓-hover hint and `countersClickable` gating apply to all of them. The sidebar footer (`#last-updated`) shows "Updated X ago" (`#last-updated-text`) plus a "Powered by rssfeed" credit link to the project.
 - Read state lives in localStorage under namespace `ghrss:` (`ghrss:read` = {id: timestamp}, `ghrss:kept` = {id: true}, `ghrss:ui` = the user's OWN UI toggles only — config-owned prefs are never persisted there, `ghrss:ver` = storage layout version). Article ids must be stable or read state is lost.
 - **Deep links** (user requirement): the open article lives in the URL hash (`#article/<id>`; the id is the stable sha1 article hash — random-looking but deterministic, so links survive hourly refetches; truly random ids would break every Action run). One URL-driven open/close path (`openArticle`/`closeArticle` + `openViaHash`/`closeViaHash` + a `hashchange` sync): opening (row click, prev/next) **pushes** a history entry — Back/Forward walk the opened articles; closing (collapse button, Escape, re-click, scope/view change, mark-all) uses `history.replaceState` so it never stacks "closed" entries. Boot restores `#article/<id>` after a refresh with click-identical semantics (mark-read rules included); a hash whose article left the retention window or is filter-hidden self-heals (cleared + toast).
 - **Feed-storage versioning** (user requirement): `STORAGE_VERSION` in app.js (currently 2) is stored per browser in `ghrss:ver`. Arriving with a different version wipes `ghrss:read`/`ghrss:kept` once (UI prefs survive). This is the mechanism behind the requested "reset the current feed storage"; bump it to reset everyone again. The ⋯-menu "Reset read state" does the same wipe on demand.
 - The publish commit on `gh-pages` uses `[skip ci]` and `github-actions[bot]` identity. Fetch failures for one feed must not fail the run (log + continue). The default branch gets **no** CI commits.
-- Node >= 20 (global fetch). Fetcher must be idempotent and CI-friendly: no interactivity, exit 0 on partial failure, cap text-extraction fetches (~20 newest unextracted per feed per run).
+- Node >= 20 (global fetch). Fetcher must be idempotent and CI-friendly: no interactivity, exit 0 on partial failure, cap text-extraction fetches (~20 newest unextracted per feed per run). `scripts/fetch.mjs` only runs `main()` when invoked as a CLI (`import.meta.url === pathToFileURL(argv[1])`), so tests import its pure exports (`isShortItem`, `compileMatcherSrv`, `compileBlockSrv`, `feedFilterDrop`) — 4chan helpers live in `scripts/4chan.mjs` (pure; the fetcher owns network I/O).
+- **4chan ingestion** (per the [4chan API](https://github.com/4chan/4chan-API) global rules): ≤1 request/second across all 4chan endpoints (`chanThrottle` — 1.1s spacing incl. boards.json), `If-Modified-Since` on catalog requests (304 → keep previous file), proper User-Agent. `boards.json` (cached per run) resolves the work-safe domain (boards.4channel.org vs boards.4chan.org) + real board titles; an unknown board fails that feed with a clear error. **Live-replace semantics**: each run replaces the board's article set — 404'd threads leave instead of lingering for retentionDays (ids stay stable for survivors via sha1(thread link)); sticky/closed threads are skipped unless opted in. `retentionDays` does not apply to 4chan feeds. Threads → articles: subject (or first OP comment line) is the title, OP comment + thumbnail = body, `N replies · M images · Open the thread` footer, enclosure = small square thumb.
 - **No duplicated navigation** (user requirement): the left rail (`#tabs_pane`) is a *module switcher* only (Newsfeed/Dashboards/Feeds/Saved/Automate/Search/Add feed + Audio player/Notifications/Support/Settings/profile/dock). Status views (All/Unread/Today/Recently read) live **only** in the header ⋯ menu; the sidebar tree holds **only** the opt-in Today row + Newsfeed + folders/feeds — exactly the real app's DOM.
 
 ## UI parity state (verified against the user's saved real-reader capture, 2026-10-22)
@@ -168,16 +193,18 @@ Replicated 1:1 (structural, from their DOM/CSS):
 - `#wraper > #side-nav(#tabs_pane 72px rail: .tab-item icon tiles, active tile `#597fb8`, `.tabs-counter` badge `#597fb8` + `#134b91` outline; #tree_pane 310px with `#feeds_nav/#saved_nav/#automation_nav/#profile_nav/#placeholder_nav` panels, `#subscriptions_fieldset` = Today (`hidden` by default, settings toggle) + Newsfeed + `#tree`, drag `#sidebar_resizer`, foot `#last-updated`) > `#content-wrapper(#header_pane` sticky 50px: title + "N unread" + title dropdown (Feed properties / Set as start page / PRO-shielded items), split `✓|▾` mark-all `.btn-heading` group, expanding search, ⋯ menu with article-list status / multiple select / show filtered / refresh / **reset read state** / 5 layouts / date / sort; `#reader_pane`)`.
 - Split list+reader: `#list-pane` + `#reader-slot` (the reader pane is simply empty until an article is opened — the "Select an article" placeholder text was removed at the user's request), reader toolbar (prev/next, open-original, close) + linked title + source/date/reading-time sub-row, scroll up/down buttons.
 - List rows: `[favicon+feed][row-main(title + inline excerpt)][date right]` + control strip (open-in-new-tab, keep-unread, read tick). Attachments list in the reader.
-- Mark-all split button `✓|▾` with dropdown: "Mark all as read" / "Older than a day…" / "Older than two days…" / "Older than three days…" / "Older than a week…" (marks matching older items read).
+- Mark-all split button `✓|▾` with dropdown: "Mark all as read" / "Older than a day…" / "Older than two days…" / "Older than three days…" / "Older than a week…" (marks matching older items read) — and the same group flips to "Mark as unread articles" when the scope is fully caught up.
 - Design tokens: primary `#1875F3`, Roboto, headings `#081425/#1a2433`, gray `#71747a`, borders `#e9eaf0`, `.btn-heading` `#edeff2/#dee2e7/#cfd5dd`, reader column 870px.
-- Features: all 5 layouts + comfort/compact/ultra density + newest/oldest sort, search operators + OR, date filters, config include/exclude filters, badge-click mark-read + Undo toast, scroll tracking, titles-only, open-original, bulk multi-select + bulk bar (row click selects in bulk mode), absolute dates, title font size, compact sidebar, tab-title unread counter, attachments list, mark-all confirm, **Estimated reading time in reader**. The row's single read-state indicator is the tick button (✓/○) — the blue unread dot was removed at the user's request; the reader title links to the original article. (Row ⋯ context menu, Copy link, stars/read-later, and state export/import were removed — see Generated 2026-10-23 (2).)
+- Features: all 5 layouts + comfort/compact/ultra density + newest/oldest sort, search operators + OR, date filters, config include/exclude filters, badge-click mark-read + Undo toast, scroll tracking, titles-only, open-original, bulk multi-select + bulk bar (row click selects in bulk mode), absolute dates, title font size, compact sidebar, tab-title unread counter + open-article title (`(N) My RSSFeed - <title>`), attachments list, mark-all confirm, mark-as-unread restore when caught up, **Estimated reading time in reader**. The row's single read-state indicator is the tick button (✓/○) — the blue unread dot was removed at the user's request; the reader title links to the original article. (Row ⋯ context menu, Copy link, stars/read-later, and state export/import were removed — see Generated 2026-10-23 (2).)
 - Server-side-only items (Archive/Annotated/Web pages/Uploads, Rules/Filters/Spotlights/Email digests, Plans/Invite friends) render **inert** with tooltips — visible for 1:1 chrome, honest about being unavailable offline.
 
 **Out of scope** (cannot exist as static files, or explicitly unwanted): accounts/auth, real notification/rule/dashboard backends, tags, notes, keyboard shortcuts, AI summaries, translations, OPML import/export **UI** (file-based `feeds.opml` import IS supported — done by the fetcher, since the frontend never decides what to fetch), timezone pickers, popularity scores, custom CSS, stars/read-later (removed at the user's request — "useless").
 
-Smoke test: `node scripts/smoke.mjs` boots the real `index.html` + `app.js` in jsdom against **deterministic in-memory fixtures** (the real feed list is 59 YouTube feeds — disk data would make tests slow/network-dependent) and asserts chrome, filters, scopes, layouts, config-owns-settings (theme), double-click linger + move-on refilter, mark-all split with undo, search-clear-on-close, bulk select, **deep links** (hash in URL on open, cleared on collapse, Back/Forward reopen articles, boot-with-hash restores the article + storage-version reset semantics), reset-read menu, panels, menus, and interactions (**66 assertions**, all passing).
+Smoke test: `node scripts/smoke.mjs` boots the real `index.html` + `app.js` in jsdom against **deterministic in-memory fixtures** (the real feed list is 59 YouTube feeds + a 4chan board — disk data would make tests slow/network-dependent) and asserts chrome, filters, scopes, layouts, config-owns-settings (theme), double-click linger + move-on refilter, mark-all split with undo, search-clear-on-close, bulk select, **deep links** (hash in URL on open, cleared on collapse, Back/Forward reopen articles, boot-with-hash restores the article + storage-version reset semantics), reset-read menu, panels, menus, and interactions — plus the new behaviors (tab-title format, Newsfeed/Today badge ticks, mark-all⇄mark-unread toggle incl. older-than restores, folder-selects/chevron-expands, sidebar credit) and **unit tests** for fetch.mjs (Shorts detection, per-feed word filters) and 4chan.mjs (catalog flattening, reply/sticky/closed windows, thread→article shape, id stability, word filters) — **123 assertions**, all passing.
 
 ## Generated
+
+- 2026-10-23 (4): **4chan boards + Shorts ban + mark-as-unread + QoL batch** (user request). **New sources**: (1) YouTube Shorts are dropped at fetch time (`settings.dropShorts`, default ON — confirmed live that channel feeds ship Shorts with `/shorts/` links; `#short(s)` tags also detected; per-feed `"dropShorts": false` opts back in) — the 59-feed run dropped 22 Shorts; (2) **4chan boards as feeds** (`"type": "4chan"`, any board) via the read-only a.4cdn.org JSON API: `scripts/4chan.mjs` (pure thread→article: subject/first-line title, OP comment body + thumbnail enclosure, `N replies · M images · Open the thread`, sha1(thread-link) stable ids), fetcher honors the API rules (≤1 req/s throttle incl. boards.json, If-Modified-Since + 304 path with `status.lastModified`, work-safe domain from boards.json, unknown-board error), config knobs: `minReplies/maxReplies/minImages/maxImages/includeSticky/includeClosed/maxThreads` + per-feed `filter` word blocks (same matcher semantics as global filters — AND across fields, OR within, /regex/flags) — `/g/` with `minReplies: 300` added to the AI News folder; live-replace semantics (404'd threads leave; no retention merge). **Fixed (user reports)**: the Newsfeed + Today sidebar ticks never worked (badges showed the CSS ✓ hint but had no `data-markread`) — both are real mark-read ticks now; clicking a folder both selected AND expanded it — selecting no longer expands, the `svg.chev` is the sole expand control. **New QoL (user requests)**: when a feed/folder/newsfeed is fully caught up, the SAME top ✓ button flips to "Mark all as unread" (icon + ▾ menu label flip; Older-than entries restore by age; confirm + Undo; only when everything is read — `state.settled` prevents premature flips on lazy-loaded scopes; caught-up empty state advertises it); tab title shows `(N) My RSSFeed - <open article title>`; rebrand "My Inoreader" → "My RSSFeed" everywhere (tab, config default, smoke fixtures); sidebar footer got a "Powered by rssfeed" credit link next to the Updated line. **Fixed (rescan)**: config `markRead` filters re-ate articles the user explicitly kept unread on every refresh (keep flags now beat filter ingest); duplicate media:thumbnail enclosures on YouTube feeds deduped; fetch.mjs made importable (CLI guard) so smoke unit-tests its pure exports. Verified live end-to-end: full fetch (60 feeds, 0 failures, /g/ = 6 threads ≥300 replies) + browser session (deep link on a /g/ thread, mark-all→mark-unread round-trip, zero console errors). Smoke 66 → **123 assertions** (57 new: UI behaviors + 4chan/Shorts/word-filter unit tests). Docs updated in the same commit per the maintenance rule.
 
 - 2026-10-23 (3): **Deep links + feed-storage reset** (user request: "reset the current feed storage" + "article id in the URL so refresh keeps me on the same article and Back undoes a misclick"). The open article now lives in the URL as `#article/<id>`; the id is the existing `sha1(link|title).slice(0,16)` — random-looking AND deterministic, which is exactly what makes refresh-restore survive hourly refetches (truly random ids would churn on every Action run). Single URL-driven open/close path in app.js: opens (row click, prev/next) push a history entry → Back/Forward walk opened articles; closes (collapse, Escape, re-click, scope/view change, mark-all) replaceState the hash away (no history spam); boot restores the hashed article with click-identical mark-read semantics; stale hashes (aged-out/filter-hidden) self-heal with a toast. Storage reset: `STORAGE_VERSION` (localStorage `ghrss:ver`, currently 2) — arriving browsers get read/keep state wiped once (UI prefs kept); deployed as the requested one-time reset. New **Reset read state** ⋯-menu item (confirm dialog + toast) for on-demand wipes. Docs updated in the same commit per the maintenance rule. Smoke 48 → **66 assertions** (hash lands in URL, collapse clears it, Back/Forward reopen, boot-with-hash restores + marks read, version-wipe + same-version survival, menu reset empties storage).
 

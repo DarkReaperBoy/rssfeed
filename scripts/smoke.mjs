@@ -42,7 +42,7 @@ const FIX = {
 
 const config = {
   // theme is a config-owned pref with no UI toggle — it must apply on EVERY load.
-  settings: { siteName: 'My Inoreader', theme: 'dark', view: 'list', refreshMinutes: 60, markReadOnOpen: true },
+  settings: { siteName: 'My RSSFeed', theme: 'dark', view: 'list', refreshMinutes: 60, markReadOnOpen: true },
   folders: [], // folder names come from the generated index.json (as with feeds.opml)
   feeds: [
     { id: 'fixture-hn', title: 'Hacker News', url: 'https://hnrss.test/frontpage', site: 'https://news.ycombinator.com', folder: 'tech' },
@@ -235,6 +235,83 @@ ok(Number($('#badge-all-items').textContent) === TOTAL - HIDDEN, 'reset makes ev
 ok(window.localStorage.getItem('ghrss:read') === '{}', 'stored read state is emptied');
 ok(window.localStorage.getItem('ghrss:kept') === '{}', 'stored keep-unread state is emptied');
 
+console.log('tab title format');
+const tRow = $('#list .row');
+const tTitle = tRow.querySelector('.row-title').textContent;
+ok($('#badge-all-items').dataset.markread === 'all', 'Newsfeed badge is a working mark-all tick');
+ok($('#badge-today').dataset.markread === 'today', 'Today badge is a mark-read tick');
+const unreadBefore = Number($('#badge-all-items').textContent);
+click(tRow);
+await settle(50);
+ok(window.document.title === `(${unreadBefore - 1}) My RSSFeed - ${tTitle}`, 'open article → "(N) My RSSFeed - Article title"');
+await settle(20);
+click($('#list .row')); // collapse
+await settle(50);
+ok(window.document.title === `(${unreadBefore - 1}) My RSSFeed`, 'closing → back to "(N) My RSSFeed"');
+ok(!!$('#last-updated a[href="https://github.com/DarkReaperBoy/rssfeed"]'), 'sidebar footer credits the project');
+ok($('#last-updated-text').textContent.includes('Updated'), 'updated line still shows under the credit');
+
+console.log('mark-all ⇄ mark-as-unread toggle (same button)');
+const rowsBeforeMarkAll = rowCount();
+click('#badge-all-items');
+await settle(50);
+ok(rowCount() === 0, 'badge tick marks the whole Newsfeed read');
+ok($('#empty').textContent.includes('All caught up'), 'empty state says "All caught up 🎉"');
+ok(!!$('#empty .empty-hint'), 'caught-up hint points at the flipped button');
+ok($('#btn-mark-all').title === 'Mark all as unread', 'the SAME button flips to "Mark all as unread"');
+ok($('#mark-menu .mark-label').textContent === 'Mark as unread articles', 'dropdown label flips to "Mark as unread articles"');
+ok($('#mark-menu').dataset.mode === 'unread', 'mark menu carries the unread mode');
+click('#btn-mark-all');
+await settle(20);
+ok(!$('#confirm-modal').classList.contains('hidden'), 'mark-as-unread asks for confirmation');
+click('#confirm-yes');
+await settle(50);
+ok(rowCount() === rowsBeforeMarkAll, 'mark as unread restores every article');
+ok($('#toast-text').textContent.includes('articles as unread'), 'restore toast reports the count');
+ok($('#btn-mark-all').title === 'Mark all as read', 'button flips back once articles are unread');
+
+click('#badge-all-items'); // everything read again
+await settle(50);
+ok(rowCount() === 0, 'badge tick re-marks everything read');
+click('#btn-mark-all-split');
+await settle(20);
+ok($('#mark-menu .mark-label').textContent === 'Mark as unread articles', 'split menu label in unread mode');
+click('#mark-menu [data-older="1"]');
+await settle(50);
+ok($('#toast-text').textContent.includes('older than a day as unread'), 'older-than items restore by age in unread mode');
+ok(rowCount() === 4, 'only the day-old articles came back unread');
+click('#btn-mark-all'); // 4 unread left → read mode again
+await settle(20);
+click('#confirm-yes');
+await settle(50);
+ok(rowCount() === 0, 'the 4 restored are marked read again');
+click('#btn-mark-all'); // caught up → the full restore
+await settle(20);
+click('#confirm-yes');
+await settle(50);
+ok(rowCount() === rowsBeforeMarkAll, 'back to unread after the second restore');
+
+console.log('folder click selects, chevron expands');
+const folderSel = '#tree .tree-folder .tree-item[data-folder="tech"]';
+click(folderSel);
+await settle(50);
+let fRow = $(folderSel);
+ok($('#scope-title').textContent === 'Technology', 'clicking a folder selects it');
+ok(!fRow.closest('.tree-folder').classList.contains('open'), 'selecting the folder does NOT expand it');
+ok(rowCount() === 15, 'folder view shows its feeds\' articles');
+click(fRow.querySelector('.chev'));
+await settle(50);
+fRow = $(folderSel);
+ok(fRow.closest('.tree-folder').classList.contains('open'), 'the chevron toggle expands the folder');
+ok($$('#tree .tree-folder.open .tree-children .tree-item').length === 2, 'feed rows visible inside the folder');
+ok($('#scope-title').textContent === 'Technology', 'expanding keeps the folder selected');
+click($(folderSel).querySelector('.chev'));
+await settle(50);
+ok(!$(folderSel).closest('.tree-folder').classList.contains('open'), 'chevron collapses the folder');
+ok($('#scope-title').textContent === 'Technology', 'collapsing keeps the folder selected');
+click('.tree-item[data-scope="all"]'); // back to the Newsfeed
+await settle(50);
+
 console.log('refresh/restore: boot with #article/<id> in the URL');
 {
   const dom2 = new JSDOM(html, { url: 'https://example.test/#article/fixture-hn-3', runScripts: 'outside-only', pretendToBeVisual: true });
@@ -280,6 +357,67 @@ console.log('feed-storage version reset');
   await settle(1200);
   ok(Number(w4.document.querySelector('#badge-all-items').textContent) === TOTAL - HIDDEN - 1, 'same-version storage is kept (no re-reset)');
   dom4.window.close();
+}
+
+console.log('YouTube shorts detection (fetch.mjs)');
+{
+  const fetchMod = await import('./fetch.mjs');
+  ok(fetchMod.isShortItem('https://www.youtube.com/shorts/abc123', 'x', '') === true, '/shorts/ link detected');
+  ok(fetchMod.isShortItem('https://www.youtube.com/watch?v=abc', 'My #SHORTS video', '') === true, '#shorts tag detected (case-insensitive)');
+  ok(fetchMod.isShortItem('https://www.youtube.com/watch?v=abc', 'try #short thing', '') === true, '#short tag detected');
+  ok(fetchMod.isShortItem('https://www.youtube.com/watch?v=abc', 'Short film review', 'in short, no') === false, 'plain "short" text is not a Short');
+  ok(fetchMod.isShortItem('https://www.youtube.com/watch?v=abc', '#shortfilm festival', '') === false, '#shortfilm is not #short(s)');
+  ok(fetchMod.isShortItem('https://www.youtube.com/watch?v=abc', 'normal video', 'plain description') === false, 'regular videos pass');
+}
+
+console.log('per-feed ingest word filters (fetch.mjs)');
+{
+  const fetchMod = await import('./fetch.mjs');
+  const blocks = {
+    include: fetchMod.compileBlockSrv({ title: ['thinkpad'] }),
+    exclude: fetchMod.compileBlockSrv({ title: ['/\\bgeneric\\b/'] }),
+  };
+  const art = (title, content = 'x') => ({ title, content, author: null, link: 'https://example.com/a' });
+  ok(fetchMod.feedFilterDrop(art('Thinkpad deals'), blocks) === false, 'include match passes');
+  ok(fetchMod.feedFilterDrop(art('Linux thread'), blocks) === true, 'include miss is dropped');
+  ok(fetchMod.feedFilterDrop(art('thinkpad but generic mousepad'), blocks) === true, 'exclude match is dropped');
+  ok(fetchMod.feedFilterDrop(art('Thinkpad deals'), { include: fetchMod.compileBlockSrv({ title: ['thinkpad'], content: ['/deal/'] }), exclude: null }) === true, 'AND across fields: content miss drops');
+  ok(fetchMod.feedFilterDrop(art('Thinkpad deals', 'big deal content'), { include: fetchMod.compileBlockSrv({ title: ['thinkpad'], content: ['/deal/'] }), exclude: null }) === false, 'AND across fields: both match passes');
+}
+
+console.log('4chan catalog → articles (4chan.mjs)');
+{
+  const chan = await import('./4chan.mjs');
+  const t = (o) => ({ no: 100, time: 1745000000, name: 'Anonymous', com: '>>99<br>check this out', ...o });
+  const catalog = [{ threads: [
+    t({ no: 101, replies: 299, sub: 'small thread' }),
+    t({ no: 102, replies: 301, sticky: 1, sub: 'sticky mega' }),
+    t({ no: 103, replies: 350, closed: 1, sub: 'closed one' }),
+    t({ no: 104, replies: 800, sub: 'Thinkpad thread', com: 'my &amp; keyboard<br>line two', tim: 1745000000123, ext: '.png', images: 12 }),
+    t({ no: 105, replies: 400, sub: 'generic thread' }),
+    t({ no: 106, replies: 600, com: 'pc building thread edition<br>op post' }),
+  ] }, { threads: [] }, { threads: null }];
+  const threads = chan.chanThreadsFromCatalog(catalog);
+  ok(threads.length === 6, 'catalog pages flatten (junk pages tolerated)');
+  const passes = (opts) => threads.filter((x) => chan.chanThreadPasses(x, opts)).map((x) => x.no);
+  ok(JSON.stringify(passes({ minReplies: 300 })) === '[104,105,106]', 'minReplies window; sticky + closed skipped by default');
+  ok(JSON.stringify(passes({ minReplies: 300, includeSticky: true })) === '[102,104,105,106]', 'includeSticky opt-in');
+  ok(JSON.stringify(passes({ minReplies: 300, maxReplies: 500 })) === '[105]', 'maxReplies caps the window');
+  ok(JSON.stringify(passes({ minReplies: 300, minImages: 5 })) === '[104]', 'minImages window');
+  const a = chan.chanThreadToArticle(threads[3], { board: 'g', worksafe: true, now: 1746000000000 });
+  ok(a.link === 'https://boards.4channel.org/g/thread/104', 'worksafe boards link to 4channel.org');
+  ok(a.title === 'Thinkpad thread', 'title from the thread subject');
+  ok(a.summary.includes('keyboard'), 'summary from the OP comment');
+  ok(a.content.includes('800 replies') && a.content.includes('/g/thread/104'), 'content carries thread stats + link');
+  ok(a.enclosures.length === 1 && a.enclosures[0].url === 'https://i.4cdn.org/g/1745000000123s.jpg' && a.enclosures[0].type === 'image/thumbnail', 'thumbnail enclosure for row thumbs');
+  ok(a.author === null, 'Anonymous posts carry no author');
+  ok(a.id === chan.chanThreadToArticle(threads[3], { board: 'g', worksafe: true, now: 1 }).id, 'thread ids are stable across fetches');
+  ok(chan.chanThreadToArticle(threads[3], { board: 't', worksafe: false }).link.startsWith('https://boards.4chan.org/t/'), 'non-worksafe boards link to 4chan.org');
+  const noSub = chan.chanThreadToArticle(threads[5], { board: 'g', worksafe: true });
+  ok(noSub.title === 'pc building thread edition', 'no subject → first comment line is the title');
+  const fetchMod = await import('./fetch.mjs');
+  ok(fetchMod.feedFilterDrop(noSub, { include: fetchMod.compileBlockSrv({ title: ['building'] }), exclude: fetchMod.compileBlockSrv({ title: ['megathread'] }) }) === false, 'word filters work on 4chan threads (include+exclude pass)');
+  ok(fetchMod.feedFilterDrop(noSub, { include: null, exclude: fetchMod.compileBlockSrv({ title: ['edition'] }) }) === true, 'word filters drop matching 4chan threads');
 }
 
 console.log('');

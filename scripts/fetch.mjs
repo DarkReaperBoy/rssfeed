@@ -2,14 +2,19 @@
 // Fetcher run by GitHub Actions (hourly). Keeps the configured retention window of
 // articles with no per-feed cap. Tracks fetch status per feed and purges feeds
 // removed from config.json / feeds.opml.
+// Also ingests two non-RSS sources, both configured as entries in config.feeds:
+//   - YouTube channel feeds: Shorts can be dropped (settings.dropShorts, default on)
+//   - 4chan boards: { "type": "4chan", "board": "g", minReplies: 300, ... } via a.4cdn.org
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { pathToFileURL } from 'node:url';
 import Parser from 'rss-parser';
 import { JSDOM } from 'jsdom';
 import { Readability } from '@mozilla/readability';
 import sanitizeHtml from 'sanitize-html';
+import { chanThreadsFromCatalog, chanThreadPasses, chanThreadToArticle } from './4chan.mjs';
 
 const ROOT = new URL('..', import.meta.url).pathname;
 const DATA_DIR = path.join(ROOT, 'data');
@@ -77,6 +82,60 @@ const stripTags = (html) =>
 const sha1 = (s) => crypto.createHash('sha1').update(s).digest('hex');
 const stableId = (link, title) => (sha1(`${link}|${title}`).slice(0, 16));
 
+const isYouTubeFeed = (url) => /(?:^https?:\/\/)(?:www\.)?youtube\.com\/feeds\//i.test(url || '') || /youtu\.be\//i.test(url || '');
+
+// YouTube ships Shorts in channel feeds with /shorts/<id> links (regular videos
+// use watch?v=) — confirmed against live feeds; creators also tag #short(s).
+export function isShortItem(link, title, content) {
+  if (/\/shorts\//i.test(link || '')) return true;
+  return /(^|[\s>([\]])#shorts?(?![\w])/i.test(`${title || ''} ${stripTags(content || '')}`);
+}
+
+/* ---- per-feed ingest filters (config.feeds[].filter: include/exclude) ----
+   Same matcher semantics as the frontend config filters: case-insensitive
+   substrings, /pattern/flags regexes, OR within a field, AND across fields.
+   Applied at fetch time — dropped items never enter the data files. */
+export function compileMatcherSrv(v) {
+  const s = String(v);
+  const m = s.match(/^\/(.+)\/([a-z]*)$/);
+  if (m) {
+    try { const re = new RegExp(m[1], (m[2] || 'i').replace('g', '')); return (hay) => re.test(String(hay || '')); }
+    catch { return () => false; }
+  }
+  const lc = s.toLowerCase();
+  return (hay) => String(hay || '').toLowerCase().includes(lc);
+}
+export function compileBlockSrv(block) {
+  const out = {};
+  for (const field of ['title', 'content', 'author', 'link']) {
+    const arr = block?.[field];
+    if (Array.isArray(arr) && arr.length) out[field] = arr.map(compileMatcherSrv);
+  }
+  return Object.keys(out).length ? out : null;
+}
+function blockHay(a, field) {
+  if (field === 'title') return a.title || '';
+  if (field === 'content') return stripTags(a.content || '') + ' ' + (a.summary || '');
+  if (field === 'author') return a.author || '';
+  return a.link || '';
+}
+function blockMatchesSrv(block, a) {
+  for (const [field, matchers] of Object.entries(block)) {
+    if (!matchers.some((fn) => fn(blockHay(a, field)))) return false; // AND across fields
+  }
+  return true;
+}
+export function feedFilterDrop(a, blocks) {
+  if (blocks.exclude && blockMatchesSrv(blocks.exclude, a)) return true;         // exclusion match → drop
+  if (blocks.include && !blockMatchesSrv(blocks.include, a)) return true;       // whitelist miss → drop
+  return false;
+}
+function compileFeedFilter(feed) {
+  if (!feed?.filter || typeof feed.filter !== 'object') return null;
+  const blocks = { include: compileBlockSrv(feed.filter.include), exclude: compileBlockSrv(feed.filter.exclude) };
+  return (blocks.include || blocks.exclude) ? blocks : null;
+}
+
 async function fetchText(url, { maxBytes = 5_000_000 } = {}) {
   const res = await fetch(url, {
     redirect: 'follow',
@@ -138,6 +197,7 @@ function pickContent(item) {
 
 function pickEnclosures(item) {
   const out = [];
+  const seen = new Set();
   // Player-embed URLs (YouTube / flash) are not real attachments — listing them
   // showed a junk "APPLICATION · <id>" link on every YouTube article.
   const EMBED_JUNK = /(?:youtube\.com\/(?:v|e|embed|watch)|youtu\.be\/|googlevideo\.com\/)/i;
@@ -145,6 +205,8 @@ function pickEnclosures(item) {
     if (!url || !/^https?:\/\//.test(url)) return;
     if (/x-shockwave-flash/i.test(type || '')) return;
     if (EMBED_JUNK.test(url)) return;
+    if (seen.has(url)) return; // media:thumbnail can be listed twice (item + media:group)
+    seen.add(url);
     out.push({ url, type: (type || '').split(';')[0].trim() });
   };
   for (const e of item.enclosures || []) push(e.url, e.type);
@@ -230,16 +292,19 @@ function parseOpml(xml) {
 }
 
 async function resolveFeeds(config) {
-  const configFeeds = (config.feeds || []).filter((f) => f && f.id && f.url);
-  for (const f of config.feeds || []) if (!f?.id || !f?.url) console.warn(`skip feed (no id/url): ${JSON.stringify(f)}`);
+  const feedKey = (f) => f.url || (f.type === '4chan' ? `4chan:${String(f.board || '').toLowerCase().replace(/\//g, '')}` : `id:${f.id}`);
+  const usable = (f) => f && f.id && (f.url || f.type === '4chan');
+  const configFeeds = (config.feeds || []).filter(usable);
+  for (const f of config.feeds || []) if (!usable(f)) console.warn(`skip feed (no id/url): ${JSON.stringify(f)}`);
   const byId = new Map(configFeeds.map((f) => [f.id, f]));
-  const byUrl = new Map(configFeeds.map((f) => [f.url, f]));
+  const byUrl = new Map(configFeeds.filter((f) => f.url).map((f) => [f.url, f]));
   const feeds = [];
   const seenUrls = new Set();
   const seenIds = new Set();
   const addFeed = (f) => {
-    if (seenUrls.has(f.url)) return; // same feed listed twice
-    seenUrls.add(f.url);
+    const key = feedKey(f);
+    if (seenUrls.has(key)) return; // same feed (or same 4chan board) listed twice
+    seenUrls.add(key);
     let id = f.id;
     let i = 2;
     while (seenIds.has(id)) id = `${f.id}-${i++}`;
@@ -253,7 +318,7 @@ async function resolveFeeds(config) {
     opmlFolders = parsed.folders;
     const consumed = new Set();
     for (const f of parsed.feeds) {
-      const ov = byId.get(f.id) || byUrl.get(f.url); // config.json wins per-field (incl. id)
+      const ov = byId.get(f.id) || (f.url ? byUrl.get(f.url) : null); // config.json wins per-field (incl. id)
       if (ov) { consumed.add(ov); addFeed(Object.assign({}, f, ov)); }
       else addFeed(f);
     }
@@ -274,6 +339,46 @@ async function resolveFeeds(config) {
   return { feeds, folders: [...folderMap.values()] };
 }
 
+/* ---- 4chan API (a.4cdn.org): read-only JSON, ≤1 request/second, honor
+   If-Modified-Since (both per the API's global rules). Worksafe boards live at
+   boards.4channel.org, the rest at boards.4chan.org; media is on i.4cdn.org. */
+const CHAN_API = 'https://a.4cdn.org';
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+let chanLastReq = 0;
+async function chanThrottle() {
+  const wait = chanLastReq + 1100 - Date.now();
+  if (wait > 0) await sleep(wait);
+  chanLastReq = Date.now();
+}
+let chanBoardsCache = null;
+async function getChanBoards() {
+  if (chanBoardsCache) return chanBoardsCache;
+  try {
+    await chanThrottle();
+    const res = await fetch(`${CHAN_API}/boards.json`, {
+      headers: { 'User-Agent': UA, Accept: 'application/json' },
+      signal: AbortSignal.timeout(35000), redirect: 'follow',
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    chanBoardsCache = (await res.json())?.boards || null;
+  } catch (err) {
+    console.warn(`boards.json failed (${err.message}) — continuing without board metadata`);
+    chanBoardsCache = null;
+  }
+  return chanBoardsCache;
+}
+async function fetchChanCatalog(board, ifModifiedSince) {
+  const headers = { 'User-Agent': UA, Accept: 'application/json' };
+  if (ifModifiedSince) headers['If-Modified-Since'] = ifModifiedSince;
+  await chanThrottle();
+  const res = await fetch(`${CHAN_API}/${encodeURIComponent(board)}/catalog.json`, {
+    headers, signal: AbortSignal.timeout(35000), redirect: 'follow',
+  });
+  if (res.status === 304) return { notModified: true };
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return { json: await res.json(), lastModified: res.headers.get('last-modified') || null };
+}
+
 async function main() {
   const config = await loadJson(path.join(ROOT, 'config.json'), null);
   if (!config) {
@@ -282,6 +387,7 @@ async function main() {
   }
   const settings = config.settings || {};
   const fullTextDefault = !!settings.fullTextDefault;
+  const dropShortsDefault = settings.dropShorts !== false; // YouTube Shorts are banned by default
   const retentionDays = Number(settings.retentionDays) > 0 ? Number(settings.retentionDays) : RETENTION_DAYS;
   const { feeds, folders: folderDefs } = await resolveFeeds(config);
   if (!feeds.length) {
@@ -339,6 +445,82 @@ async function main() {
       continue;
     }
 
+    if (feed.type === '4chan') {
+      const board = String(feed.board || '').toLowerCase().replace(/^\/+|\/+$/g, '');
+      const boards = await getChanBoards();
+      const meta = boards?.find((b) => b.board === board) || null;
+      if (!board) {
+        failures++;
+        await fs.writeFile(file, JSON.stringify({ articles: prev.articles || [] }));
+        index.feeds[feed.id] = { ...summarizeFeed({ ...feed, site: feed.site || 'https://boards.4channel.org' }, prev.articles || []), status: { ...status, ok: false, error: '4chan feed needs a "board"' } };
+        console.error(`[${feed.id}] CONFIG ERROR: 4chan feed needs a "board" (e.g. "g")`);
+        continue;
+      }
+      if (boards && !meta) {
+        failures++;
+        await fs.writeFile(file, JSON.stringify({ articles: prev.articles || [] }));
+        index.feeds[feed.id] = { ...summarizeFeed({ ...feed, site: feed.site || 'https://boards.4channel.org' }, prev.articles || []), status: { ...status, ok: false, error: `unknown board /${board}/` } };
+        console.error(`[${feed.id}] FETCH FAILED: unknown 4chan board /${board}/ — keeping ${(prev.articles || []).length} threads`);
+        continue;
+      }
+      const worksafe = meta ? meta.ws_board !== 0 : true;
+      const effFeed = { ...feed, title: feed.title || meta?.title || `/${board}/`, site: feed.site || `https://${worksafe ? 'boards.4channel.org' : 'boards.4chan.org'}/${board}/` };
+      const feedBlocks = compileFeedFilter(feed);
+      let res;
+      try {
+        res = await fetchChanCatalog(board, prevStatus.lastModified || null);
+      } catch (err) {
+        failures++;
+        status.ok = false;
+        status.error = err.message;
+        status.consecutiveFailures = (prevStatus.consecutiveFailures || 0) + 1;
+        await fs.writeFile(file, JSON.stringify({ articles: prev.articles || [] }));
+        index.feeds[feed.id] = { ...summarizeFeed(effFeed, prev.articles || []), status };
+        console.error(`[${feed.id}] FETCH FAILED: ${err.message} — keeping ${(prev.articles || []).length} threads`);
+        continue;
+      }
+      status.ok = true;
+      status.lastSuccess = now;
+      status.consecutiveFailures = 0;
+      status.error = null;
+      status.lastModified = res.lastModified || prevStatus.lastModified || null;
+      if (res.notModified) {
+        // catalog unchanged since last run — keep the file as-is (API courtesy path)
+        await fs.writeFile(file, JSON.stringify({ articles: prev.articles || [] }));
+        index.feeds[feed.id] = { ...summarizeFeed(effFeed, prev.articles || []), status };
+        console.log(`[${feed.id}] /${board}/: not modified — keeping ${(prev.articles || []).length} live threads`);
+        continue;
+      }
+      const opts = {
+        minReplies: Number(feed.minReplies) || 0,
+        maxReplies: Number(feed.maxReplies) || 0,
+        minImages: Number(feed.minImages) || 0,
+        maxImages: Number(feed.maxImages) || 0,
+        includeSticky: !!feed.includeSticky,
+        includeClosed: !!feed.includeClosed,
+      };
+      const articles = [];
+      let skipped = 0;
+      let filtered = 0;
+      for (const t of chanThreadsFromCatalog(res.json)) {
+        if (!chanThreadPasses(t, opts)) { skipped++; continue; }
+        const a = chanThreadToArticle(t, { board, worksafe, now });
+        if (feedBlocks && feedFilterDrop(a, feedBlocks)) { filtered++; continue; }
+        a.content = sanitize(a.content);
+        articles.push(a);
+      }
+      const cap = Number(feed.maxThreads) > 0 ? Number(feed.maxThreads) : 0;
+      const kept = cap ? articles.slice(0, cap) : articles;
+      // 4chan feeds are LIVE: each run replaces the set — threads that left the
+      // catalog (404'd) drop out instead of lingering for retentionDays. Thread
+      // numbers never change, so ids (and read state) stay stable for survivors.
+      // retentionDays does not apply: a bumped thread can outlive the window.
+      await fs.writeFile(file, JSON.stringify({ articles: kept }));
+      index.feeds[feed.id] = { ...summarizeFeed(effFeed, kept), status };
+      console.log(`[${feed.id}] /${board}/: ${kept.length} live threads${skipped ? ` (skipped ${skipped} below the reply/word filters)` : ''}${filtered ? ` (dropped ${filtered} by word filter)` : ''}${cap ? ` (capped at ${cap})` : ''}`);
+      continue;
+    }
+
     let xml;
     try {
       const res = await fetch(feed.url, { headers: parser.options.headers, signal: AbortSignal.timeout(35000), redirect: 'follow' });
@@ -386,13 +568,18 @@ async function main() {
 
     const wantText = feed.fullText ?? fullTextDefault;
     let textBudget = wantText ? TEXT_EXTRACT_BUDGET : 0;
+    const ytShorts = isYouTubeFeed(feed.url) && (feed.dropShorts ?? dropShortsDefault);
+    const feedBlocks = compileFeedFilter(feed);
     const articles = [];
+    let shortsDropped = 0;
+    let filterDropped = 0;
     for (const item of parsed.items || []) {
       const title = stripTags(item.title || '(untitled)') || '(untitled)';
       const link = item.link || item.guid || '';
+      const content = pickContent(item);
+      if (ytShorts && isShortItem(link, title, content)) { shortsDropped++; continue; }
       const id = stableId(link || title, title);
       const date = pickDate(item) || now;
-      const content = pickContent(item);
       const prevA = prevById.get(id);
       const plain = stripTags(content);
       const summary = plain.slice(0, 300);
@@ -407,7 +594,7 @@ async function main() {
           console.warn(`[${feed.id}] extract failed for ${link}: ${err.message}`);
         }
       }
-      articles.push({
+      const art = {
         id,
         title,
         link,
@@ -418,8 +605,12 @@ async function main() {
         text,
         enclosures: pickEnclosures(item),
         fetchedAt: now,
-      });
+      };
+      if (feedBlocks && feedFilterDrop(art, feedBlocks)) { filterDropped++; continue; }
+      articles.push(art);
     }
+    if (shortsDropped) console.log(`[${feed.id}] dropped ${shortsDropped} YouTube short(s)`);
+    if (filterDropped) console.log(`[${feed.id}] dropped ${filterDropped} article(s) by the feed's word filter`);
 
     // Merge with previous so ids stay stable
     const byId = new Map();
@@ -455,7 +646,11 @@ async function main() {
   await fs.writeFile(path.join(DATA_DIR, 'all-feeds.json'), JSON.stringify({ articles: allArticles }));
 
   await fs.writeFile(path.join(DATA_DIR, 'index.json'), JSON.stringify(index));
-  console.log(`done: ${Object.keys(index.feeds).length} feeds, ${failures} failure(s), keeping last ${retentionDays} days (no per-feed cap)`);
+  console.log(`done: ${Object.keys(index.feeds).length} feeds, ${failures} failure(s), keeping last ${retentionDays} days (no per-feed cap; 4chan feeds are live)`);
 }
 
-main().catch((err) => { console.error(err); process.exit(1); });
+// Only run main() when invoked as a CLI script — importing (tests) gets exports.
+const invokedAsCli = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (invokedAsCli) {
+  main().catch((err) => { console.error(err); process.exit(1); });
+}

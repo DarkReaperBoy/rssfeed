@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>My Inoreader</title>
+<title>My RSSFeed</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='6' cy='18' r='2.5' fill='%23e8710a'/%3E%3Cpath d='M4 10a10 10 0 0 1 10 10h3A13 13 0 0 0 4 7z' fill='%23f5a623'/%3E%3Cpath d='M4 4a16 16 0 0 1 16 16h3A19 19 0 0 0 4 1z' fill='%23e8710a'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -53,13 +53,13 @@
           <div id="pdinner_today" class="parent_div hidden">
             <button class="tree-item" data-scope="today" title="Today">
               <i class="sys-icon"><svg><use href="#i-today"/></svg></i><span class="label">Today</span>
-              <span class="badge" id="badge-today"></span>
+              <span class="badge" id="badge-today" data-markread="today" title="Mark as read"></span>
             </button>
           </div>
           <div id="parent_all_articles" class="parent_div">
             <button class="tree-item" data-scope="all" title="Newsfeed">
               <i class="sys-icon"><svg><use href="#i-all"/></svg></i><span class="label">Newsfeed</span>
-              <span class="badge" id="badge-all-items"></span>
+              <span class="badge" id="badge-all-items" data-markread="all" title="Mark as read"></span>
             </button>
           </div>
           <div id="tree"></div>
@@ -67,7 +67,10 @@
       </div>
 
       <div id="sidebar_resizer" title="Drag to resize"></div>
-      <div class="sidebar-foot" id="last-updated" title=""></div>
+      <div class="sidebar-foot" id="last-updated">
+        <div id="last-updated-text" title=""></div>
+        <div class="sidebar-credit">Powered by <a href="https://github.com/DarkReaperBoy/rssfeed" target="_blank" rel="noopener noreferrer">rssfeed</a></div>
+      </div>
     </div>
   </div>
 

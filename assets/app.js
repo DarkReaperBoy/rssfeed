@@ -33,6 +33,7 @@ const state = {
   filters: [],
   markTimers: new Map(),
   loading: new Set(),
+  settled: new Set(), // feeds that finished loading (or failed) — mark-mode sync waits for these
   refreshTimer: null,
   bulkSel: new Set(),
 };
@@ -98,11 +99,16 @@ const fullTime = (ts) => ts ? new Date(ts).toLocaleString() : '';
 const absTime = (ts) => ts
   ? new Date(ts).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
   : '';
-let baseTitle = 'My Inoreader';
+let baseTitle = 'My RSSFeed';
 function updateTitleCounter() {
   let n = 0;
   for (const arts of state.feeds.values()) for (const a of arts) if (!isRead(a) && !a._f?.hidden) n++;
-  document.title = n > 0 && ui.titleCounter !== false ? `(${n}) ${baseTitle}` : baseTitle;
+  const prefix = n > 0 && ui.titleCounter !== false ? `(${n}) ` : '';
+  const open = state.expandedId ? findArticle(state.expandedId) : null;
+  // Article open → "(N) My RSSFeed - Article title" (Inoreader-style tab title)
+  document.title = open?.title
+    ? `${prefix}${baseTitle} - ${String(open.title).slice(0, 100)}`
+    : `${prefix}${baseTitle}`;
 }
 function faviconHtml(feed) {
   const site = feed?.site || '';
@@ -184,7 +190,8 @@ function applyFiltersToFeed(feedId, articles) {
     a._f = filterResult(a, feedId);
     a._feed = feedId;
     // Inoreader-style ingest: markRead filters silently read the article once.
-    if (a._f.markRead && !a._f.keepUnread && !isRead(a)) { state.read[a.id] = Date.now(); }
+    // An explicit user "keep unread" beats the automation — never eat those.
+    if (a._f.markRead && !a._f.keepUnread && !isKept(a) && !isRead(a)) { state.read[a.id] = Date.now(); }
   }
   saveRead();
 }
@@ -206,6 +213,7 @@ async function loadFeed(feedId) {
   } catch {
   } finally {
     state.loading.delete(feedId);
+    state.settled.add(feedId);
   }
 }
 let loadChain = Promise.resolve();
@@ -539,6 +547,7 @@ function renderList() {
     ? `${visible.length} recently read`
     : `${unread} unread`; // their header: "Newsfeed" + "81 unread"
   updateTitleCounter();
+  syncMarkButtons(); // the ✓ button flips to "mark as unread" when everything here is read
   renderEmpty(visible);
 }
 let readerKey = ''; // article id:fetchedAt — rebuild the reader pane only when the open article changes
@@ -580,7 +589,8 @@ function renderEmpty(visible) {
   } else if (state.search) {
     el.innerHTML = `<h3>No matches</h3><p>Nothing matched <code>${esc(state.search)}</code> in this view.<br>Operators: <code>feed:name</code> <code>title:word</code> <code>before:2026-01-01</code> <code>after:2026-01-01</code> <code>unread:true</code> <code>is:read</code></p>`;
   } else if (ui.status === 'unread') {
-    el.innerHTML = `<h3>All caught up 🎉</h3><p>No unread articles here${ui.dateRange !== 'all' ? ' for this time range' : ''}.</p>`;
+    const caughtUp = !state.search && ui.dateRange === 'all' && allReadInScope();
+    el.innerHTML = `<h3>All caught up 🎉</h3><p>No unread articles here${ui.dateRange !== 'all' ? ' for this time range' : ''}.</p>${caughtUp ? '<p class="empty-hint">Marked everything read by accident? The ✓ button up top now marks articles as unread.</p>' : ''}`;
   } else {
     el.innerHTML = `<h3>Nothing here</h3><p>No articles in this view. New items arrive when the hourly fetch runs.</p>`;
   }
@@ -722,9 +732,80 @@ function markScopeRead(scope, olderDays = 0) {
   });
 }
 function markAllAsReadInScope() {
-  confirmDialog('Mark all as read', `Mark all articles in "${scopeTitle()}" as read? Articles kept unread or hidden by filters are skipped.`, () => {
-    markScopeRead(state.scope);
+  if (allReadInScope()) {
+    // Everything here is read — the SAME button flips to "mark as unread" so an
+    // accidental mark-all (or procrastination regret) is one confirmed click away.
+    confirmDialog('Mark as unread', `Mark every article in "${scopeTitle()}" as unread again?`, () => {
+      markScopeUnread(state.scope);
+    });
+  } else {
+    confirmDialog('Mark all as read', `Mark all articles in "${scopeTitle()}" as read? Articles kept unread or hidden by filters are skipped.`, () => {
+      markScopeRead(state.scope);
+    });
+  }
+}
+
+/* ---- mark-as-unread: the mirror of markScopeRead, active only when the
+   current scope is fully caught up (see syncMarkButtons) ---- */
+function scopeUnreadCount(scope) {
+  // Same definition as the sidebar badges: not read, not filter-hidden.
+  let n = 0;
+  for (const feedId of feedIdsInScope()) {
+    for (const a of state.feeds.get(feedId) || []) {
+      if (isRead(a) || a._f?.hidden) continue;
+      if (scope === 'today' && a.date < startOfToday()) continue;
+      n++;
+    }
+  }
+  return n;
+}
+function allReadInScope() {
+  const ids = feedIdsInScope();
+  if (ids.some((id) => !state.settled.has(id))) return false; // feeds still loading — keep the read mode
+  return scopeUnreadCount(state.scope) === 0;
+}
+function collectScopeReadIds(scope, olderDays = 0) {
+  const cutoff = olderDays ? Date.now() - olderDays * 864e5 : 0;
+  const ids = [];
+  for (const feedId of feedIdsInScope()) {
+    for (const a of state.feeds.get(feedId) || []) {
+      if (!isRead(a) || a._f?.hidden) continue; // hidden articles re-read themselves via markRead filters anyway
+      if (scope === 'today' && a.date < startOfToday()) continue;
+      if (cutoff && a.date >= cutoff) continue;
+      ids.push(a.id);
+    }
+  }
+  return ids;
+}
+function markScopeUnread(scope, olderDays = 0) {
+  const ids = collectScopeReadIds(scope, olderDays);
+  if (!ids.length) {
+    showToast(olderDays ? 'Nothing older than that is read here' : 'Nothing to restore — no read articles here');
+    return;
+  }
+  const snapshot = ids.map((id) => ({ id, ts: state.read[id] }));
+  for (const id of ids) delete state.read[id];
+  state.keepVisible.clear();
+  saveRead(); renderTree(); renderList();
+  const what = olderDays ? ` older than ${OLDER_LABELS[olderDays] || olderDays + ' days'}` : '';
+  showToast(`Marked ${ids.length} article${ids.length === 1 ? '' : 's'}${what} as unread`, 'Undo', () => {
+    for (const { id, ts } of snapshot) { if (ts) state.read[id] = ts; else delete state.read[id]; }
+    saveRead(); renderTree(); renderList();
   });
+}
+function syncMarkButtons() {
+  const caughtUp = allReadInScope();
+  const btn = $('#btn-mark-all');
+  if (!btn) return;
+  btn.title = caughtUp ? 'Mark all as unread' : 'Mark all as read';
+  const use = btn.querySelector('use');
+  if (use) use.setAttribute('href', caughtUp ? '#i-unread' : '#i-read');
+  const split = $('#btn-mark-all-split');
+  if (split) split.title = caughtUp ? 'Mark as unread articles' : 'Mark as read articles';
+  const label = $('#mark-menu .mark-label');
+  if (label) label.textContent = caughtUp ? 'Mark as unread articles' : 'Mark as read articles';
+  const menu = $('#mark-menu');
+  if (menu) menu.dataset.mode = caughtUp ? 'unread' : 'read';
 }
 
 function updateBulkBar() {
@@ -906,6 +987,20 @@ function bindEvents() {
       if (ui.countersClickable) markScopeRead(markBtn.dataset.markread);
       return;
     }
+    const chev = e.target.closest('.tree-folder > .tree-item .chev');
+    if (chev) {
+      // The chevron IS the expand/collapse control. The folder row itself only
+      // selects the folder (shows its articles) — expanding is a separate act.
+      e.stopPropagation();
+      const wrap = chev.closest('.tree-folder');
+      const fbtn = chev.closest('.tree-item');
+      if (wrap && fbtn?.dataset.folder) {
+        ui.openFolders[fbtn.dataset.folder] = !wrap.classList.contains('open');
+        saveUi();
+        renderTree();
+      }
+      return;
+    }
     const scopeBtn = e.target.closest('[data-scope]');
     if (scopeBtn) {
       state.scope = scopeBtn.dataset.scope;
@@ -914,10 +1009,6 @@ function bindEvents() {
       state.keepVisible.clear();
       document.body.classList.remove('sidebar-open');
       $('#scrim').classList.add('hidden'); // don't leave a stuck overlay after picking a feed (mobile)
-      if (scopeBtn.dataset.folder) { // folder click also toggles expansion
-        ui.openFolders[scopeBtn.dataset.folder] = !scopeBtn.parentElement.classList.contains('open');
-        saveUi();
-      }
       renderAll();
       ensureScopeLoaded();
       return;
@@ -985,7 +1076,9 @@ function bindEvents() {
     const item = e.target.closest('[data-older]');
     if (!item) return;
     $('#mark-menu').classList.add('hidden');
-    markScopeRead(state.scope, Number(item.dataset.older));
+    const older = Number(item.dataset.older);
+    if ($('#mark-menu').dataset.mode === 'unread') markScopeUnread(state.scope, older); // caught up: restore by age
+    else markScopeRead(state.scope, older);
   });
   $('#sort-items').addEventListener('click', (e) => {
     const item = e.target.closest('[data-sort]');
@@ -1133,7 +1226,8 @@ async function refresh(manual = false) {
   }
 }
 function flashUpdated(msg) {
-  const el = $('#last-updated');
+  const el = $('#last-updated-text');
+  if (!el) return;
   if (msg) { el.textContent = msg; el.title = ''; return; }
   const ts = state.index?.generatedAt;
   el.textContent = ts ? `Updated ${relTime(ts) === 'now' ? 'just now' : relTime(ts) + ' ago'}` : 'No data yet';
@@ -1167,6 +1261,7 @@ async function loadConsolidatedIntoState() {
     for (const [feedId, arts] of grouped.entries()) {
       applyFiltersToFeed(feedId, arts);
       state.feeds.set(feedId, arts);
+      state.settled.add(feedId);
     }
     const feedsMeta = { ...state.index.feeds };
     for (const [feedId, arts] of state.feeds.entries()) {
@@ -1196,7 +1291,7 @@ async function boot() {
     // load, so editing settings + pushing is all it takes to change behavior.
     for (const k of CONFIG_KEYS) if (k in s) ui[k] = s[k];
     if (s.view && !localStorage.getItem(LS_UI)) ui.layout = s.view; // default layout for new visitors
-    baseTitle = s.siteName || 'My Inoreader';
+    baseTitle = s.siteName || 'My RSSFeed';
     document.title = baseTitle;
     applyTheme(); // theme may have just changed via config
     compileFilters();

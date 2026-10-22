@@ -185,6 +185,9 @@ svg { width: 20px; height: 20px; fill: currentColor; flex: none; }
   padding: 7px 12px; font-size: 11px; color: var(--text-faint);
   border-top: 1px solid var(--border);
 }
+.sidebar-foot a { color: var(--accent); font-weight: 500; text-decoration: none; }
+.sidebar-foot a:hover { text-decoration: underline; }
+.sidebar-credit { margin-top: 1px; }
 
 /* dropdowns (sidebar ⋯ + header ⋯) */
 .dropdown {
@@ -501,6 +504,7 @@ body.bulk-mode .row-check { display: block; }
 #empty h3 { color: var(--text); }
 #empty code { background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; }
 #empty .tool-btn { margin-top: 12px; }
+#empty .empty-hint { font-size: 12.5px; color: var(--text-faint); margin-top: 10px; }
 
 #toast {
   position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%);

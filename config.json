@@ -1,13 +1,14 @@
 {
   "settings": {
-    "siteName": "My Inoreader",
+    "siteName": "My RSSFeed",
     "theme": "auto",
     "view": "list",
     "retentionDays": 30,
     "markReadOnOpen": true,
     "markReadAfterSeconds": 0,
     "refreshMinutes": 60,
-    "fullTextDefault": false
+    "fullTextDefault": false,
+    "dropShorts": true
   },
   "folders": [
     {
@@ -36,6 +37,16 @@
     }
   ],
   "feeds": [
+    {
+      "id": "4chan-g",
+      "type": "4chan",
+      "board": "g",
+      "title": "/g/ - Technology",
+      "site": "https://boards.4channel.org/g/",
+      "folder": "ai-news",
+      "minReplies": 300,
+      "maxThreads": 30
+    },
     {
       "id": "ai-explained",
       "title": "AI Explained",
