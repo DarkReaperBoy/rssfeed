@@ -43,7 +43,7 @@
       "title": "Hacker News",
       "site": "https://news.ycombinator.com/",
       "folder": "tech-news",
-      "minPoints": 100,
+      "minPoints": 150,
       "minComments": 100
     },
     {
