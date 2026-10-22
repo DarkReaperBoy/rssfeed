@@ -1,6 +1,6 @@
 # AGENTS.md — GitHub-Actions RSS Reader ("Inoreader on Pages")
 
-A self-hosted, serverless RSS reader modeled on Inoreader.
+A self-hosted, serverless RSS reader that is a **1:1 UI clone of Inoreader**, fed by the user's real subscriptions.
 
 > **Maintenance rule for agents:** this file must stay truthful. Whenever you
 > change behavior, schemas, file layout or scope, update the relevant section
@@ -11,27 +11,27 @@ A self-hosted, serverless RSS reader modeled on Inoreader.
 
 ## Architecture
 
-- **Fetching backend**: GitHub Actions (`.github/workflows/fetch.yml`) runs **hourly** (`cron: '0 * * * *'` + `workflow_dispatch`). It runs `scripts/fetch.mjs`, which downloads every feed in `config.json`, extracts optional full-text, applies retention, and writes static JSON into `data/`.
+- **Fetching backend**: GitHub Actions (`.github/workflows/fetch.yml`) runs **hourly** (`cron: '0 * * * *'`), on `workflow_dispatch`, and **on every push to `main`** (`push: branches: [main]` — the user's CI/CD deploys on push). It runs `scripts/fetch.mjs`, which downloads every feed in `config.json`, extracts optional full-text, applies retention, and writes static JSON into `data/`.
 - **Publishing**: the same workflow assembles the site (`index.html`, `assets/`, `config.json`, `data/`) into `_site/` and **force-pushes it to the `gh-pages` branch**. GitHub Pages serves from `gh-pages` branch root. The default branch stays clean: source only, no data commits, no node artifacts.
 - **UI**: pure static site served by **GitHub Pages** (`index.html`, `assets/styles.css`, `assets/app.js`). No build step, no framework, no npm deps on the client.
 - **Never commit**: `node_modules/`, `_site/` (both in .gitignore). `package.json`/`package-lock.json` ARE committed (CI needs `npm ci`).
-- **Config**: a single `config.json` at repo root is the *entire* configuration: UI settings, folders, feeds, and **content filters** (inclusion + exclusion). Users edit it via the GitHub web editor.
-- **Read/unread state**: `localStorage` only (per browser/device). Articles are **never auto-pruned while unread** — an article stays unread until the user reads or marks it. Read articles are eventually pruned by `settings.retentionDays` at fetch time.
+- **Config**: a single `config.json` at repo root is the *entire* configuration: UI settings, folders, feeds, and **content filters** (inclusion + exclusion). Current folders/feeds were imported from the user's Inoreader OPML export (`~/Downloads/Inoreader Feeds 20261022.xml`): **6 folders, 59 feeds** (mostly YouTube channel Atom feeds + one rsshub proxy).
+- **Read/unread state**: `localStorage` only (per browser/device). Articles are **never auto-pruned while unread** — an article stays unread until the user reads or marks it. Read articles are eventually pruned by `settings.retentionDays` at fetch time. Stars (read-later) also live in localStorage (`ghrss:starred`).
 
 There is deliberately **no server, no database, no auth, no token**. Anything that cannot work as static files + GitHub Actions is out of scope.
 
 ## Directory layout
 
 ```
-config.json            # THE config: settings + folders + feeds + filters (user-edited)
+config.json            # THE config: settings + folders + feeds + filters (user-edited; feeds = OPML import)
 data/index.json        # generated locally/CI: per-feed metadata/counts, generatedAt timestamp
 data/feeds/<feedId>.json  # generated: { articles: [...] } newest-first
 assets/app.js          # entire UI logic (single file, plain ES2020, no modules)
-assets/styles.css      # Inoreader-like styling, light+dark themes
-index.html             # UI shell
+assets/styles.css      # Inoreader replica styling, light+dark themes
+index.html             # UI shell — mirrors real Inoreader DOM ids (#wraper/#side-nav/#tabs_pane/#tree_pane/#header_pane/#reader_pane)
 scripts/fetch.mjs      # fetcher/extracter run by Actions (Node >= 20, ESM)
-scripts/smoke.mjs      # jsdom smoke test of the UI against local data (npm run test:ui)
-.github/workflows/fetch.yml  # hourly fetch + publish to gh-pages
+scripts/smoke.mjs      # jsdom smoke test of the UI against deterministic fixtures (npm run test:ui)
+.github/workflows/fetch.yml  # hourly + push-triggered fetch + publish to gh-pages
 package.json           # fetch-script deps only (rss-parser, jsdom, @mozilla/readability, sanitize-html)
 ```
 
@@ -42,7 +42,7 @@ package.json           # fetch-script deps only (rss-parser, jsdom, @mozilla/rea
   "settings": {
     "siteName": "My Inoreader",
     "theme": "auto",              // auto | light | dark (client default; user toggle overrides in localStorage)
-    "view": "list",               // list | compact | cards
+    "view": "list",               // list | expanded | column | cards | magazine
     "articlesPerFeed": 200,       // max articles kept per feed in data/
     "retentionDays": 90,          // read articles older than this are pruned at fetch; UNREAD is never pruned
     "keepUnreadForever": true,    // unread articles survive retention
@@ -94,7 +94,7 @@ Matcher semantics:
 - A matcher string is a **case-insensitive substring** unless it looks like `/pattern/flags`, which is treated as a regex.
 - Within one field, entries are OR'ed. Across non-empty fields, conditions are AND'ed (an article must satisfy every provided field of the block).
 - An exclusion block matches → the `actions` apply. If `include` is present, articles **not** matching it are also excluded (whitelist behavior) and `actions` apply to them too.
-- The UI always reads filters from `config.json` (never baked into data/), so filter edits take effect without waiting for a refetch. The fetcher only records `data/index.json` counts on *filtered-out* articles being kept (counts are computed client-side from local read state).
+- The UI always reads filters from `config.json` (never baked into data/), so filter edits take effect without waiting for a refetch. Counts are computed client-side from local read state.
 
 ## data/ schemas (generated — never hand-edit)
 
@@ -128,49 +128,30 @@ Matcher semantics:
 - **Embeds**: the client upgrades bare media links in article bodies to players — YouTube (watch/youtu.be → `youtube-nocookie.com/embed/<id>` iframe), Vimeo, SoundCloud (lazy iframe on click), direct audio/video → HTML5 player. Never fetch remote JS.
 - Favicons: `https://www.google.com/s2/favicons?domain=<host>&sz=64` (external, degrade to letter-tile on error).
 - **Unread is sacred**: nothing may mark an article read except (a) the user opening it (per settings), (b) user's explicit "mark all as read"/"mark read", or (c) a filter with `markRead: true`. `keepUnread` filters beat (a).
-- Read state lives in localStorage under namespace `ghrss:` (`ghrss:read` = {id: timestamp}, `ghrss:ui` = UI prefs). Article ids must be stable or read state is lost.
+- Read state lives in localStorage under namespace `ghrss:` (`ghrss:read` = {id: timestamp}, `ghrss:ui` = UI prefs, `ghrss:kept` = {id: true}, `ghrss:starred` = {id: feedId}). Article ids must be stable or read state is lost.
 - The publish commit on `gh-pages` uses `[skip ci]` and `github-actions[bot]` identity. Fetch failures for one feed must not fail the run (log + continue). The default branch gets **no** CI commits.
 - Node >= 20 (global fetch). Fetcher must be idempotent and CI-friendly: no interactivity, exit 0 on partial failure, cap text-extraction fetches (~20 newest unextracted per feed per run).
+- **No duplicated navigation** (user requirement): the left rail (`#tabs_pane`) is a *module switcher* only (Newsfeed/Dashboards/Feeds/Saved/Automate/Search/Add feed + Audio player/Notifications/Support/Settings/profile/dock). Status views (All/Unread/Today/Recently read) live **only** in the header ⋯ menu; the sidebar tree holds **only** the opt-in Today row + Newsfeed + folders/feeds — exactly the real app's DOM.
 
-## Feature scope (decided with the user — do NOT add without asking)
+## UI parity state (verified against the user's saved real-reader capture, 2026-10-22)
 
-In scope: folders, unread counts, read/unread persistence (localStorage, unread kept forever), **all five Inoreader layouts (list/expanded/column/card/magazine)** + list density (comfort/compact/ultra) + newest/oldest sort (help-proven parity: inoreader.com/help/basic/article-view), search with operators (`feed:`, `title:`, `before:`, `after:`, `unread:`, `is:read`) + OR groups, date filters, config-driven include/exclude filters, text-view extraction with embeds, dark/light/auto theme, mark-all-as-read / mark-unread / keep-unread, **mark-read with Undo toast**, **click a sidebar unread badge → mark that feed/folder read**, sidebar options (show updated only, dim read subscriptions, sort A–Z), row "mark as read and hide" (X) button, opt-in scroll-tracking mark-read, per-feed refresh, subscription stats, retention config, settings panel linking to config.json editor.
+Source material on the user's Desktop (OUTSIDE the project — do not delete): `(81) Inoreader - The FBI just arrested...html` + `..._files/` (their production `main_6VYi.css`, `article_skeleton_6VYi.js`, full DOM, preferences JSON).
 
-Note: parity items were verified against the user's saved real-reader page (Desktop HTML capture) and inoreader.com help/preferences payloads — keep AGENTS.md aligned with that reality.
+Replicated 1:1 (structural, from their DOM/CSS):
+- `#wraper > #side-nav(#tabs_pane 72px rail: .tab-item icon tiles, active tile `#597fb8`, `.tabs-counter` badge `#597fb8` + `#134b91` outline; #tree_pane 310px with `#feeds_nav/#saved_nav/#automation_nav/#profile_nav/#placeholder_nav` panels, `#subscriptions_fieldset` = Today (`hidden` by default, settings toggle) + Newsfeed + `#tree`, drag `#sidebar_resizer`, foot `#last-updated`) > `#content-wrapper(#header_pane` sticky 50px: title + "N unread" + title dropdown (Feed properties / Set as start page / PRO-shielded items), split `✓|▾` mark-all `.btn-heading` group, expanding search, ⋯ menu with article-list status / multiple select / show filtered / refresh / 5 layouts / date / sort; `#reader_pane`)`.
+- Split list+reader: `#list-pane` + `#reader-slot` with "Select an article from the list" placeholder, reader toolbar with title/source/date/open-original and DESCRIPTION/TRANSCRIPT/TOPICS/ARTICLE tabs + mentions row, scroll up/down buttons.
+- List rows: `[dot][favicon+feed 130px][row-main(title + inline excerpt)][date right]` + hover control strip (star, open-in-new-tab, keep-unread, read toggle, ⋯). Per-row ⋯ menu and attachments.
+- Mark-all split button `✓|▾` with dropdown: "Mark all as read" / "Older than a day…" / "Older than two days…" / "Older than three days…" / "Older than a week…" (marks matching older items read).
+- Design tokens: primary `#1875F3`, Roboto, headings `#081425/#1a2433`, gray `#71747a`, borders `#e9eaf0`, `.btn-heading` `#edeff2/#dee2e7/#cfd5dd`, reader column 870px.
+- Features: all 5 layouts + comfort/compact/ultra density + newest/oldest sort, search operators + OR, date filters, config include/exclude filters, badge-click mark-read + Undo toast, sidebar options menu (updated-only/dim-read/sort A–Z), X hide button, scroll tracking, titles-only, open-original, bulk multi-select + bulk bar, absolute dates, title font size, compact sidebar, tab-title unread counter, attachments list, mark-all confirm, **star/read-later per row + reader → Saved tab (Starred panel, functional)**, rail module panels (Automate/Profile real labels from capture; Dashboards/Audio/Notifications/Support/Add feed = honest placeholder panels), dock toggle, "Feed properties" opens settings.
+- Server-side-only items (Archive/Annotated/Web pages/Uploads, Rules/Filters/Spotlights/Email digests, Plans/Invite friends) render **inert** with tooltips — visible for 1:1 chrome, honest about being unavailable offline.
 
-**Out of scope (explicitly rejected)**: stars/favorites, read-later, OPML import/export (config JSON is the substitute), tags, automation rules beyond filters, keyboard shortcuts, article notes/highlights-by-selection, desktop notifications, accounts/auth/tokens, newsletter ingestion, AI summaries, keyword-monitoring feeds.
+**Out of scope** (cannot exist as static files, or explicitly unwanted): accounts/auth, real notification/rule/dashboard backends, tags, notes, keyboard shortcuts, AI summaries, translations, OPML import/export UI (the one-time import was done by the agent from the user's export), timezone pickers, popularity scores, custom CSS.
 
-## IN PROGRESS (parity port from the user's saved real-reader capture — 2026-10-22, user napping, full port authorized)
-
-Source material on the user's Desktop (OUTSIDE the project — do not delete):
-- `(81) Inoreader - The FBI just arrested...html` — saved real Inoreader reader page, full DOM (sidebar `#tree`, `#reader_pane`, `#top_tabs`, toolbar) + embedded preferences JSON blob (starts ~byte 91679, key `article_listing` etc.)
-- `..._files/` — their real assets: `main_6VYi.css` (1.6MB theme CSS), `base_6VYi.css` (206KB), `index_js_6VYi.js`, `article_skeleton_6VYi.js`, …
-- `1790938239967.gif` — screen recording (cannot be viewed by agent)
-
-### Confirmed design tokens (ported or to port)
-- Primary blue **#1875F3** (`--primary-color`, `.text-primary`), darker #0952b5, lighter #61a0f7 — OUR `--accent` should become this (currently #4a90d9)
-- Font **Roboto, sans-serif** (+ Public Sans somewhere); headings dark navy **#081425 / #1a2433 / #31415d**; secondary gray **#828d9d**; light bg **#f3f4f7 / #F1F5FA**; borders **#D9DDE6**
-- Sidebar width **310px** (we use 264); reader content max ~870px (ours 860 ✓)
-- `.tree_unread { font-weight:bold }` ✓ we have; `.article_title_link{font-weight:bold}` + underline on hover; article titles `-webkit-line-clamp: 2/3`; READ articles show header buttons/date at **opacity 0.6** (unread full)
-- Reader typography: `.article-content h1 1.5rem`, `h2 1.3rem`
-- Top tabs (left rail): Home, Dashboards, Feeds (badge), Saved, Automate, Search, Add content, Preferences, profile — ours covers reader subset by design (dashboards/saved/automate out of scope)
-
-### PORTED — FULL PAGE STRUCTURE REBUILD (2026-10-22 late)
-index.html + styles.css were rewritten to mirror their real DOM skeleton exactly:
-`#wraper > #side-nav(#tabs_pane rail 72px with .tab-item icon tiles + active tile bg #597fb8, #tree_pane 310px: sidebar-head Feeds + #subscriptions_fieldset with STATIC system rows Today/Newsfeed/Unread/Read + #tree folders, #sidebar_resizer drag) > #content-wrapper(#header_pane sticky 50px: heading-title + .section_count_badge, expanding search icon→field, .btn-heading split mark-all ✓|▾, ⋯ #header-menu holding status/date/sort/view controls; #reader_pane).`
-**List view rows are single-line per their view_style_0 anatomy**: `[dot][favicon+feed col (flex 2 5 130px)][bold title][muted inline excerpt][date right]` — this was the big look-mismatch before (we had 3-line stacked rows). Test selectors updated: system rows live outside `#tree` (badge assertions unscoped), +4 new assertions (45 total).
-
-### PORTED — design tokens (styles.css tokens verified against their real CSS)
-Primary **#1875F3** (+darker #0952b5/#lighter #61a0f7), Roboto via Google Fonts, sidebar **310px**, secondary **#828d9d**, bg-hover **#f3f4f7**, border **#d9dde6**, headings **#081425/#1a2433**, 2-line title clamp + underline-on-hover, read rows dim metadata to .65, reader h1 1.5rem/h2 1.3rem, --list-max 870px. `--sidebar-w`, `--title-size`, `--font` vars.
-
-### PORTED — features (41 smoke assertions passing)
-5 layouts + density + sort newest/oldest; badge-click mark-read + Undo toast; sidebar ⋯ menu (updated-only/dim-read/sort A–Z); X "mark as read and hide"; scroll tracking; titles-only; open-original mode; feed-icons toggle; column thumbnails toggle; **bulk multi-select + bulk bar (read/unread/undo)**; auto-scroll opened article; absolute dates; title font-size select; compact sidebar; sidebar favicons toggle; clickable-counters toggle; **tab title unread counter**; attachments/enclosures list in reader; mark-all confirm. Migration: old `layout:'compact'` → list+density-compact.
-
-### Do NOT port (user rejected): stars/read-later/tags/notes/rules/shortcuts/notifications/OPML; out of scope: dashboards, teams, AI, translations, TTS, image proxy, popularity scores, monitoring feeds, newsletters, timezone/date-format pickers, magic sort, custom CSS.
-
-Full prefs inventory saved at /tmp/inoreader_pref_pairs + /tmp/inoreader_prefs.json (ephemeral — re-extract from the Desktop capture if gone).
+Smoke test: `node scripts/smoke.mjs` boots the real `index.html` + `app.js` in jsdom against **deterministic in-memory fixtures** (the real feed list is 59 YouTube feeds — disk data would make tests slow/network-dependent) and asserts chrome, filters, scopes, layouts, star/Saved flow, panels: **93 assertions**.
 
 ## Generated
 
-- 2026-10-22 (2): Inoreader-parity pass driven by scraping the real reader (user's saved Desktop page + help center): 5 layouts, density, sort toggle, badge-click mark-read, undo toast, sidebar options menu, scroll tracking, X hide-button. Smoke test extended to 34 assertions, all passing.
-- 2026-10-22: initial build. Fetcher: rss-parser + jsdom/readability + sanitize-html. UI: single `assets/app.js` (~700 lines), vanilla. Data: `data/index.json` + `data/feeds/<id>.json`. Publishing: workflow force-pushes assembled `_site/` to `gh-pages` (Pages source); default branch has no CI commits and ignores `data/`, `node_modules/`, `_site/`. Multi-folder feeds (`folders: []`) and per-folder `maxAgeDays` added after scraping inoreader.com for parity. Smoke test: `npm run test:ui` (21 assertions, all passing).
+- 2026-10-22 (3): 1:1 chrome rebuild from the capture's real DOM: rail became a module switcher (removing the duplicated Today/Newsfeed/Unread/Read second nav — user complaint), sidebar panels (Feeds/Saved/Automate/Profile/placeholders), header title dropdown + ⋯ menu now owns the article-list status (All/Unread/Today/Recently read), star/read-later + Saved tab added, config.json rebuilt from the user's OPML export (6 folders/59 feeds), workflow gained a `push` trigger so their CI/CD deploys on push, smoke rewritten to deterministic fixtures (75 assertions, all passing).
+- 2026-10-22 (2): Inoreader-parity pass from the real reader capture + help center: 5 layouts, density, sort toggle, badge-click mark-read, undo toast, sidebar options menu, scroll tracking, X hide-button (34→45 assertions as chrome evolved).
+- 2026-10-22: initial build. Fetcher: rss-parser + jsdom/readability + sanitize-html. UI: single `assets/app.js`, vanilla ES2020. Data: `data/index.json` + `data/feeds/<id>.json`. Publishing: workflow force-pushes assembled `_site/` to `gh-pages`; default branch has no CI commits and ignores `data/`, `node_modules/`, `_site/`.

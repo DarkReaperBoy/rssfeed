@@ -4,6 +4,8 @@ on:
   schedule:
     - cron: '0 * * * *'   # hourly, on the hour (UTC)
   workflow_dispatch:        # manual run from the Actions tab
+  push:
+    branches: [main]        # every push to main deploys via CI/CD
 
 permissions:
   contents: write
