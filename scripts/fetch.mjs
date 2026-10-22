@@ -322,6 +322,14 @@ async function main() {
     }
   }
 
+  // Consolidated single-file payload for the frontend (fast initial load)
+  const allArticles = [];
+  for (const id of currentFeedIds) {
+    const d = await loadJson(path.join(FEEDS_DIR, `${id}.json`), { articles: [] });
+    for (const a of (d.articles || [])) allArticles.push(a);
+  }
+  await fs.writeFile(path.join(DATA_DIR, 'all-feeds.json'), JSON.stringify({ articles: allArticles }));
+
   await fs.writeFile(path.join(DATA_DIR, 'index.json'), JSON.stringify(index));
   console.log(`done: ${Object.keys(index.feeds).length} feeds, ${failures} failure(s), keeping last ${RETENTION_DAYS} days (no per-feed cap)`);
 }
