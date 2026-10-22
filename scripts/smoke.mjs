@@ -41,7 +41,8 @@ const $ = (s) => window.document.querySelector(s);
 const $$ = (s) => [...window.document.querySelectorAll(s)];
 
 console.log('boot + sidebar');
-ok($('#tree').textContent.includes('Newsfeed'), 'system views render (Newsfeed)');
+ok(!!$('.tree-item[data-scope="all"]') && $('.tree-item[data-scope="all"]').textContent.includes('Newsfeed'), 'system views render (Newsfeed)');
+ok(!!$('.tree-item[data-scope="today"]') && !!$('.tree-item[data-scope="unread"]'), 'system rows in subscriptions fieldset');
 ok($('#tree').textContent.includes('Technology'), 'folder renders');
 ok($('#tree').textContent.includes('Hacker News'), 'feed renders');
 ok($('#tree').textContent.includes('BBC News'), 'second feed renders');
@@ -53,7 +54,7 @@ ok(rows.every((r) => r.classList.contains('unread')), 'all rows unread initially
 const hnHidden = $$('#list .row').filter((r) => r.querySelector('.feed-name')?.textContent === 'Hacker News' && /show hn/i.test(r.querySelector('.row-title').textContent));
 ok(hnHidden.length === 0, 'exclude filter hides matching articles');
 ok($$('#list .row').some((r) => r.querySelector('.feed-name')?.textContent === 'Hacker News'), 'non-matching HN articles still visible');
-const badgeBefore = $('#tree .tree-item[data-scope="unread"] .badge')?.textContent;
+const badgeBefore = $('.tree-item[data-scope="unread"] .badge')?.textContent;
 
 console.log('reading + mark read');
 const firstRow = $('#list .row');
@@ -62,14 +63,14 @@ firstRow.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
 await settle(50);
 ok(!!$('#list .row.expanded .reader-body'), 'row expands into reading pane');
 ok(!!$('#list .row.expanded .reader-title'), 'reader shows title');
-const badgeAfter = $('#tree .tree-item[data-scope="unread"] .badge')?.textContent;
+const badgeAfter = $('.tree-item[data-scope="unread"] .badge')?.textContent;
 ok(Number(badgeAfter) === Number(badgeBefore) - 1, `opening marked read, unread count ${badgeBefore} → ${badgeAfter}`);
 
 console.log('mark unread via row action');
 const toggleBtn = $('#list .row.expanded [data-act="toggle-read"]');
 toggleBtn.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
 await settle(50);
-ok($('#tree .tree-item[data-scope="unread"] .badge')?.textContent === badgeBefore, 'mark unread restores count');
+ok($('.tree-item[data-scope="unread"] .badge')?.textContent === badgeBefore, 'mark unread restores count');
 // mark it read again for the read-filter test
 $('#list .row.expanded [data-act="toggle-read"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
 await settle(50);
@@ -153,6 +154,17 @@ if (folderBadge) {
   const restored = $('#tree .tree-item[data-scope="folder:tech"] .badge');
   ok(!!restored && Number(restored.textContent) === before, 'undo restores unread counts');
 }
+
+console.log('header More menu + expanding search');
+$('#btn-more').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+await settle(30);
+ok(!$('#header-menu').classList.contains('hidden'), 'header More menu opens');
+$('#search-open').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+await settle(30);
+ok(!$('#search-box').classList.contains('hidden'), 'search expands from icon');
+$('#search-close').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+await settle(30);
+ok($('#search-box').classList.contains('hidden'), 'search collapses');
 
 console.log('sidebar options menu');
 $('#btn-sidebar-menu').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));

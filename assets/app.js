@@ -298,16 +298,7 @@ function renderTree() {
   if (ui.sortAZ) folders.sort((a, b) => a.name.localeCompare(b.name));
   const inFolder = new Set();
   let html = '';
-  const sysItem = (scope, icon, label, count) => `
-    <button class="tree-item ${state.scope === scope ? 'active' : ''} ${count ? 'unread' : ''}" data-scope="${scope}">
-      <svg><use href="#i-${icon}"/></svg><span class="label">${esc(label)}</span>${count ? `<span class="badge">${count}</span>` : ''}
-    </button>`;
   const totalUnread = Object.keys(feeds).reduce((n, id) => n + unreadCount(id), 0);
-  html += sysItem('all', 'all', 'Newsfeed', 0);
-  html += sysItem('unread', 'unread', 'Unread', totalUnread);
-  html += sysItem('today', 'today', 'Today', 0);
-  html += sysItem('recently-read', 'read', 'Recently read', 0);
-  html += '<div style="height:10px"></div>';
 
   const feedItem = (id) => {
     inFolder.add(id);
@@ -340,9 +331,18 @@ function renderTree() {
   if (loose.length) html += loose.map(feedItem).join('');
   tree.innerHTML = html;
 
+  // Static system rows (mirrors their #subscriptions_fieldset): badges + active states.
+  const unreadBadge = $('.tree-item[data-scope="unread"] .badge');
+  if (unreadBadge) unreadBadge.textContent = totalUnread > 0 ? String(totalUnread) : '';
+  const todayBadge = $('#badge-today');
+  if (todayBadge) {
+    let n = 0;
+    for (const arts of state.feeds.values()) for (const a of arts) if (!isRead(a) && !a._f.hidden && a.date >= startOfToday()) n++;
+    todayBadge.textContent = n > 0 ? String(n) : '';
+  }
   const total = $('#rail-unread-count');
   total.textContent = totalUnread > 999 ? '999+' : totalUnread ? String(totalUnread) : '';
-  $$('#rail .rail-btn[data-scope]').forEach((b) => b.classList.toggle('active', b.dataset.scope === state.scope));
+  $$('[data-scope]').forEach((b) => b.classList.toggle('active', b.dataset.scope === state.scope));
 }
 
 function scopeTitle() {
@@ -382,13 +382,13 @@ function rowHtml(a) {
     <div class="row-main">
       <div class="row-meta">
         ${faviconHtml(feed)}<span class="feed-name">${esc(feed.title)}</span>
-        ${a.author ? `<span class="author">— ${esc(a.author)}</span>` : ''}
+        ${a.author ? `<span class="author">${esc(a.author)}</span>` : ''}
         ${f.hidden ? '<span class="author" title="Filtered">[filtered]</span>' : ''}
-        <span class="time" title="${esc(fullTime(a.date))}">${esc(timeHtml)}</span>
       </div>
       <div class="row-title">${esc(a.title)}</div>
-      ${state.layout !== 'compact' && !ui.titlesOnly ? `<div class="row-snippet">${esc(a.summary || stripTags(a.content).slice(0, 220))}</div>` : ''}
+      ${!ui.titlesOnly ? `<div class="row-snippet">${esc(a.summary || stripTags(a.content).slice(0, 220))}</div>` : ''}
     </div>
+    <span class="time" title="${esc(fullTime(a.date))}">${esc(timeHtml)}</span>
     <div class="row-actions">
       <button class="icon-btn" data-act="hide-read" title="Mark as read and hide"><svg><use href="#i-close"/></svg></button>
       <button class="icon-btn" data-act="toggle-read" title="${read ? 'Mark unread' : 'Mark read'}"><svg><use href="#i-${read ? 'unread' : 'read'}"/></svg></button>
@@ -704,6 +704,7 @@ function bindEvents() {
 
   document.addEventListener('click', (e) => {
     if (!e.target.closest('#sidebar-menu') && !e.target.closest('#btn-sidebar-menu')) $('#sidebar-menu')?.classList.add('hidden');
+    if (!e.target.closest('#header-menu') && !e.target.closest('#btn-more')) $('#header-menu')?.classList.add('hidden');
     const markBtn = e.target.closest('[data-markread]');
     if (markBtn) {
       e.stopPropagation();
@@ -766,6 +767,49 @@ function bindEvents() {
     $('#sidebar-menu').classList.toggle('hidden');
     syncSidebarMenu();
   });
+
+  // header: expanding search (their search-input-wrapper behavior)
+  const openSearch = () => {
+    $('#search-box').classList.remove('hidden');
+    $('#search-open').classList.add('hidden');
+    $('#search-input').focus();
+  };
+  const closeSearch = () => {
+    $('#search-box').classList.add('hidden');
+    $('#search-open').classList.remove('hidden');
+  };
+  $('#search-open').addEventListener('click', openSearch);
+  $('#search-close').addEventListener('click', closeSearch);
+  $('#search-input').addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSearch(); });
+
+  // header ⋯ More menu (status/date/sort/view — their header dropdown)
+  $('#btn-more').addEventListener('click', (e) => {
+    e.stopPropagation();
+    $('#header-menu').classList.toggle('hidden');
+  });
+
+  // resizable sidebar (their #sidebar_resizer)
+  const resizer = $('#sidebar_resizer');
+  if (resizer && !resizer._bound) {
+    resizer._bound = true;
+    resizer.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      const startX = e.clientX;
+      const startW = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--sidebar-width'), 10) || 310;
+      let cur = startW;
+      const move = (ev) => {
+        cur = Math.min(480, Math.max(210, startW + (ev.clientX - startX)));
+        document.documentElement.style.setProperty('--sidebar-width', `${cur}px`);
+      };
+      const up = () => {
+        document.removeEventListener('mousemove', move);
+        document.removeEventListener('mouseup', up);
+        ui.sidebarW = cur; saveUi();
+      };
+      document.addEventListener('mousemove', move);
+      document.addEventListener('mouseup', up);
+    });
+  }
   $('#sidebar-menu').addEventListener('click', (e) => {
     const item = e.target.closest('[data-opt]');
     if (!item) return;
@@ -952,6 +996,7 @@ async function boot() {
     baseTitle = state.config.settings?.siteName || 'My Inoreader';
     document.title = baseTitle;
     compileFilters();
+    if (ui.sidebarW) document.documentElement.style.setProperty('--sidebar-width', `${ui.sidebarW}px`);
   } catch (err) {
     $('#empty').classList.remove('hidden');
     $('#empty').innerHTML = `<h3>Could not load config.json</h3><p>${esc(err.message)}. Make sure the repo is published to GitHub Pages and config.json exists at the root.</p>`;

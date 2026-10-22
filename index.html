@@ -41,85 +41,170 @@
   <symbol id="i-next" viewBox="0 0 24 24"><path d="M8.6 16.6 10 18l6-6-6-6-1.4 1.4L13.2 12z"/></symbol>
 </svg>
 
-<div id="app">
-  <nav id="rail" aria-label="Sections">
-    <div class="rail-logo" title="ghrss"><svg viewBox="0 0 24 24" width="22" height="22"><circle cx="6" cy="18" r="2.5" fill="currentColor"/><path d="M4 10a10 10 0 0 1 10 10h3A13 13 0 0 0 4 7z" opacity=".75"/><path d="M4 4a16 16 0 0 1 16 16h3A19 19 0 0 0 4 1z" opacity=".45"/></svg></div>
-    <button class="rail-btn" data-scope="all" title="Newsfeed"><svg><use href="#i-all"/></svg><span class="tab-label">Newsfeed</span></button>
-    <button class="rail-btn" data-scope="unread" title="Unread"><svg><use href="#i-unread"/></svg><span class="tab-label">Unread</span><span class="rail-count tabs-counter" id="rail-unread-count"></span></button>
-    <button class="rail-btn" data-scope="today" title="Today"><svg><use href="#i-today"/></svg><span class="tab-label">Today</span></button>
-    <button class="rail-btn" data-scope="recently-read" title="Read"><svg><use href="#i-read"/></svg><span class="tab-label">Read</span></button>
-    <div class="rail-spacer"></div>
-    <button class="rail-btn" id="btn-theme" title="Toggle theme"><svg><use href="#i-theme"/></svg><span class="tab-label">Theme</span></button>
-    <button class="rail-btn" id="btn-settings" title="Settings"><svg><use href="#i-settings"/></svg><span class="tab-label">Settings</span></button>
-  </nav>
+<div id="wraper">
+  <div id="side-nav">
 
-  <aside id="sidebar">
-    <div class="sidebar-head">
-      <span>Feeds</span>
-      <span class="sidebar-tools">
-        <button id="btn-sidebar-menu" class="icon-btn" title="Sidebar options"><svg><use href="#i-dots"/></svg></button>
-        <button id="btn-refresh" class="icon-btn" title="Check for new data"><svg><use href="#i-refresh"/></svg></button>
-      </span>
-      <div id="sidebar-menu" class="dropdown hidden">
-        <button class="dropdown-item" data-opt="updatedOnly"><span class="check"></span>Show updated subscriptions only</button>
-        <button class="dropdown-item" data-opt="dimRead"><span class="check"></span>Dim read subscriptions</button>
-        <div class="dropdown-line"></div>
-        <button class="dropdown-item" data-opt="sortAZ"><span class="check"></span>Sort alphabetically</button>
+    <nav id="tabs_pane" aria-label="Sections">
+      <ul id="top_tabs">
+        <li class="nav-item">
+          <div class="rail-logo" title="ghrss"><svg viewBox="0 0 24 24" width="22" height="22"><circle cx="6" cy="18" r="2.5" fill="currentColor"/><path d="M4 10a10 10 0 0 1 10 10h3A13 13 0 0 0 4 7z" opacity=".75"/><path d="M4 4a16 16 0 0 1 16 16h3A19 19 0 0 0 4 1z" opacity=".45"/></svg></div>
+        </li>
+        <li class="nav-item" id="feeds_tab">
+          <button class="tab-item" data-scope="all" title="Newsfeed">
+            <i class="tab-icon"><svg><use href="#i-all"/></svg></i>
+            <span class="tab-label">Newsfeed</span>
+            <span class="tabs-counter" id="rail-unread-count"></span>
+          </button>
+        </li>
+        <li class="nav-item" id="unread_tab">
+          <button class="tab-item" data-scope="unread" title="Unread">
+            <i class="tab-icon"><svg><use href="#i-unread"/></svg></i>
+            <span class="tab-label">Unread</span>
+          </button>
+        </li>
+        <li class="nav-item" id="today_tab">
+          <button class="tab-item" data-scope="today" title="Today">
+            <i class="tab-icon"><svg><use href="#i-today"/></svg></i>
+            <span class="tab-label">Today</span>
+          </button>
+        </li>
+        <li class="nav-item" id="read_tab">
+          <button class="tab-item" data-scope="recently-read" title="Read">
+            <i class="tab-icon"><svg><use href="#i-read"/></svg></i>
+            <span class="tab-label">Read</span>
+          </button>
+        </li>
+      </ul>
+      <ul id="bottom_tabs">
+        <li class="nav-item">
+          <button class="tab-item" id="btn-theme" title="Toggle theme">
+            <i class="tab-icon"><svg><use href="#i-theme"/></svg></i>
+            <span class="tab-label">Theme</span>
+          </button>
+        </li>
+        <li class="nav-item">
+          <button class="tab-item" id="btn-settings" title="Settings">
+            <i class="tab-icon"><svg><use href="#i-settings"/></svg></i>
+            <span class="tab-label">Settings</span>
+          </button>
+        </li>
+      </ul>
+    </nav>
+
+    <div id="tree_pane">
+      <div id="feeds_nav">
+        <div class="sidebar-head">
+          <h6 class="sidebar-heading">Feeds</h6>
+          <span class="sidebar-tools">
+            <button id="btn-sidebar-menu" class="icon-btn" title="Sidebar options"><svg><use href="#i-dots"/></svg></button>
+            <button id="btn-refresh" class="icon-btn" title="Check for new data"><svg><use href="#i-refresh"/></svg></button>
+          </span>
+          <div id="sidebar-menu" class="dropdown hidden">
+            <button class="dropdown-item" data-opt="updatedOnly"><span class="check"></span>Show updated subscriptions only</button>
+            <button class="dropdown-item" data-opt="dimRead"><span class="check"></span>Dim read subscriptions</button>
+            <div class="dropdown-line"></div>
+            <button class="dropdown-item" data-opt="sortAZ"><span class="check"></span>Sort alphabetically</button>
+          </div>
+        </div>
+
+        <fieldset id="subscriptions_fieldset">
+          <div class="parent_div">
+            <button class="tree-item" data-scope="today" title="Today">
+              <i class="sys-icon"><svg><use href="#i-today"/></svg></i><span class="label">Today</span>
+              <span class="badge" id="badge-today"></span>
+            </button>
+          </div>
+          <div class="parent_div selected_parent">
+            <button class="tree-item" data-scope="all" title="Newsfeed">
+              <i class="sys-icon"><svg><use href="#i-all"/></svg></i><span class="label">Newsfeed</span>
+            </button>
+          </div>
+          <div class="parent_div">
+            <button class="tree-item" data-scope="unread" title="Unread">
+              <i class="sys-icon"><svg><use href="#i-unread"/></svg></i><span class="label">Unread</span>
+              <span class="badge"></span>
+            </button>
+          </div>
+          <div class="parent_div">
+            <button class="tree-item" data-scope="recently-read" title="Read">
+              <i class="sys-icon"><svg><use href="#i-read"/></svg></i><span class="label">Read</span>
+            </button>
+          </div>
+          <div id="tree"></div>
+        </fieldset>
       </div>
+      <div id="sidebar_resizer" title="Drag to resize"></div>
+      <div class="sidebar-foot" id="last-updated" title=""></div>
     </div>
-    <div id="tree" role="tree"></div>
-    <div class="sidebar-foot" id="last-updated" title=""></div>
-  </aside>
+  </div>
 
-  <main id="main">
-    <header id="topbar">
-      <button id="menu-toggle" class="icon-btn" title="Menu"><svg><use href="#i-menu"/></svg></button>
-      <div class="heading-title">
-        <span id="scope-title">Newsfeed</span>
-        <span id="scope-count" class="heading-sub"></span>
-      </div>
-      <div class="topbar-spacer"></div>
-      <div id="search-wrap">
-        <svg class="search-icon"><use href="#i-search"/></svg>
-        <input id="search-input" type="search" placeholder='Search this section — feed: title: before: unread:true' autocomplete="off" spellcheck="false">
-      </div>
-      <div class="toolbar">
-        <div class="btn-group-markread">
-          <button id="btn-mark-all" class="btn-heading" title="Mark all as read"><svg><use href="#i-read"/></svg></button>
-          <button id="btn-mark-all-split" class="btn-heading btn-split" title="Mark as read articles"><svg><use href="#i-chevron"/></svg></button>
+  <div id="content-wrapper">
+    <header id="header_pane">
+      <div class="heading-wrapper">
+        <button id="menu-toggle" class="icon-btn" title="Menu"><svg><use href="#i-menu"/></svg></button>
+        <div class="heading-title">
+          <span id="scope-title">Newsfeed</span>
+          <span id="scope-count" class="section_count_badge"></span>
+        </div>
+        <div class="heading-controls">
+          <div id="search-wrap">
+            <button id="search-open" class="icon-btn" title="Search in current section"><svg><use href="#i-search"/></svg></button>
+            <div id="search-box" class="hidden">
+              <svg class="search-icon"><use href="#i-search"/></svg>
+              <input id="search-input" type="search" placeholder="Search — feed: title: before: unread:true" autocomplete="off" spellcheck="false">
+              <button id="search-close" class="icon-btn" title="Close search"><svg><use href="#i-close"/></svg></button>
+            </div>
+          </div>
+          <div class="btn-group-markread">
+            <button id="btn-mark-all" class="btn-heading" title="Mark all as read"><svg><use href="#i-read"/></svg></button>
+            <button id="btn-mark-all-split" class="btn-heading btn-split" title="Mark as read articles"><svg><use href="#i-chevron"/></svg></button>
+          </div>
+          <button id="btn-more" class="icon-btn" title="More"><svg><use href="#i-dots"/></svg></button>
+          <div id="header-menu" class="dropdown hidden">
+            <div class="menu-label">Status</div>
+            <div class="menu-pad">
+              <div class="chips" id="status-chips">
+                <button class="chip" data-status="all">All</button>
+                <button class="chip" data-status="unread">Unread</button>
+                <button class="chip" data-status="read">Read</button>
+              </div>
+            </div>
+            <div class="menu-label">Date</div>
+            <div class="menu-pad">
+              <select id="date-range" title="Date filter">
+                <option value="all">Any time</option>
+                <option value="today">Today</option>
+                <option value="3d">Last 3 days</option>
+                <option value="week">This week</option>
+                <option value="month">This month</option>
+              </select>
+            </div>
+            <div class="menu-label">Sort &amp; view</div>
+            <div class="menu-pad menu-row">
+              <button id="btn-sort" class="icon-btn" title="Sort: newest first"><svg><use href="#i-sort"/></svg></button>
+              <button id="btn-show-filtered" class="icon-btn" title="Show filtered-out articles"><svg><use href="#i-eyeoff"/></svg></button>
+              <span class="menu-spacer"></span>
+              <div class="layouts" id="layouts">
+                <button class="icon-btn" data-layout="list" title="List view"><svg><use href="#i-list"/></svg></button>
+                <button class="icon-btn" data-layout="expanded" title="Expanded view"><svg><use href="#i-expanded"/></svg></button>
+                <button class="icon-btn" data-layout="column" title="Column view"><svg><use href="#i-column"/></svg></button>
+                <button class="icon-btn" data-layout="cards" title="Card view"><svg><use href="#i-cards"/></svg></button>
+                <button class="icon-btn" data-layout="magazine" title="Magazine view"><svg><use href="#i-magazine"/></svg></button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </header>
 
-    <div id="filterbar">
-      <div class="chips" id="status-chips">
-        <button class="chip" data-status="all">All</button>
-        <button class="chip" data-status="unread">Unread</button>
-        <button class="chip" data-status="read">Read</button>
-      </div>
-      <select id="date-range" title="Date filter">
-        <option value="all">Any time</option>
-        <option value="today">Today</option>
-        <option value="3d">Last 3 days</option>
-        <option value="week">This week</option>
-        <option value="month">This month</option>
-      </select>
-      <button id="btn-sort" class="icon-btn" title="Sort: newest first"><svg><use href="#i-sort"/></svg></button>
-      <button id="btn-show-filtered" class="icon-btn" title="Show filtered-out articles"><svg><use href="#i-eyeoff"/></svg></button>
-      <div class="topbar-spacer"></div>
-      <div class="layouts" id="layouts">
-        <button class="icon-btn" data-layout="list" title="List view"><svg><use href="#i-list"/></svg></button>
-        <button class="icon-btn" data-layout="expanded" title="Expanded view"><svg><use href="#i-expanded"/></svg></button>
-        <button class="icon-btn" data-layout="column" title="Column view"><svg><use href="#i-column"/></svg></button>
-        <button class="icon-btn" data-layout="cards" title="Card view"><svg><use href="#i-cards"/></svg></button>
-        <button class="icon-btn" data-layout="magazine" title="Magazine view"><svg><use href="#i-magazine"/></svg></button>
-      </div>
+    <div id="reader_pane">
+      <div id="list" class="view-list" aria-live="polite"></div>
+      <div id="empty" class="hidden"></div>
     </div>
-
-    <div id="list" class="view-list" aria-live="polite"></div>
-    <div id="empty" class="hidden"></div>
-  </main>
+  </div>
 </div>
+
+<div id="scrim" class="hidden"></div>
 
 <div id="toast" class="hidden"><span id="toast-text"></span><button id="toast-action"></button></div>
 
@@ -129,8 +214,6 @@
   <button class="tool-btn" id="bulk-unread"><svg><use href="#i-unread"/></svg>Mark unread</button>
   <button class="tool-btn" id="bulk-clear">Clear</button>
 </div>
-
-<div id="scrim" class="hidden"></div>
 
 <div id="settings-modal" class="modal hidden" role="dialog" aria-modal="true">
   <div class="modal-card">

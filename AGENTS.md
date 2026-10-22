@@ -155,7 +155,12 @@ Source material on the user's Desktop (OUTSIDE the project — do not delete):
 - Reader typography: `.article-content h1 1.5rem`, `h2 1.3rem`
 - Top tabs (left rail): Home, Dashboards, Feeds (badge), Saved, Automate, Search, Add content, Preferences, profile — ours covers reader subset by design (dashboards/saved/automate out of scope)
 
-### PORTED — design (styles.css tokens verified against their real CSS)
+### PORTED — FULL PAGE STRUCTURE REBUILD (2026-10-22 late)
+index.html + styles.css were rewritten to mirror their real DOM skeleton exactly:
+`#wraper > #side-nav(#tabs_pane rail 72px with .tab-item icon tiles + active tile bg #597fb8, #tree_pane 310px: sidebar-head Feeds + #subscriptions_fieldset with STATIC system rows Today/Newsfeed/Unread/Read + #tree folders, #sidebar_resizer drag) > #content-wrapper(#header_pane sticky 50px: heading-title + .section_count_badge, expanding search icon→field, .btn-heading split mark-all ✓|▾, ⋯ #header-menu holding status/date/sort/view controls; #reader_pane).`
+**List view rows are single-line per their view_style_0 anatomy**: `[dot][favicon+feed col (flex 2 5 130px)][bold title][muted inline excerpt][date right]` — this was the big look-mismatch before (we had 3-line stacked rows). Test selectors updated: system rows live outside `#tree` (badge assertions unscoped), +4 new assertions (45 total).
+
+### PORTED — design tokens (styles.css tokens verified against their real CSS)
 Primary **#1875F3** (+darker #0952b5/#lighter #61a0f7), Roboto via Google Fonts, sidebar **310px**, secondary **#828d9d**, bg-hover **#f3f4f7**, border **#d9dde6**, headings **#081425/#1a2433**, 2-line title clamp + underline-on-hover, read rows dim metadata to .65, reader h1 1.5rem/h2 1.3rem, --list-max 870px. `--sidebar-w`, `--title-size`, `--font` vars.
 
 ### PORTED — features (41 smoke assertions passing)
