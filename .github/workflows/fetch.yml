@@ -22,6 +22,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Fetch previous data (for 30-day accumulation)
+        run: |
+          git fetch origin gh-pages --depth=1 2>/dev/null || true
+          if git rev-parse --verify origin/gh-pages >/dev/null 2>&1; then
+            git checkout origin/gh-pages -- data 2>/dev/null || true
+          fi
+          ls data 2>/dev/null || echo "no previous data (first run)"
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
