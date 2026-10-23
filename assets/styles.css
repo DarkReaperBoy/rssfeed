@@ -616,6 +616,12 @@ body.hide-side-favicons #tree_pane .tree-item .favicon-tile { display: none; }
 .mark-custom { display: flex; align-items: center; gap: 10px; padding: 6px 10px; font-size: 13.5px; color: var(--text-dim); cursor: pointer; }
 .mark-custom:hover { background: var(--bg-hover); }
 .mark-custom input[type="date"] { margin-left: auto; border: 1px solid var(--border); background: var(--bg); color: var(--text); border-radius: 4px; padding: 3px 6px; font: inherit; font-size: 12.5px; max-width: 148px; }
+/* Subdued expander for the INVERSE mark direction (read ⇄ unread by age) —
+   the menu opens offering exactly one group; this row reveals the other. */
+.mark-alt-toggle { display: flex; align-items: center; gap: 8px; width: 100%; border: 0; border-top: 1px solid var(--border); margin-top: 4px; padding: 8px 10px 6px; background: none; color: var(--text-dim); font: inherit; font-size: 12.5px; cursor: pointer; text-align: left; }
+.mark-alt-toggle:hover { color: var(--text); background: var(--bg-hover); }
+.mark-alt-toggle .chev { margin-left: auto; width: 14px; height: 14px; flex: none; color: var(--text-faint); transition: transform .15s; }
+.mark-alt-toggle.open .chev { transform: rotate(90deg); }
 .dropdown-more { top: 44px; right: 0; min-width: 290px; max-height: calc(100vh - 74px); overflow-y: auto; }
 .dropdown .dropdown-item .mi-icon { display: inline-flex; width: 16px; color: var(--text-dim); }
 .dropdown .dropdown-item .mi-icon svg { width: 16px; height: 16px; }

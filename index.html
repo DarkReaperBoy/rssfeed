@@ -17,7 +17,7 @@ try {
   }
 } catch (e) {}
 </script>
-<link rel="stylesheet" href="assets/styles.css?v=20261026">
+<link rel="stylesheet" href="assets/styles.css?v=20261027">
 </head>
 <body>
 
@@ -124,6 +124,14 @@ try {
                   <button class="dropdown-item" data-mark="unread" data-older="31">Older than a month</button>
                   <div class="dropdown-item mark-custom" data-custom="unread">Before… <input type="date" id="mark-date-unread" title="Mark articles published before this date as unread"></div>
                 </div>
+                <!-- The inverse direction stays one click away: the menu OPENS
+                     offering exactly one group (the flip rule above); this subdued
+                     expander reveals the other group on demand — restore-by-age
+                     must never be unreachable just because new articles exist. -->
+                <button id="mark-alt-toggle" class="mark-alt-toggle" type="button" aria-expanded="false">
+                  <span id="mark-alt-label">Mark as unread by age</span>
+                  <svg class="chev"><use href="#i-chevron"/></svg>
+                </button>
               </div>
             </div>
 
@@ -210,7 +218,7 @@ try {
   </div>
 </noscript>
 
-<div id="toast" class="hidden" role="status" aria-live="polite"><span id="toast-text"></span><button id="toast-action"></button></div>
+<div id="toast" class="hidden" role="status" aria-live="polite"><span id="toast-text"></span><button id="toast-action"></button><button id="toast-action-2"></button></div>
 
 <div id="bulk-bar" class="hidden">
   <span class="count" id="bulk-count">0</span>
@@ -254,6 +262,6 @@ try {
   </div>
 </div>
 
-<script src="assets/app.js?v=20261026"></script>
+<script src="assets/app.js?v=20261027"></script>
 </body>
 </html>

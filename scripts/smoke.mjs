@@ -270,6 +270,101 @@ const visibleGroupLabel = () =>
   $('#mark-group-unread').classList.contains('hidden') ? $('#mark-group-read .mark-label') : $('#mark-group-unread .mark-label');
 ok(visibleGroupLabel().textContent === 'Mark as read', 'the OFFERED group while not caught up is "Mark as read"');
 
+console.log('inverse-direction expander — restore by age while NOT caught up');
+// User report: "mark as unread, older than a x is broken" — the unread group
+// was hidden whenever any unread article existed (with a fetch every ~15 min
+// that is almost always), making restore-by-age unreachable. The subdued
+// expander brings it back while the menu still OPENS offering exactly one group.
+click('#btn-mark-all-split');
+await settle(20);
+ok(!!$('#mark-alt-toggle') && $('#mark-alt-label').textContent === 'Mark as unread by age', 'collapsed expander offers the inverse direction (unread) while not caught up');
+ok($('#mark-group-unread').classList.contains('hidden'), 'the menu still opens with exactly ONE group');
+click('#mark-alt-toggle');
+await settle(20);
+ok(!$('#mark-group-unread').classList.contains('hidden'), 'the expander reveals the "Mark as unread" group');
+ok(!$('#mark-group-read').classList.contains('hidden'), 'the primary read group stays visible');
+ok($('#mark-alt-toggle').getAttribute('aria-expanded') === 'true', 'the expander reports its expanded state');
+click('#mark-menu [data-mark="read"][data-older="1"]'); // mark the day-old batch read via the primary group
+await settle(80);
+ok($('#toast-text').textContent.includes('4 article'), 'day-old batch marked read while not caught up');
+ok($('#mark-menu').classList.contains('hidden'), 'the action closed the menu');
+click('#btn-mark-all-split'); // reopen — the expansion must reset
+await settle(20);
+ok($('#mark-group-unread').classList.contains('hidden') && $('#mark-alt-toggle').getAttribute('aria-expanded') === 'false', 'reopening resets the expander (one group again)');
+ok($('#mark-alt-label').textContent === 'Mark as unread by age', 'the expander label survives the reset');
+click('#mark-alt-toggle'); // reveal the unread group again — the reported-broken path
+await settle(20);
+click('#mark-menu [data-mark="unread"][data-older="1"]');
+await settle(80);
+ok($('#toast-text').textContent.includes('4 articles older than a day as unread'), 'restore-by-age works while NOT caught up (the reported break)');
+ok(rowCount() === TOTAL - HIDDEN, 'the restored rows are back: net-zero end state');
+ok($('#badge-all-items').textContent === String(TOTAL - HIDDEN), 'badge back to everything-unread');
+
+console.log('Today scope: structurally dead presets are hidden');
+// A Today article is never older than a day — the older-than rows can only
+// ever toast "No articles older than … here" in that view (dead menu items,
+// the other half of the "older than a x is broken" report).
+click('#status-items [data-status="today"]');
+await settle(80);
+ok($('#scope-title').textContent === 'Today', 'Today view entered');
+click('#btn-mark-all-split');
+await settle(20);
+ok($$('#mark-menu .dropdown-item[data-older]').length === 8, 'eight older-than rows exist across both groups');
+ok($$('#mark-menu .dropdown-item[data-older]').every((b) => b.classList.contains('hidden')), 'every older-than preset is hidden in the Today view');
+ok($$('#mark-menu .mark-custom').length === 2 && $$('#mark-menu .mark-custom.hidden').length === 0, 'the "Before…" pickers stay (a future date still works)');
+click('#btn-mark-all-split'); // close
+await settle(20);
+click('.tree-item[data-scope="all"]'); // back to the Newsfeed
+await settle(80);
+click('#btn-mark-all-split');
+await settle(20);
+ok($$('#mark-menu .dropdown-item[data-older]').every((b) => !b.classList.contains('hidden')), 'presets return outside the Today view');
+click('#btn-mark-all-split'); // close
+await settle(20);
+
+console.log('filter-invisible restores explain themselves');
+// Caught up with the Date filter on Today: restoring older-than-a-day lands
+// entirely OUTSIDE the filter — the toast used to claim success over an
+// unchanged "All caught up 🎉" list (looked dead). It must now explain itself,
+// offer Show all, and the empty state must stop celebrating hidden unread.
+click('#badge-all-items'); // everything read → caught up
+await settle(80);
+const dr = $('#date-range');
+dr.value = 'today';
+dr.dispatchEvent(new window.Event('change', { bubbles: true }));
+await settle(80);
+ok(rowCount() === 0, 'caught up under a Today filter: the unread view is empty');
+ok($('#empty h3').textContent === 'Nothing in this time range', 'the empty state no longer claims "All caught up" while a filter narrows the view');
+ok($('#empty p').textContent.includes('No unread articles'), 'the caught-up flavor reads honestly (no hidden unread yet)');
+click('#btn-mark-all-split');
+await settle(20);
+ok(!$('#mark-group-unread').classList.contains('hidden'), 'caught up → the unread group is the offered one');
+click('#mark-menu [data-mark="unread"][data-older="1"]');
+await settle(120);
+ok($('#toast-text').textContent.includes('4 articles older than a day as unread — hidden by the date filter'), 'the toast names the filter that hides the result');
+ok($('#toast-action-2').textContent === 'Show all' && $('#toast-action-2').style.display !== 'none', 'a one-click Show-all companion rides along');
+ok(rowCount() === 0, 'the restored rows are indeed outside the Today filter');
+ok($('#empty h3').textContent === 'Nothing in this time range', 'empty state stays on the honest header');
+ok($('#empty p').textContent.includes('4 unread articles') && $('#empty p').textContent.includes('older than Today'), 'the empty state names the hidden unread instead of celebrating');
+click('#toast-action-2');
+await settle(80);
+ok(rowCount() === 4, 'Show all reveals the restored rows');
+ok($('#date-range').value === 'all' && dr.value === 'all', 'the Date filter actually reset (select synced)');
+ok($('#toast').classList.contains('hidden'), 'the Show-all click dismisses the toast');
+// Return to the full-unread net-zero state for the following blocks: not
+// caught up → expander → "Before tomorrow" un-reads everything.
+click('#btn-mark-all-split');
+await settle(20);
+click('#mark-alt-toggle');
+await settle(20);
+const tmr = new Date(now + 864e5);
+const tmrStr = `${tmr.getFullYear()}-${String(tmr.getMonth() + 1).padStart(2, '0')}-${String(tmr.getDate()).padStart(2, '0')}`;
+const dpick = $('#mark-date-unread');
+dpick.value = tmrStr;
+dpick.dispatchEvent(new window.Event('change', { bubbles: true }));
+await settle(500); // past the 250 ms date-picker debounce
+ok(rowCount() === TOTAL - HIDDEN, '"Before tomorrow" through the revealed group un-reads everything (net-zero restored)');
+
 console.log('search');
 click('#search-open');
 await settle(20);

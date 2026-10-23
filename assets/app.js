@@ -841,9 +841,21 @@ function renderEmpty(visible) {
     el.innerHTML = `<h3>No matches</h3><p>Nothing matched <code>${esc(state.search)}</code> in any feed.<br>Operators: <code>feed:name</code> <code>title:word</code> <code>before:2026-01-01</code> <code>after:2026-01-01</code> <code>unread:true</code> <code>is:read</code></p>`;
   } else if (ui.status === 'unread') {
     const caughtUp = !state.search && ui.dateRange === 'all' && allReadInScope();
-    el.innerHTML = `<h3>All caught up 🎉</h3><p>No unread articles here${ui.dateRange !== 'all' ? ' for this time range' : ''}.</p>${caughtUp ? '<p class="empty-hint">Over-marked? The ✓ button and its ▾ menu now offer <em>Mark as unread</em> — everything, by age, or before an exact date.</p>' : ''}`;
+    if (caughtUp) {
+      el.innerHTML = `<h3>All caught up 🎉</h3><p>No unread articles here.</p><p class="empty-hint">Over-marked? The ✓ button and its ▾ menu now offer <em>Mark as unread</em> — everything, by age, or before an exact date.</p>`;
+    } else if (ui.dateRange !== 'all') {
+      // Empty ONLY because the date filter excludes everything — unread
+      // articles still exist in this scope. "All caught up 🎉" here was a
+      // lie that made working restores look dead (the badge said 806 while
+      // the list celebrated).
+      const n = scopeUnreadCount(state.scope);
+      const label = { today: 'Today', '3d': 'the last 3 days', week: 'this week', month: 'this month' }[ui.dateRange] || 'this range';
+      el.innerHTML = `<h3>Nothing in this time range</h3><p>${n ? `${n} unread article${n === 1 ? '' : 's'} in ${esc(scopeTitle())} ${n === 1 ? 'is' : 'are'} older than ${label}. Widen the Date filter (⋯ menu) to see ${n === 1 ? 'it' : 'them'}.` : `No unread articles in ${esc(scopeTitle())} for this time range.`}</p>`;
+    } else {
+      el.innerHTML = `<h3>All caught up 🎉</h3><p>No unread articles here.</p>`;
+    }
   } else {
-    el.innerHTML = `<h3>Nothing here</h3><p>No articles in this view. New items arrive when the hourly fetch runs.</p>`;
+    el.innerHTML = `<h3>Nothing here</h3><p>No articles in this view${ui.dateRange !== 'all' ? ' for this time range' : ''}. New items arrive when the hourly fetch runs.</p>`;
   }
 }
 
@@ -1084,6 +1096,31 @@ function boundaryHint(cutoff = 0) {
   if (!cutoff || !start || cutoff >= start) return '';
   return ` — data goes back to ${new Date(start).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`;
 }
+/* A scope-level mark action can affect only articles the current LIST view
+   filters out (date filter, search, folder max-age). The action is honest —
+   but with every affected row invisible it LOOKS dead: "Marked 806 articles…"
+   over an unchanged "All caught up" list (user report: "mark as unread, older
+   than a x is broken"). Return a toast note + one-click way to see them. */
+function viewHiddenExtra(ids) {
+  if (!ids.length) return null;
+  const vis = new Set(state.visible.map((a) => a.id));
+  if (ids.some((id) => vis.has(id))) return null;
+  if (ui.dateRange !== 'all') {
+    return {
+      note: ' — hidden by the date filter',
+      label: 'Show all',
+      cb: () => { ui.dateRange = 'all'; saveUi(); syncControls(); renderList(); },
+    };
+  }
+  if (state.search) {
+    return { note: ' — hidden by the search', label: 'Clear search', cb: () => closeSearchFn() };
+  }
+  if (state.scope.startsWith('folder:')) {
+    const f = folderDefs().find((x) => x.id === state.scope.slice(7));
+    if (Number(f?.maxAgeDays) > 0) return { note: ` — older than this folder's ${f.maxAgeDays}-day view`, label: null };
+  }
+  return null;
+}
 function markScopeRead(scope, olderDays = 0, beforeTs = 0) {
   const what = describeCutoff(olderDays, beforeTs);
   const cutoff = cutoffFrom(olderDays, beforeTs);
@@ -1102,10 +1139,11 @@ function markScopeRead(scope, olderDays = 0, beforeTs = 0) {
   }
   if (snapshot.some((s) => s.guard)) saveUserUnread();
   saveRead(); state.keepVisible.clear(); renderTree(); renderList();
-  showToast(`Marked ${ids.length} article${ids.length === 1 ? '' : 's'}${what} as read`, 'Undo', () => {
+  const extra = viewHiddenExtra(ids);
+  showToast(`Marked ${ids.length} article${ids.length === 1 ? '' : 's'}${what} as read${extra?.note || ''}`, 'Undo', () => {
     for (const { id, ts, guard } of snapshot) { if (ts) state.read[id] = ts; else delete state.read[id]; if (guard) state.userUnread[id] = guard; else delete state.userUnread[id]; }
     saveRead(); saveUserUnread(); renderTree(); renderList();
-  });
+  }, false, extra && extra.label ? extra : null);
 }
 function markAllAsReadInScope() {
   if (allReadInScope()) {
@@ -1195,12 +1233,13 @@ function markScopeUnread(scope, olderDays = 0, beforeTs = 0) {
   saveUserUnread();
   state.keepVisible.clear();
   saveRead(); renderTree(); renderList();
-  showToast(`Marked ${ids.length} article${ids.length === 1 ? '' : 's'}${what} as unread`, 'Undo', () => {
+  const extra = viewHiddenExtra(ids);
+  showToast(`Marked ${ids.length} article${ids.length === 1 ? '' : 's'}${what} as unread${extra?.note || ''}`, 'Undo', () => {
     for (const { id, ts, guard } of snapshot) { if (ts) state.read[id] = ts; else delete state.read[id]; if (guard) state.userUnread[id] = guard; else delete state.userUnread[id]; }
     saveRead(); saveUserUnread(); renderTree(); renderList();
-  });
+  }, false, extra && extra.label ? extra : null);
 }
-function syncMarkButtons() {
+function syncMarkButtons(forceReset = false) {
   const caughtUp = allReadInScope();
   const btn = $('#btn-mark-all');
   if (!btn) return;
@@ -1211,11 +1250,29 @@ function syncMarkButtons() {
   if (split) split.title = caughtUp ? 'Mark as unread — more options' : 'Mark as read — more options';
   // Exactly ONE ▾ group is offered — the same rule as the main button flip:
   // unread articles exist → "Mark as read"; everything here is read →
-  // "Mark as unread". Never both at once.
-  const gRead = $('#mark-group-read');
-  const gUnread = $('#mark-group-unread');
-  if (gRead) gRead.classList.toggle('hidden', caughtUp);
-  if (gUnread) gUnread.classList.toggle('hidden', !caughtUp);
+  // "Mark as unread". Never both at once. (While the menu is OPEN the user may
+  // have expanded the inverse group via #mark-alt-toggle — a render landing
+  // mid-menu must not collapse it under their cursor.)
+  const menuOpen = !forceReset && !$('#mark-menu')?.classList.contains('hidden');
+  if (!menuOpen) {
+    const gRead = $('#mark-group-read');
+    const gUnread = $('#mark-group-unread');
+    if (gRead) gRead.classList.toggle('hidden', caughtUp);
+    if (gUnread) gUnread.classList.toggle('hidden', !caughtUp);
+    const alt = $('#mark-alt-toggle');
+    if (alt) {
+      alt.setAttribute('aria-expanded', 'false');
+      alt.classList.remove('open');
+      const lbl = $('#mark-alt-label');
+      if (lbl) lbl.textContent = caughtUp ? 'Mark as read by age' : 'Mark as unread by age';
+    }
+  }
+  // In the Today scope the older-than presets are structurally dead — a Today
+  // article is never older than a day — so they can only ever produce "No
+  // articles older than … here" (user report: "mark as unread, older than a x
+  // is broken"). Hide the dead rows; "Before…" stays (a future date works).
+  const today = state.scope === 'today';
+  $$('#mark-menu .dropdown-item[data-older]').forEach((b) => b.classList.toggle('hidden', today));
 }
 
 function updateBulkBar() {
@@ -1252,17 +1309,29 @@ function bulkMark(on) {
 }
 
 let toastTimer = null;
-function showToast(text, actionLabel, cb, ambient = false) {
+function showToast(text, actionLabel, cb, ambient = false, extra = null) {
   const el = $('#toast');
   const btn = $('#toast-action');
-  // One slot, so priority rules apply: AMBIENT notices (sync results, "already
-  // up to date") must never stomp a live Undo; action feedback (zero-results,
-  // confirms, new Undos) always replaces — a silent button looks broken.
-  if (ambient && !actionLabel && !el.classList.contains('hidden') && btn.style.display !== 'none') return;
+  const btn2 = $('#toast-action-2');
+  const anyActionLive = () => !el.classList.contains('hidden')
+    && ((btn && btn.style.display !== 'none') || (btn2 && btn2.style.display !== 'none'));
+  // One slot per action, so priority rules apply: AMBIENT notices (sync
+  // results, "already up to date") must never stomp a live Undo / Show-all;
+  // action feedback (zero-results, confirms, new Undos) always replaces — a
+  // silent button looks broken.
+  if (ambient && !actionLabel && !extra && anyActionLive()) return;
   $('#toast-text').textContent = text;
   btn.textContent = actionLabel || '';
   btn.style.display = actionLabel ? '' : 'none';
   btn.onclick = () => { if (cb) cb(); hideToast(); };
+  // Second slot: the "your action worked but the current view hides it"
+  // companion (e.g. Show all / Clear search after a filter-invisible restore).
+  if (btn2) {
+    const label2 = extra?.label || '';
+    btn2.textContent = label2;
+    btn2.style.display = label2 ? '' : 'none';
+    btn2.onclick = () => { if (extra?.cb) extra.cb(); hideToast(); };
+  }
   el.classList.remove('hidden');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(hideToast, 7000);
@@ -1593,8 +1662,27 @@ function bindEvents() {
   $('#btn-mark-all').addEventListener('click', markAllAsReadInScope);
   $('#btn-mark-all-split').addEventListener('click', (e) => {
     e.stopPropagation(); // their ▾ opens the mark menu (ss2)
-    $('#mark-menu').classList.toggle('hidden');
+    const menu = $('#mark-menu');
+    const opening = menu.classList.contains('hidden');
+    menu.classList.toggle('hidden');
+    // Every open starts from the honest default: ONE group per the flip rule,
+    // inverse expander collapsed — a stale expansion must not survive a close.
+    if (opening) syncMarkButtons(true);
     syncMenuAria();
+  });
+  // The subdued expander: reveal the INVERSE group (mark-as-unread while
+  // unread articles exist, mark-as-read once caught up). Restore-by-age must
+  // stay reachable in every state — the old exactly-one-group menu made it
+  // impossible to un-read anything unless the whole scope was caught up, and
+  // with a fetch every ~15 min that almost never happens (user report:
+  // "mark as unread, older than a x is broken").
+  $('#mark-alt-toggle')?.addEventListener('click', () => {
+    const alt = $('#mark-alt-toggle');
+    const open = alt.classList.toggle('open');
+    alt.setAttribute('aria-expanded', String(open));
+    const caughtUp = allReadInScope();
+    const g = caughtUp ? $('#mark-group-read') : $('#mark-group-unread');
+    if (g) g.classList.toggle('hidden', !open);
   });
   // Menu actions wait for the scope's feeds so the count matches the badges —
   // but never forever: every fetch is capped and this wait is bounded too, so
