@@ -7,9 +7,6 @@
 <title>My RSSFeed</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='6' cy='18' r='2.5' fill='%23e8710a'/%3E%3Cpath d='M4 10a10 10 0 0 1 10 10h3A13 13 0 0 0 4 7z' fill='%23f5a623'/%3E%3Cpath d='M4 4a16 16 0 0 1 16 16h3A19 19 0 0 0 4 1z' fill='%23e8710a'/%3E%3C/svg%3E">
 <script>
-/* Paint the right theme BEFORE the stylesheet: config.json's theme arrives
-   async, so returning dark-mode visitors used to get a white flash every load.
-   ghrss:theme is the last-applied theme (app.js keeps it fresh). */
 try {
   var t = JSON.parse(localStorage.getItem('ghrss:theme') || '"auto"');
   if (t === 'dark' || (t !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches)) {
@@ -20,7 +17,6 @@ try {
 <link rel="stylesheet" href="assets/styles.css?v=20261027">
 </head>
 <body>
-
 <svg xmlns="http://www.w3.org/2000/svg" style="display:none">
   <symbol id="i-all" viewBox="0 0 24 24"><path d="M4 6h16v2H4zm0 5h16v2H4zm0 5h10v2H4z"/></symbol>
   <symbol id="i-unread" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zm0 4a5 5 0 1 1 0 10 5 5 0 0 1 0-10z"/></symbol>
@@ -48,17 +44,13 @@ try {
   <symbol id="i-chevron-up" viewBox="0 0 24 24"><path d="M12 8l6 6-1.4 1.4L12 10.8l-4.6 4.6L6 14z"/></symbol>
   <symbol id="i-gear" viewBox="0 0 24 24"><path d="M19.4 13c.07-.33.1-.66.1-1s-.03-.67-.1-1l2.12-1.63a.5.5 0 0 0 .12-.64l-2-3.46a.5.5 0 0 0-.61-.22l-2.5 1a7.6 7.6 0 0 0-1.7-1l-.37-2.65A.5.5 0 0 0 14 2.5h-4a.5.5 0 0 0-.5.42L9.2 5.57a7.6 7.6 0 0 0-1.7 1l-2.5-1a.5.5 0 0 0-.6.22l-2 3.46a.5.5 0 0 0 .12.64L4.6 11c-.07.33-.1.66-.1 1s.03.67.1 1l-2.1 1.63a.5.5 0 0 0-.12.64l2 3.46c.13.22.4.31.61.22l2.5-1a7.6 7.6 0 0 0 1.7 1l.37 2.65a.5.5 0 0 0 .5.42h4a.5.5 0 0 0 .5-.42l.37-2.65a7.6 7.6 0 0 0 1.7-1l2.5 1c.22.09.48 0 .61-.22l2-3.46a.5.5 0 0 0-.12-.64L19.4 13zM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"/></symbol>
 </svg>
-
 <div id="wraper">
   <div id="side-nav">
-
-
     <div id="tree_pane">
       <div id="feeds_nav" class="nav-panel">
         <div class="sidebar-head">
           <h2 class="sidebar-heading">Feeds</h2>
         </div>
-
         <fieldset id="subscriptions_fieldset">
           <div id="pdinner_today" class="parent_div hidden">
             <button class="tree-item" data-scope="today" title="Today">
@@ -75,7 +67,6 @@ try {
           <div id="tree"></div>
         </fieldset>
       </div>
-
       <div id="sidebar_resizer" title="Drag to resize"></div>
       <div class="sidebar-foot" id="last-updated">
         <div id="last-updated-text" title=""></div>
@@ -83,7 +74,6 @@ try {
       </div>
     </div>
   </div>
-
   <div id="content-wrapper">
     <header id="header_pane">
       <div class="heading-wrapper">
@@ -104,10 +94,6 @@ try {
                 <button id="btn-mark-all-split" class="btn-heading btn-split" title="More mark actions" aria-label="More mark actions" aria-haspopup="menu" aria-expanded="false"><svg><use href="#i-chevron-down"/></svg></button>
               </div>
               <div id="mark-menu" class="dropdown dropdown-mark hidden">
-                <!-- Exactly ONE group is offered at a time — the same rule as the
-                     main ✓ button flip: unread articles exist → mark-as-read;
-                     everything here is read → mark-as-unread. syncMarkButtons()
-                     toggles the .hidden classes on every render. -->
                 <div id="mark-group-read">
                   <div class="mark-label">Mark as read</div>
                   <button class="dropdown-item" data-mark="read" data-older="1">Older than a day</button>
@@ -118,25 +104,18 @@ try {
                 </div>
                 <div id="mark-group-unread" class="hidden">
                   <div class="mark-label">Mark as unread</div>
-                  <!-- The unread direction restores by READING age (when you read
-                       it), not publication age — the labels say so outright. -->
                   <button class="dropdown-item" data-mark="unread" data-older="1">Read more than a day ago</button>
                   <button class="dropdown-item" data-mark="unread" data-older="2">Read more than two days ago</button>
                   <button class="dropdown-item" data-mark="unread" data-older="7">Read more than a week ago</button>
                   <button class="dropdown-item" data-mark="unread" data-older="31">Read more than a month ago</button>
                   <div class="dropdown-item mark-custom" data-custom="unread">Before… <input type="date" id="mark-date-unread" title="Mark articles you read before this date as unread"></div>
                 </div>
-                <!-- The inverse direction stays one click away: the menu OPENS
-                     offering exactly one group (the flip rule above); this subdued
-                     expander reveals the other group on demand — restore-by-age
-                     must never be unreachable just because new articles exist. -->
                 <button id="mark-alt-toggle" class="mark-alt-toggle" type="button" aria-expanded="false">
                   <span id="mark-alt-label">Mark as unread by age</span>
                   <svg class="chev"><use href="#i-chevron"/></svg>
                 </button>
               </div>
             </div>
-
             <div id="search-wrap">
               <button id="search-open" class="icon-btn" title="Search all articles" aria-label="Search"><svg><use href="#i-search"/></svg></button>
               <div id="search-box" class="hidden">
@@ -194,7 +173,6 @@ try {
         </div>
       </div>
     </header>
-
     <div id="reader_pane">
       <div id="list_pane">
         <div id="list"></div>
@@ -210,25 +188,20 @@ try {
     </div>
   </div>
 </div>
-
 <div id="scrim" class="hidden"></div>
-
 <noscript>
   <div style="position:fixed;inset:0;background:#fefefe;color:#1a2433;display:flex;align-items:center;justify-content:center;text-align:center;padding:24px;font:15px/1.6 system-ui,sans-serif;z-index:999">
     <p><strong>This reader runs entirely in your browser and needs JavaScript.</strong><br>
     Articles are fetched into <code>data/</code> by a GitHub Action — enable JavaScript to read them.</p>
   </div>
 </noscript>
-
 <div id="toast" class="hidden" role="status" aria-live="polite"><span id="toast-text"></span><button id="toast-action"></button><button id="toast-action-2"></button></div>
-
 <div id="bulk-bar" class="hidden">
   <span class="count" id="bulk-count">0</span>
   <button class="tool-btn" id="bulk-read"><svg><use href="#i-read"/></svg>Mark read</button>
   <button class="tool-btn" id="bulk-unread"><svg><use href="#i-unread"/></svg>Mark unread</button>
   <button class="tool-btn" id="bulk-clear">Clear</button>
 </div>
-
 <div id="confirm-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
   <div class="modal-card modal-small">
     <div class="modal-head"><h2 id="confirm-title">Confirm</h2></div>
@@ -241,7 +214,6 @@ try {
     </div>
   </div>
 </div>
-
 <div id="settings-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="settings-title">
   <div class="modal-card modal-small">
     <div class="modal-head">
@@ -263,7 +235,6 @@ try {
     </div>
   </div>
 </div>
-
 <script src="assets/app.js?v=20261027"></script>
 </body>
 </html>

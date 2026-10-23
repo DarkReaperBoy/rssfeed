@@ -1,39 +1,32 @@
-/* ghrss — replica of Inoreader's reader frame, rebuilt from their real
-   DOM (#wraper > #side-nav(#tree_pane) > #content-wrapper
-   (#header_pane + #reader_pane)) and their production CSS metrics:
-   tree rows line-height 36px, header 50px + buttons 36px,
-   primary #1875F3, tab tile #597fb8, borders #e9eaf0, bg #fefefe,
-   gray #71747a, Roboto. (Note: #wraper — sic — mirrors Inoreader's DOM.) */
-
 :root {
   --accent: #1875f3;
   --accent-strong: #0952b5;
   --accent-light: #61a0f7;
-  --tile: #597fb8;              /* active tab tile + counters */
+  --tile: #597fb8;              
   --bg: #fefefe;
   --bg-side: #fefefe;
   --bg-main: #fefefe;
   --bg-hover: #f1f3f6;
   --bg-row-hover: #f1f3f6;
   --bg-expanded: #f8f9fc;
-  --bg-elevated: #ffffff;       /* dropdowns / modals — one step above the page */
-  --surface-raised: #081425;    /* toast / bulk bar */
+  --bg-elevated: #ffffff;       
+  --surface-raised: #081425;    
   --on-raised: #fefefe;
   --on-raised-accent: #8ab9ef;
-  --btn-gray: #edeff2;          /* .btn-heading */
+  --btn-gray: #edeff2;          
   --btn-gray-hover: #dee2e7;
   --btn-gray-active: #cfd5dd;
   --border: #e9eaf0;
   --text: #1a2433;
   --text-heading: #081425;
-  --text-dim: #71747a;          /* .unread_cnt / muted */
+  --text-dim: #71747a;          
   --text-faint: #9aa4b2;
   --highlight-bg: #fff7e0;
   --shadow: 0 1px 3px rgba(8, 20, 37, .12);
   --radius: 6px;
   --list-max: 870px;
   --sidebar-width: 242px;
-  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; /* self-hosted: no render-blocking Google Fonts request */
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; 
   --title-size: 14.5px;
   color-scheme: light;
 }
@@ -80,14 +73,13 @@ input, select { font: inherit; color: inherit; }
 a { color: var(--accent); }
 svg { width: 20px; height: 20px; fill: currentColor; flex: none; }
 .hidden { display: none !important; }
-:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; } /* keyboard users could not see where they were */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; } 
 
-/* ============ frame: #wraper ============ */
 #wraper {
   display: grid;
   grid-template-columns: var(--sidebar-width) 1fr;
   height: 100vh;
-  height: 100dvh; /* mobile URL bar: 100vh alone gets cropped by it */
+  height: 100dvh; 
 }
 #side-nav {
   grid-column: 1;
@@ -108,15 +100,14 @@ svg { width: 20px; height: 20px; fill: currentColor; flex: none; }
   background: var(--bg-main);
 }
 
-/* ============ sidebar: #tree_pane ============ */
 #tree_pane {
   position: relative;
   background: var(--bg-side);
-  height: 100%; /* fill #side-nav: collapsed folders left the footer floating mid-air; expanded ones couldn't scroll */
+  height: 100%; 
   display: flex; flex-direction: column;
   overflow: hidden;
   min-width: 0;
-  /* no border-right here: #side-nav already draws the divider (2px double before) */
+
 }
 .sidebar-head {
   position: relative;
@@ -134,8 +125,8 @@ svg { width: 20px; height: 20px; fill: currentColor; flex: none; }
 .parent_div { border-radius: 5px; }
 .tree-item {
   display: flex; align-items: center; gap: 6px;
-  width: 100%; min-height: 36px;              /* .parent_div line-height:36px */
-  padding: 1px 8px 1px 4px;                   /* .parent_div_inner padding */
+  width: 100%; min-height: 36px;              
+  padding: 1px 8px 1px 4px;                   
   border-radius: 5px;
   color: var(--text); text-align: left;
   font-size: 14px; position: relative;
@@ -143,7 +134,7 @@ svg { width: 20px; height: 20px; fill: currentColor; flex: none; }
 .tree-item .sys-icon { display: flex; width: 20px; height: 20px; color: var(--text-faint); }
 .tree-item .sys-icon svg { width: 18px; height: 18px; }
 .tree-item:hover { background: var(--bg-hover); }
-.tree-item.active { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent-strong); } /* no font-weight: bold — the weight change used to shift the row's text and its ellipsis point on every selection */
+.tree-item.active { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent-strong); } 
 .tree-item.active .sys-icon { color: var(--accent); }
 .tree-item .label {
   flex: 1; min-width: 0;
@@ -152,7 +143,7 @@ svg { width: 20px; height: 20px; fill: currentColor; flex: none; }
 .tree-item .badge {
   position: relative;
   font-size: 11.5px; color: var(--text-dim); font-weight: 500;
-  min-width: 20px; text-align: right;          /* .unread_cnt */
+  min-width: 20px; text-align: right;          
   cursor: pointer; padding-left: 4px;
 }
 .tree-item .badge:hover,
@@ -199,7 +190,6 @@ svg { width: 20px; height: 20px; fill: currentColor; flex: none; }
 .sidebar-foot a:hover { text-decoration: underline; }
 .sidebar-credit { margin-top: 1px; }
 
-/* dropdowns (header ⋯ + mark menus) */
 .dropdown {
   position: absolute; top: 42px; right: 6px; z-index: 60;
   background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px;
@@ -215,12 +205,11 @@ svg { width: 20px; height: 20px; fill: currentColor; flex: none; }
 .dropdown-line { height: 1px; background: var(--border); margin: 4px 2px; }
 .menu-label {
   font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
-  color: var(--text-faint); padding: 6px 1.25rem 2px; /* align with the items' 1.25rem inset */
+  color: var(--text-faint); padding: 6px 1.25rem 2px; 
 }
 .menu-pad { padding: 2px 8px 6px; }
 .menu-pad select { width: 100%; }
 
-/* ============ content header: #header_pane ============ */
 #header_pane {
   position: sticky; top: 0; z-index: 24;
   background: var(--bg);
@@ -229,7 +218,7 @@ svg { width: 20px; height: 20px; fill: currentColor; flex: none; }
 }
 .heading-wrapper {
   display: flex; align-items: center; gap: 10px;
-  min-height: 50px;                            /* .heading-wrapper min-height:50px */
+  min-height: 50px;                            
   padding: 0 1rem;
 }
 #menu-toggle { display: none; }
@@ -241,7 +230,6 @@ svg { width: 20px; height: 20px; fill: currentColor; flex: none; }
 }
 .heading-controls { margin-left: auto; display: flex; align-items: center; gap: 8px; position: relative; }
 
-/* search: icon → expands (their search-input-wrapper behavior) */
 #search-wrap { position: relative; display: flex; justify-content: flex-end; }
 #search-box { display: flex; align-items: center; gap: 2px; width: min(340px, 42vw); }
 #search-box .search-icon { width: 16px; height: 16px; color: var(--text-dim); margin-left: 8px; }
@@ -262,12 +250,11 @@ svg { width: 20px; height: 20px; fill: currentColor; flex: none; }
 .icon-btn:disabled { opacity: .35; pointer-events: none; }
 .icon-btn.active { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
 
-/* .btn-heading gray pills */
 .btn-heading, .tool-btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-  height: 36px; padding: 0 10px; border-radius: 6px;   /* .heading-btn-height:36px */
+  height: 36px; padding: 0 10px; border-radius: 6px;   
   background: var(--btn-gray); color: var(--text);
-  border: 1px solid transparent; font-size: 13.5px; /* was hardcoded #fefefe — a bright white outline glowed on every button in dark mode */
+  border: 1px solid transparent; font-size: 13.5px; 
 }
 .btn-heading:hover, .tool-btn:hover { background: var(--btn-gray-hover); color: var(--text); }
 .btn-heading:active, .tool-btn:active { background: var(--btn-gray-active); }
@@ -280,7 +267,6 @@ svg { width: 20px; height: 20px; fill: currentColor; flex: none; }
 .btn-group-markread .btn-split { border-radius: 0 6px 6px 0; padding: 0 5px; border-left: 1px solid color-mix(in srgb, var(--text) 14%, transparent); }
 .btn-group-markread .btn-split svg { width: 14px; height: 14px; color: var(--text-dim); }
 
-/* ============ reader pane = split list | article (their 3-column frame) ============ */
 #reader_pane { flex: 1; overflow: hidden; display: flex; position: relative; background: var(--bg); }
 #list_pane { flex: 1 1 44%; min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--border); }
 #list { flex: 1; overflow-y: auto; }
@@ -291,7 +277,6 @@ svg { width: 20px; height: 20px; fill: currentColor; flex: none; }
 }
 #reader-slot { display: flex; flex-direction: column; min-height: 100%; }
 
-/* scroll up/down circles (bottom-right, their scroll buttons) */
 #scroll-nav {
   position: absolute; right: 18px; bottom: 18px; z-index: 26;
   display: none; flex-direction: column; gap: 10px;
@@ -315,8 +300,6 @@ body.article-open #scroll-nav { display: flex; }
 }
 #list.view-column { columns: 3 300px; column-gap: 14px; padding: 14px; display: block; }
 
-/* ---- LIST view = their current anatomy (ss1/ss2/ss3):
-   [thumb?][bold title / favicon+feed / date stacked] [open][keep][read] bottom-right ---- */
 .view-list .row {
   display: flex; align-items: center; gap: 10px;
   padding: 9px 16px;
@@ -332,7 +315,7 @@ body.article-open #scroll-nav { display: flex; }
 .view-list .row-thumb { width: 86px; height: 48px; border-radius: 5px; object-fit: cover; flex: none; background: var(--bg-hover); }
 .view-list .row-main {
   flex: 1; min-width: 0;
-  display: flex; flex-direction: column; gap: 2px; padding-right: 100px; /* open + keep + read */
+  display: flex; flex-direction: column; gap: 2px; padding-right: 100px; 
 }
 .view-list .row-meta {
   order: 2; display: flex; align-items: center; gap: 6px;
@@ -351,7 +334,7 @@ body.article-open #scroll-nav { display: flex; }
 }
 .view-list .row.unread .row-title { font-weight: 700; color: var(--text-heading); }
 .view-list .row-title:hover { text-decoration: underline; }
-.view-list .row-snippet { display: none; }        /* their list shows no excerpt (ss1–ss3) */
+.view-list .row-snippet { display: none; }        
 .view-list.no-favicons .row-meta .favicon, .view-list.no-favicons .row-meta .favicon-tile { display: none; }
 .view-list .row .time {
   order: 3; position: static; margin: 0; padding: 0;
@@ -360,10 +343,8 @@ body.article-open #scroll-nav { display: flex; }
 }
 .view-list .row-body-inline { display: none; }
 
-/* read dimming */
 .row:not(.unread) .row-meta .feed-name { opacity: .75; }
 
-/* ---- row controls: [open][keep][read], bottom-right, always visible (ss1–ss3) ---- */
 .row-actions {
   position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
   display: flex; align-items: center; gap: 2px;
@@ -378,9 +359,8 @@ body.article-open #scroll-nav { display: flex; }
 .row-actions .icon-btn svg { width: 16px; height: 16px; }
 .row-check { display: none; width: 16px; height: 16px; accent-color: var(--accent); flex: none; }
 body.bulk-mode .row-check { display: block; }
-.row.selected { outline: 2px solid var(--accent); outline-offset: -2px; } /* bulk-mode selection via row click */
+.row.selected { outline: 2px solid var(--accent); outline-offset: -2px; } 
 
-/* ---- stacked layouts: cards / column / magazine ---- */
 .view-cards .row, .view-column .row, .view-magazine .row {
   display: flex; flex-direction: column; align-items: stretch;
   border: 1px solid var(--border); border-radius: var(--radius);
@@ -402,7 +382,7 @@ body.bulk-mode .row-check { display: block; }
   position: absolute; top: 10px; right: 12px; z-index: 2;
   font-size: 12px; color: var(--text-dim);
   background: color-mix(in srgb, var(--bg) 80%, transparent);
-  padding: 2px 7px; border-radius: 10px; /* a chip: readable over thumbnails instead of gray-on-photo */
+  padding: 2px 7px; border-radius: 10px; 
 }
 .view-cards .row-title, .view-column .row-title, .view-magazine .row-title {
   display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
@@ -420,13 +400,12 @@ body.bulk-mode .row-check { display: block; }
   position: static; display: flex; justify-content: flex-end;
   margin-top: 8px; transform: none;
 }
-.view-cards .row:not(:hover):not(:focus-within) .row-actions, .view-column .row:not(:hover):not(:focus-within) .row-actions, .view-magazine .row:not(:hover):not(:focus-within) .row-actions { visibility: hidden; } /* :focus-within keeps keyboard users able to reach the actions */
+.view-cards .row:not(:hover):not(:focus-within) .row-actions, .view-column .row:not(:hover):not(:focus-within) .row-actions, .view-magazine .row:not(:hover):not(:focus-within) .row-actions { visibility: hidden; } 
 @media (hover: none) {
-  /* touch devices have no hover: always show row actions */
+
   .view-cards .row:not(:hover):not(:focus-within) .row-actions, .view-column .row:not(:hover):not(:focus-within) .row-actions, .view-magazine .row:not(:hover):not(:focus-within) .row-actions { visibility: visible; }
 }
 
-/* ---- expanded view: single-line header + full content below ---- */
 .view-expanded .row { display: block; cursor: default; padding: 0; border-bottom: 1px solid var(--border); }
 .view-expanded .row:hover { background: var(--bg-expanded); }
 .view-expanded .row-main { display: flex; align-items: center; gap: 6px; max-width: var(--list-max); margin: 0 auto; padding: 10px 20px 0; }
@@ -445,14 +424,12 @@ body.bulk-mode .row-check { display: block; }
 .view-expanded .row-body-inline pre { overflow-x: auto; background: var(--bg-hover); padding: 12px; border-radius: 6px; font-size: 13px; }
 .view-expanded .row-actions { position: static; display: flex; justify-content: flex-end; margin: 6px auto 10px; max-width: var(--list-max); width: calc(100% - 40px); transform: none; }
 
-/* selected row highlight */
 .row.expanded { background: var(--bg-expanded); cursor: default; }
 .row.expanded:hover { background: var(--bg-expanded); }
 .row.expanded::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--accent); }
 .view-column .row.expanded { column-span: all; }
 .view-magazine .row.expanded { display: block; border-radius: var(--radius); }
 
-/* ---- reader chrome (ss3): toolbar / title / meta / mentions / tab bar ---- */
 .reader { max-width: var(--list-max); margin: 0 auto; padding: 0 26px 30px; display: flex; flex-direction: column; flex: 1; }
 .reader-toolbar {
   position: sticky; top: 0; z-index: 4;
@@ -463,7 +440,7 @@ body.bulk-mode .row-check { display: block; }
 .reader-toolbar .icon-btn { width: 34px; height: 34px; }
 .reader-toolbar .icon-btn svg { width: 18px; height: 18px; }
 .reader-title { font-size: 27px; line-height: 1.25; margin: 10px 0 14px; font-weight: 700; color: var(--text-heading); }
-.reader-title a { color: inherit; text-decoration: none; } /* title links to the original article */
+.reader-title a { color: inherit; text-decoration: none; } 
 .reader-title a:hover { text-decoration: underline; color: var(--accent); }
 .reader-sub {
   font-size: 14px; color: var(--text-dim); margin-bottom: 14px;
@@ -488,7 +465,6 @@ body.bulk-mode .row-check { display: block; }
 .reader-attachments a:hover { border-color: var(--accent); }
 .reader-attachments img { width: 34px; height: 34px; object-fit: cover; border-radius: 5px; }
 
-/* embeds — YouTube-style facade: red rounded rect + white play triangle */
 .embed { position: relative; margin: 14px 0; }
 .embed-facade {
   position: relative; display: block; width: 100%; aspect-ratio: 16 / 9;
@@ -514,13 +490,12 @@ body.bulk-mode .row-check { display: block; }
   display: flex; align-items: center; justify-content: center;
   color: #fff; font-size: 14px; font-weight: 500;
 }
-.embed-facade.embed-audio::after, .embed-facade.embed-audio::before { display: none; } /* its own ▶ text is the icon */
+.embed-facade.embed-audio::after, .embed-facade.embed-audio::before { display: none; } 
 .embed iframe { width: 100%; aspect-ratio: 16 / 9; border: 0; border-radius: var(--radius); }
 
 #date-range { width: 100%; border: 1px solid transparent; border-radius: 6px; background: var(--btn-gray); padding: 6px 8px; color: var(--text); font-size: 13px; }
 .layouts { display: flex; gap: 2px; }
 
-/* ============ empty / toast / bulk / modals ============ */
 #empty { padding: 60px 20px; text-align: center; color: var(--text-dim); margin: auto; }
 #empty h3 { color: var(--text); }
 #empty code { background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; }
@@ -554,7 +529,6 @@ body.bulk-mode .row-check { display: block; }
 .modal-body { padding: 16px 18px; overflow-y: auto; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 
-/* ---- settings modal rows ---- */
 .set-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; cursor: pointer; }
 .set-row.set-col { flex-direction: column; align-items: flex-start; gap: 4px; cursor: default; }
 .set-row.set-col + .set-row { border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent); }
@@ -567,9 +541,8 @@ body.bulk-mode .row-check { display: block; }
 select { border: 1px solid var(--border); border-radius: 6px; background: var(--bg); padding: 5px 8px; }
 code { background: var(--bg-hover); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
 
-#scrim { position: fixed; inset: 0; background: rgba(0, 0, 0, .4); z-index: 25; } /* below #side-nav (30): the sidebar must stay clickable on mobile */
+#scrim { position: fixed; inset: 0; background: rgba(0, 0, 0, .4); z-index: 25; } 
 
-/* compact sidebar (icons only) */
 body.compact-sidebar #wraper, body.compact-sidebar #side-nav { --sidebar-width: 72px; }
 body.compact-sidebar #tree_pane .tree-item .label,
 body.compact-sidebar #tree_pane .sidebar-heading,
@@ -577,13 +550,12 @@ body.compact-sidebar #tree_pane .tree-item .chev { display: none; }
 body.compact-sidebar #tree_pane .tree-item { justify-content: center; }
 body.compact-sidebar #tree_pane .tree-children { padding-left: 0; }
 body.compact-sidebar #tree_pane .tree-item .badge { position: absolute; top: 2px; right: 4px; font-size: 9.5px; padding: 0 3px; }
-body.compact-sidebar #sidebar_resizer { display: none; } /* icons-only mode has a fixed width — dragging did nothing visually but saved a garbage width that mis-applied later */
+body.compact-sidebar #sidebar_resizer { display: none; } 
 body.hide-side-favicons #tree_pane .tree-item .favicon,
 body.hide-side-favicons #tree_pane .tree-item .favicon-tile { display: none; }
 
-/* ============ responsive ============ */
 @media (max-width: 1120px) {
-  /* narrow: list and article swap full-width (no room for the split) */
+
   #article_pane { display: none; }
   body.article-open #list_pane { display: none; }
   body.article-open #article_pane { display: flex; max-width: none; border-left: 0; }
@@ -603,11 +575,10 @@ body.hide-side-favicons #tree_pane .tree-item .favicon-tile { display: none; }
   .heading-wrapper { padding: 6px .75rem; }
 }
 
-/* ============ header title + More menu ============ */
 .heading-title { display: flex; align-items: flex-start; padding-top: 1px; gap: 8px; min-width: 0; }
 .title-block { position: relative; display: flex; flex-direction: column; min-width: 0; }
 .title-row { display: flex; align-items: center; gap: 2px; min-width: 0; }
-.text-count { font-size: 12px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } /* .text-muted-color text-xs */
+.text-count { font-size: 12px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } 
 
 .mark-wrap { position: relative; display: inline-flex; }
 .dropdown-mark { top: 40px; right: 0; min-width: 250px; max-height: calc(100vh - 62px); overflow-y: auto; padding: 4px; }
@@ -616,8 +587,7 @@ body.hide-side-favicons #tree_pane .tree-item .favicon-tile { display: none; }
 .mark-custom { display: flex; align-items: center; gap: 10px; padding: 6px 10px; font-size: 13.5px; color: var(--text-dim); cursor: pointer; }
 .mark-custom:hover { background: var(--bg-hover); }
 .mark-custom input[type="date"] { margin-left: auto; border: 1px solid var(--border); background: var(--bg); color: var(--text); border-radius: 4px; padding: 3px 6px; font: inherit; font-size: 12.5px; max-width: 148px; }
-/* Subdued expander for the INVERSE mark direction (read ⇄ unread by age) —
-   the menu opens offering exactly one group; this row reveals the other. */
+
 .mark-alt-toggle { display: flex; align-items: center; gap: 8px; width: 100%; border: 0; border-top: 1px solid var(--border); margin-top: 4px; padding: 8px 10px 6px; background: none; color: var(--text-dim); font: inherit; font-size: 12.5px; cursor: pointer; text-align: left; }
 .mark-alt-toggle:hover { color: var(--text); background: var(--bg-hover); }
 .mark-alt-toggle .chev { margin-left: auto; width: 14px; height: 14px; flex: none; color: var(--text-faint); transition: transform .15s; }
@@ -628,7 +598,6 @@ body.hide-side-favicons #tree_pane .tree-item .favicon-tile { display: none; }
 
 .nav-panel { display: flex; flex-direction: column; overflow-y: auto; flex: 1; min-height: 0; }
 
-/* countersClickable=false: badges stop advertising "click to mark read" */
 #subscriptions_fieldset[data-counters="0"] .tree-item .badge { cursor: default; }
 #subscriptions_fieldset[data-counters="0"] .tree-item .badge:hover { color: var(--text-dim); }
 #subscriptions_fieldset[data-counters="0"] .tree-item .badge:hover::after { content: none; }

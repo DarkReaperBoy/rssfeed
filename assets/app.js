@@ -1,16 +1,11 @@
-/* ghrss — entire reader UI. Plain ES2020, no deps, no build step.
-   Data: config.json + data/*.json from the repo (GitHub Actions refreshes hourly).
-   State: read/kept maps + your UI toggles in localStorage (ghrss:read/kept/ui);
-   every other preference is owned by config.json and re-read on each load. */
 (() => {
 'use strict';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const LS_READ = 'ghrss:read', LS_KEPT = 'ghrss:kept', LS_UI = 'ghrss:ui', LS_VER = 'ghrss:ver', LS_USERUNREAD = 'ghrss:userUnread';
-const STORAGE_VERSION = 3; // bump = one-time reset of the stored feed state (read + kept); UI prefs survive
-// One-time feed-storage reset: a browser that last visited before this version
-// starts fresh — read/keep-unread state is wiped once, then the version is recorded.
+const STORAGE_VERSION = 3; 
+
 try {
   if (Number(localStorage.getItem(LS_VER)) !== STORAGE_VERSION) {
     localStorage.removeItem(LS_READ);
@@ -22,46 +17,34 @@ try {
 const state = {
   config: null,
   index: null,
-  feeds: new Map(),          // feedId -> articles[]
+  feeds: new Map(),          
   scope: 'all',
   search: '',
   expandedId: null,
   visible: [],
-  keepVisible: new Set(),    // rows the user just read stay in the Unread view until they move on
-  read: loadObj(LS_READ),    // {articleId: readTs}
-  kept: loadObj(LS_KEPT),    // {articleId: true} — "keep unread"
-  userUnread: loadObj(LS_USERUNREAD), // {articleId: ts} — explicit un-reads that must beat markRead filters (even across reloads)
+  keepVisible: new Set(),    
+  read: loadObj(LS_READ),    
+  kept: loadObj(LS_KEPT),    
+  userUnread: loadObj(LS_USERUNREAD), 
   filters: [],
   markTimers: new Map(),
-  loading: new Map(), // feedId → in-flight load promise (joinable, so a mark action waits for — not skips — a load in progress
-  settled: new Set(), // feeds that finished loading (or failed) — mark-mode sync waits for these
+  loading: new Map(), 
+  settled: new Set(), 
   refreshTimer: null,
   lastPollAt: 0,
   bulkSel: new Set(),
-  filterMarked: new Set(), // ids already auto-read by a markRead filter (never re-read one the user un-read)
+  filterMarked: new Set(), 
 };
 
-/* Preferences come in groups:
-   - CONFIG_KEYS: config.json owns them and re-applies them on EVERY load —
-     they are the site-wide defaults for every visitor.
-   - SETTING_KEYS overlap CONFIG_KEYS but are editable in the Settings modal:
-     a saved local override (ghrss:ui.settings) is applied after config.json
-     and wins — the owner can still ship different defaults via config.json.
-   - USER_KEYS are changed with the UI's own controls (layout, status, sort…)
-     and persist per browser; config.json only seeds a brand-new visitor. */
 const CONFIG_KEYS = ['theme', 'density', 'markReadOnOpen', 'markReadAfterSeconds',
   'titlesOnly', 'openOriginal', 'showFavicons', 'columnThumbs', 'scrollTracking',
   'absoluteDates', 'fontSize', 'sideFavicons', 'compactSidebar', 'countersClickable',
   'titleCounter', 'showToday', 'updatedOnly', 'dimRead', 'sortAZ', 'autoScroll'];
 const USER_KEYS = ['layout', 'status', 'dateRange', 'sortDir', 'showFiltered', 'openFolders', 'sidebarW'];
-/* Reading-behavior prefs the Settings modal owns. config.json seeds them
-   (CONFIG_KEYS above); a change made in the modal persists locally in
-   ghrss:ui.settings and wins over config.json on every later load —
-   "edit config.json" must not silently undo the user's own choice. */
+
 const SETTING_KEYS = ['markReadOnOpen', 'markReadAfterSeconds', 'openOriginal', 'titlesOnly', 'scrollTracking'];
-// bulkSelect is deliberately NOT persisted: a returning visitor must never
-// find article clicks silently hijacked into checkbox selection.
-const savedUi = loadObj(LS_UI); // older blobs may carry more keys — only USER_KEYS are honored
+
+const savedUi = loadObj(LS_UI); 
 const ui = Object.assign({
   theme: 'auto', layout: 'list', status: 'unread', dateRange: 'all',
   showFiltered: false, openFolders: {},
@@ -71,18 +54,17 @@ const ui = Object.assign({
   titlesOnly: false, openOriginal: false, showFavicons: true, columnThumbs: true,
   bulkSelect: false, autoScroll: true, absoluteDates: false, fontSize: '14.5px',
   sideFavicons: true, compactSidebar: false, countersClickable: true, titleCounter: true, showToday: false,
-  settings: {}, // local Settings-modal overrides — applied AFTER config.json in boot
+  settings: {}, 
 }, Object.fromEntries(USER_KEYS.filter((k) => k in savedUi).map((k) => [k, savedUi[k]])));
 if (savedUi.settings && typeof savedUi.settings === 'object') {
   for (const k of SETTING_KEYS) if (k in savedUi.settings) ui.settings[k] = savedUi.settings[k];
 }
-// migrate pre-parity values
+
 if (ui.layout === 'compact') { ui.layout = 'list'; ui.density = 'compact'; }
-if (ui.status === 'read') ui.status = 'all'; // legacy saved value — no such view exists
+if (ui.status === 'read') ui.status = 'all'; 
 
 function loadObj(k) {
-  // Null-prototype objects: feed GUIDs like "constructor"/"__proto__" can't
-  // fake lookups (isRead) or pollute prototypes through state maps.
+
   const out = Object.create(null);
   try {
     const v = JSON.parse(localStorage.getItem(k));
@@ -99,14 +81,10 @@ function saveUi() { saveObj(LS_UI, Object.assign(Object.fromEntries(USER_KEYS.ma
 const isRead = (a) => !!state.read[a.id];
 const isKept = (a) => !!state.kept[a.id];
 
-/* ---------------- utils ---------------- */
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const stripTags = (html) => String(html ?? '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 const stripCtrl = (s) => String(s ?? '').replace(/[\s\u0000-\u001f]+/g, '');
-/* Article links are FEED DATA, not trusted URLs: a hostile feed can ship a
-   javascript:/data: "link" and it used to flow straight into the row/reader
-   anchors and window.open. Only http(s) (control chars stripped — browsers
-   ignore them inside schemes) ever becomes a real URL. */
+
 const safeHref = (u) => (/^https?:\/\//i.test(stripCtrl(String(u ?? ''))) ? String(u) : '#');
 function relTime(ts) {
   if (!ts) return '';
@@ -130,17 +108,13 @@ function updateTitleCounter() {
   for (const arts of state.feeds.values()) for (const a of arts) if (!isRead(a) && !a._f?.hidden) n++;
   const prefix = n > 0 && ui.titleCounter !== false ? `(${n}) ` : '';
   const open = state.expandedId ? findArticle(state.expandedId) : null;
-  // Article open → "(N) My RSSFeed - Article title" (Inoreader-style tab title)
+
   document.title = open?.title
     ? `${prefix}${baseTitle} - ${String(open.title).slice(0, 100)}`
     : `${prefix}${baseTitle}`;
 }
 function faviconHtml(feed) {
-  // No inline onerror (CSP-friendly; a title starting with ' or " used to
-  // break out of the attribute). A delegated capture-phase 'error' listener
-  // in bindEvents swaps the failed <img> for the letter tile.
-  // Array.from = code points: an emoji or surrogate-pair initial can't
-  // degenerate into half a character.
+
   const initial = Array.from(String(feed?.title || '?'))[0] || '?';
   const site = feed?.site || '';
   let host = '';
@@ -156,10 +130,9 @@ const feedMeta = (id) => {
   return m;
 };
 const feedTitle = (id) => feedMeta(id).title || id;
-// Folder registry: generated by the fetcher (config.json + feeds.opml merged), config as fallback.
+
 const folderDefs = () => (state.index?.folders?.length ? state.index.folders : state.config?.folders || []);
 
-/* ---------------- config filters (include/exclude, JSON-driven) ---------------- */
 function compileMatcher(v) {
   const s = String(v);
   const m = s.match(/^\/(.+)\/([a-z]*)$/);
@@ -178,7 +151,7 @@ function compileBlock(block) {
   return Object.keys(out).length ? out : null;
 }
 function blockMatches(block, a) {
-  // AND across fields, OR within a field.
+
   for (const [field, matchers] of Object.entries(block)) {
     let hay = '';
     if (field === 'title') hay = a.title || '';
@@ -191,10 +164,8 @@ function blockMatches(block, a) {
 }
 function compileFilters() {
   state.filters = (state.config.filters || []).filter((f) => f.enabled !== false).map((f) => {
-    const scope = Array.isArray(f.feeds) && f.feeds.length ? new Set(f.feeds) : null; // '*' or omitted = all
-    // "hide" defaults ON only for pure hide filters: an explicit highlight /
-    // markRead / keepUnread means the user wants to SEE those rows — hiding
-    // everything the filter selects made highlight-only filters nuke the list.
+    const scope = Array.isArray(f.feeds) && f.feeds.length ? new Set(f.feeds) : null; 
+
     const actions = Object.assign({ hide: f.actions && Object.keys(f.actions).length ? false : true }, f.actions || {});
     return {
       id: f.id || 'filter', name: f.name || f.id || '',
@@ -205,11 +176,7 @@ function compileFilters() {
   });
 }
 function filterResult(a, feedId) {
-  // Two match shapes share one filter: hide treats `include` as a whitelist
-  // (hide everything OUTSIDE it — classic kill-file semantics), while the
-  // positive actions (highlight / markRead / keepUnread) treat `include` as
-  // the SELECTION (act on what's inside it) with `exclude` as a veto. The old
-  // single predicate inverted every non-hide action.
+
   const res = { hidden: false, markRead: false, keepUnread: false, highlight: false };
   for (const f of state.filters) {
     if (!f.inScope(feedId)) continue;
@@ -233,24 +200,18 @@ function applyFiltersToFeed(feedId, articles) {
   for (const a of articles) {
     a._f = filterResult(a, feedId);
     a._feed = feedId;
-    // Inoreader-style ingest: markRead filters silently read the article once.
-    // An explicit user "keep unread" beats the automation — never eat those;
-    // and an article the user deliberately un-read is never re-read by a
-    // refresh re-running the filter.
+
     if (a._f.markRead && !a._f.keepUnread && !isKept(a) && !isRead(a) && !state.userUnread[a.id] && !state.filterMarked.has(a.id)) {
       state.read[a.id] = Date.now();
       state.filterMarked.add(a.id);
       marked++;
     }
   }
-  if (marked) saveRead(); // one write per batch — zero when nothing changed
+  if (marked) saveRead(); 
 }
 
-/* ---------------- data loading ---------------- */
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-// Hard cap on every request — a stalled connection (mobile carriers, in-app
-// browsers) can never wedge loading forever. RSS_FETCH_TIMEOUT_MS is a
-// test/debug override; real visitors get 10 s.
+
 const FETCH_TIMEOUT_MS = Number(window.RSS_FETCH_TIMEOUT_MS) || 10000;
 async function fetchJson(url) {
   const ctrl = new AbortController();
@@ -264,9 +225,7 @@ async function fetchJson(url) {
   }
 }
 async function loadFeed(feedId, force = false) {
-  // A second request for the same feed JOINS the in-flight load instead of
-  // skipping it — mark actions then cover exactly what was loading, not a
-  // snapshot of whatever happened to be ready.
+
   if (state.loading.has(feedId)) return state.loading.get(feedId);
   if (!force && state.feeds.has(feedId)) return;
   const done = (async () => {
@@ -274,10 +233,9 @@ async function loadFeed(feedId, force = false) {
       const data = await fetchJson(`data/feeds/${encodeURIComponent(feedId)}.json`);
       applyFiltersToFeed(feedId, data.articles || []);
       state.feeds.set(feedId, data.articles || []);
-      // fetch failures surface through index.json feed status (sidebar warning icon)
+
     } catch {
-      // on a forced reload (refresh fallback) the previous articles stay put —
-      // a network blip must never blank a feed the user is reading
+
     } finally {
       state.loading.delete(feedId);
       state.settled.add(feedId);
@@ -286,11 +244,7 @@ async function loadFeed(feedId, force = false) {
   state.loading.set(feedId, done);
   await done;
 }
-/* Loads many feeds in parallel (6 at a time). 60 serial round-trips took
-   minutes on a phone and any stalled request wedged the whole chain — mark
-   actions and search now wait seconds at most (each fetch is also capped by
-   fetchJson). Renders are throttled so a 60-feed load doesn't rebuild the
-   list dozens of times. */
+
 async function loadMany(ids, onChange, force = false) {
   const queue = [...new Set(ids)];
   let renderQueued = false;
@@ -323,9 +277,7 @@ function feedIdsInScope() {
   }
   return Object.keys(feeds);
 }
-/* Scope resolution for ACTIONS (sidebar badges, mark menus): 'all' and 'today'
-   are their OWN scopes — never "whatever the user happens to be looking at".
-   Clicking the Newsfeed ✓ from inside a feed used to mark just that feed. */
+
 function scopeFeedIds(scope) {
   if (scope.startsWith('feed:')) return [scope.slice(5)];
   if (scope.startsWith('folder:')) {
@@ -336,19 +288,16 @@ function scopeFeedIds(scope) {
   return feedIdsInScope();
 }
 async function loadAllFeeds(onChange) {
-  // One consolidated request beats dozens of feed files whenever it works;
-  // whatever it misses (offline feeds, new entries) is fetched in parallel.
+
   await loadConsolidatedIntoState();
   const missing = Object.keys(state.index?.feeds || {}).filter((id) => !state.feeds.has(id));
   if (missing.length) await loadMany(missing, onChange);
 }
 
-/* ---------------- search ---------------- */
 function parseQuery(q) {
   const ops = { feed: [], title: [], before: null, after: null, unread: null };
   const rest = [];
-  // date-only values mean the user's LOCAL day, matching the mark-date
-  // pickers (Date.parse('2026-01-01') would silently mean UTC midnight)
+
   const parseDay = (s) => {
     const t = Date.parse(s);
     if (Number.isNaN(t) || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return t;
@@ -366,15 +315,14 @@ function parseQuery(q) {
       else if (key === 'after' || key === 'since') { const t = parseDay(val); if (!isNaN(t)) ops.after = t; }
       else if (key === 'unread') ops.unread = !['false', 'no', '0'].includes(val);
       else if (key === 'is' && (val === 'read' || val === 'unread')) ops.unread = val === 'unread';
-      else rest.push(m[0].toLowerCase()); // unknown operator: treat the whole token as a term
+      else rest.push(m[0].toLowerCase()); 
     } else rest.push((m[4] ?? m[5] ?? '').toLowerCase());
   }
   return { ops, terms: rest.filter(Boolean) };
 }
 function compileSearch(q) {
   if (!q || !String(q).trim()) return null;
-  // OR-groups: "a b OR c" → (a AND b) OR (c). Uppercase-only: a lowercase "or"
-  // inside prose ("for or against") must never split a query.
+
   return String(q).split(/\s+OR\s+/).map((group) => parseQuery(group));
 }
 function searchMatchesCompiled(a, groups) {
@@ -393,15 +341,10 @@ function searchGroupMatches(a, ops, terms) {
   return true;
 }
 
-/* ---------------- list pipeline ---------------- */
-const RECENTLY_READ_WINDOW = 7 * 864e5; // "Recently read" = articles read in the last 7 days
+const RECENTLY_READ_WINDOW = 7 * 864e5; 
 function scopeFilter(a) {
   if (state.scope === 'today') return a.date >= startOfToday();
-  // "Recently read" means READ RECENTLY: within the window above, by read
-  // timestamp — not "every read article in the last 60 days". Without the
-  // window the view (and its mark-all-as-unread flip) silently covered the
-  // ENTIRE read history: one confirmed click there nuked ~2000 articles back
-  // to unread while the dialog said only "Recently read".
+
   if (state.scope === 'recently-read') { const ts = state.read[a.id] || 0; return ts > 0 && Date.now() - ts < RECENTLY_READ_WINDOW; }
   return true;
 }
@@ -417,8 +360,7 @@ function dateRangeFilter(a) {
   }
 }
 function folderCutoff(feedId) {
-  // Inoreader Pro's "unread duration" per folder: when viewing that folder,
-  // only show articles newer than maxAgeDays.
+
   if (!state.scope.startsWith('folder:')) return 0;
   const f = folderDefs().find((x) => x.id === state.scope.slice(7));
   const days = Number(f?.maxAgeDays) || 0;
@@ -427,10 +369,7 @@ function folderCutoff(feedId) {
 function computeVisible() {
   const out = [];
   const searchGroups = compileSearch(state.search);
-  // An active search is GLOBAL — it spans every feed (the search box preloads
-  // them all, and the feed:/title: operators are cross-feed by design). The
-  // old scope-clipped loop made "Search in current section" technically true
-  // but made the preload and the feed: operator pointless.
+
   const feedIds = searchGroups ? Object.keys(state.index?.feeds || {}) : feedIdsInScope();
   for (const feedId of feedIds) {
     const cutoff = searchGroups ? 0 : folderCutoff(feedId);
@@ -453,19 +392,16 @@ function computeVisible() {
       ? dir * ((state.read[x.id] || 0) - (state.read[y.id] || 0))
       : dir * (x.date - y.date);
   });
-  // The currently open article stays visible even once it stops matching
-  // (e.g. marked read under the "Unread" filter) until it is collapsed —
-  // EXCEPT under an active search: a query narrows the list to exact matches.
+
   if (state.expandedId && !out.some((a) => a.id === state.expandedId)) {
     const open = findArticle(state.expandedId);
     if (open && !open._f?.hidden && !state.search && scopeFilter(open) && dateRangeFilter(open)) out.push(open);
-    // a vanished or hidden open article is dropped — renderList clears it + the URL hash
+
   }
   state.visible = out;
   return out;
 }
 
-/* ---------------- rendering: sidebar ---------------- */
 function unreadCount(feedId) {
   let n = 0;
   for (const a of state.feeds.get(feedId) || []) if (!isRead(a) && !a._f.hidden) n++;
@@ -475,10 +411,10 @@ function renderTree() {
   const tree = $('#tree');
   const feeds = state.index?.feeds || {};
   const folders = [...folderDefs()];
-  if (ui.sortAZ) folders.sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id)); // nameless config folders used to crash
+  if (ui.sortAZ) folders.sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id)); 
   const inFolder = new Set();
   let html = '';
-  let totalUnread = 0, todayN = 0; // ONE pass instead of a scan per counter
+  let totalUnread = 0, todayN = 0; 
   for (const arts of state.feeds.values()) {
     for (const a of arts) {
       if (isRead(a) || a._f?.hidden) continue;
@@ -495,8 +431,7 @@ function renderTree() {
     const st = meta.status || {};
     const failed = st.ok === false && !st.disabled;
     const disabled = !!st.disabled;
-    // Raw title here — esc() runs ONCE, at interpolation. (It used to run
-    // twice: "Tom & Jerry" displayed as "Tom &amp;amp; Jerry" in tooltips.)
+
     const warnTitle = failed
       ? `Feed fetch failed${st.error ? ': ' + st.error : ''}${st.consecutiveFailures > 1 ? ` — ${st.consecutiveFailures} consecutive failures` : ''}${st.lastSuccess ? ` — last success ${relTime(st.lastSuccess)} ago` : ''}`
       : disabled
@@ -525,16 +460,14 @@ function renderTree() {
   }
   let loose = Object.keys(feeds).filter((id) => !inFolder.has(id));
   if (ui.sortAZ) loose.sort((a, b) => feedTitle(a).localeCompare(feedTitle(b)));
-  if (ui.updatedOnly) loose = loose.filter((id) => unreadCount(id) > 0); // was a splice/indexOf O(n²) loop
+  if (ui.updatedOnly) loose = loose.filter((id) => unreadCount(id) > 0); 
   if (loose.length) html += loose.map(feedItem).join('');
   tree.innerHTML = html;
 
-  // System rows (their #subscriptions_fieldset): Today (opt-in) + Newsfeed only.
-  // Unread/Recently read live in the header ⋯ menu, not duplicated in the tree.
   $('#pdinner_today').classList.toggle('hidden', !ui.showToday);
   $('#badge-today').textContent = todayN > 0 ? String(todayN) : '';
   $('#badge-all-items').textContent = totalUnread > 0 ? String(totalUnread) : '';
-  // The badge ✓-hover only advertises "click to mark read" when counters are clickable.
+
   $('#subscriptions_fieldset').dataset.counters = ui.countersClickable ? '1' : '0';
   $$('.parent_div > .tree-item[data-scope]').forEach((b) => b.classList.toggle('active', b.dataset.scope === state.scope));
 }
@@ -552,7 +485,6 @@ function scopeTitle() {
   return 'Articles';
 }
 
-/* ---------------- rendering: list ---------------- */
 function thumbFor(a) {
   const enc = (a.enclosures || []).find((e) => /^image\//.test(e.type || '') || /\.(jpe?g|png|webp|gif)(\?|$)/i.test(e.url));
   if (enc) return enc.url;
@@ -595,11 +527,9 @@ function ytId(url) {
   return m ? m[1] : null;
 }
 function articleBody(a) {
-  // Extracted full text FIRST: the fetcher only extracts when the feed's own
-  // content is a short teaser — content || text always short-circuited to the
-  // teaser, so fullText never reached the reader (and readingTime disagreed).
+
   let html = a.text || a.content || `<p>${esc(a.summary || '')}</p>`;
-  // Ensure the main video is embeddable for YouTube articles.
+
   if (a.link && ytId(a.link) && !html.includes(a.link)) {
     html = `<p><a href="${esc(a.link)}">${esc(a.title || '')}</a></p>` + html;
   }
@@ -612,7 +542,7 @@ function readerHtml(a) {
   const feed = feedMeta(a._feed);
   const idx = state.visible.indexOf(a);
   const read = isRead(a), kept = isKept(a);
-  const link = safeHref(a.link); // '#' for missing/junk schemes — no anchor then
+  const link = safeHref(a.link); 
   return `<div class="reader" data-id="${esc(a.id)}">
     <div class="reader-toolbar">
       <span class="spacer"></span>
@@ -636,8 +566,7 @@ function readerHtml(a) {
   </div>`;
 }
 function attachmentsHtml(a) {
-  // Non-image enclosures as links; standalone images below (skip image/thumbnail —
-  // that one is already used as the row thumb, don't list it twice).
+
   const enc = (a.enclosures || []).filter((e) => e.url && !/^image\//i.test(e.type || ''));
   const imgs = (a.enclosures || []).filter((e) => e.url && /^image\//i.test(e.type || '') && e.type !== 'image/thumbnail');
   if (!enc.length && !imgs.length) return '';
@@ -645,7 +574,7 @@ function attachmentsHtml(a) {
     const kind = (e.type || '').split('/')[0];
     const raw = (e.url.split('/').pop() || '').split('?')[0] || '';
     let name = raw;
-    try { name = decodeURIComponent(raw); } catch { /* malformed percent-encoding — keep raw */ }
+    try { name = decodeURIComponent(raw); } catch {  }
     name = name.slice(0, 90);
     return kind && kind !== 'image' ? `${kind.toUpperCase()} · ${name}` : name;
   };
@@ -656,8 +585,7 @@ function attachmentsHtml(a) {
 }
 function readingTime(a) {
   try {
-    // Only for genuinely extracted text: every YouTube/HN/4chan row used to
-    // read "1 min read" off a two-line description with no readable body.
+
     if (!a.text) return '';
     const text = stripTags(a.text);
     const words = text.trim().split(/\s+/).filter(Boolean).length;
@@ -672,7 +600,7 @@ function updateScopeCount() {
   $('#scope-title').textContent = scopeTitle();
   $('#scope-count').textContent = state.scope === 'recently-read'
     ? `${state.visible.length} recently read`
-    : `${unread} unread`; // their header: "Newsfeed" + "81 unread"
+    : `${unread} unread`; 
 }
 function renderList() {
   const list = $('#list');
@@ -682,19 +610,16 @@ function renderList() {
   updateBulkBar();
   if (state.expandedId && !visible.some((a) => a.id === state.expandedId)) {
     const open = findArticle(state.expandedId);
-    // Purged or filter-hidden → close. Merely filtered OUT of the list by the
-    // active search / date filter → the reader stays open on it: searching
-    // must never throw away your place.
+
     if (!open || open._f?.hidden) { state.expandedId = null; clearHashArticle(); }
   }
-  const keepScroll = list.scrollTop; // rebuilding the list must not yank it back to the top
+  const keepScroll = list.scrollTop; 
   renderListHead();
-  // A deep scroll position must survive the rebuild: keep growing the render
-  // until the old offset is covered again (jsdom has no geometry — skip there).
+
   if (list.clientHeight > 0) {
     while (renderedCount < visible.length && list.scrollHeight < keepScroll + list.clientHeight + 400) appendListChunk();
   }
-  // The expanded row (deep link / j-k far down) must exist in the DOM too.
+
   const xi = state.expandedId ? visible.findIndex((a) => a.id === state.expandedId) : -1;
   if (xi >= renderedCount) renderUpTo(xi + 1);
   list.scrollTop = keepScroll;
@@ -702,18 +627,12 @@ function renderList() {
   setupScrollTracking();
   updateScopeCount();
   updateTitleCounter();
-  syncMarkButtons(); // the ✓ button flips to "mark as unread" when everything here is read
+  syncMarkButtons(); 
   renderEmpty(visible);
 }
-/* ---------------- progressive list rendering (virtualization) ----------------
-   A caught-up reader holds 2000+ rows; rebuilding ALL of them per open cost
-   600–800ms of innerHTML work (plus every favicon re-parsed). Rows now paint
-   in LIST_CHUNK chunks: the head renders immediately, the tail appends as the
-   user scrolls towards it. NOTHING is ever removed once rendered (no true
-   windowing), so scroll position, anchors, inline videos and in-page search
-   behave exactly as before — the tail simply does not exist until needed. */
+
 const LIST_CHUNK = 150;
-let renderedCount = 0; // rows of state.visible currently in the DOM
+let renderedCount = 0; 
 let listAppendQueued = false;
 function buildRowHtml(a) {
   let row = rowHtml(a);
@@ -746,22 +665,19 @@ function appendListChunk() {
   tail.insertAdjacentHTML('beforebegin', rowsHtml(from, to));
   renderedCount = to;
   sanitizeListBodies(from);
-  if (renderedCount >= state.visible.length) tail.remove(); // everything is in — no sentinel needed
-  setupScrollTracking(); // the fresh rows join the observer too
+  if (renderedCount >= state.visible.length) tail.remove(); 
+  setupScrollTracking(); 
 }
 function renderUpTo(indexInclusive) { while (renderedCount < indexInclusive && renderedCount < state.visible.length) appendListChunk(); }
 function maybeAppendListChunk() {
   const list = $('#list');
   if (!list) return;
-  // Pre-render ~4 screens ahead so fast flings never hit a hard bottom. The
-  // bounded loop lets ONE big jump (End key) materialize several chunks; the
-  // cap only guards pathological zero-geometry hosts.
+
   let guard = 0;
   while (renderedCount < state.visible.length && guard++ < 8
     && list.scrollTop + list.clientHeight >= list.scrollHeight - 1600) appendListChunk();
 }
-/* Only the expanded layout puts article bodies inside rows — sanitize (and
-   embed-upgrade) exactly the NEW range, not the whole list again. */
+
 function sanitizeListBodies(fromRowIdx) {
   if (ui.layout !== 'expanded') return;
   const rows = $$('#list .row');
@@ -770,9 +686,9 @@ function sanitizeListBodies(fromRowIdx) {
     if (el) { sanitizeReaderDom(el); upgradeEmbeds(el, findArticle(rows[i].dataset.id)?.link); }
   }
 }
-let readerKey = ''; // article id:fetchedAt — rebuild the reader pane only when the open article changes
+let readerKey = ''; 
 function syncReaderControls(slot, a) {
-  // Same article: don't nuke playing embeds — only sync control state.
+
   const i = state.visible.indexOf(a);
   const prev = slot.querySelector('[data-act="prev"]'), next = slot.querySelector('[data-act="next"]');
   if (prev) prev.disabled = i <= 0;
@@ -793,19 +709,17 @@ function syncReaderControls(slot, a) {
   }
 }
 function renderReaderPane(visible) {
-  // Split frame (ss1/ss3): list stays put, the article opens in the right pane.
+
   const slot = $('#reader-slot');
   if (!slot) return;
   const open = state.expandedId ? findArticle(state.expandedId) : null;
-  // Expanded layout renders the body inline in the list — a side pane would
-  // duplicate the whole article next to itself.
+
   const show = !!(open && !open._f?.hidden && ui.layout !== 'expanded');
   if (show) {
     const key = `${open.id}:${open.fetchedAt || 0}`;
     if (key !== readerKey) {
       readerKey = key;
-      // Inert-first: sanitize + upgrade on a detached <template>, THEN insert.
-      // The live DOM (and its image/media loads) never sees unsanitized markup.
+
       const tpl = document.createElement('template');
       tpl.innerHTML = readerHtml(open);
       tpl.content.querySelectorAll('.reader-body').forEach((el) => { sanitizeReaderDom(el); upgradeEmbeds(el, open.link); });
@@ -831,8 +745,7 @@ function renderEmpty(visible) {
     el.innerHTML = `<h3>${navigator.onLine ? 'No data yet' : 'You look offline'}</h3><p>${navigator.onLine ? `The hourly GitHub Action builds <code>data/</code>. Trigger it once: <strong>Actions → Fetch feeds &amp; publish → Run workflow</strong>, or wait for the next hour.` : 'Reconnect and reload — the last published data loads from cache when it arrives.'}</p>`;
     return;
   }
-  // Feeds still arriving must not be told "All caught up 🎉" — that false
-  // caught-up flashed on every slow first load before the articles landed.
+
   if (feedIdsInScope().some((id) => !state.settled.has(id))) {
     el.innerHTML = `<h3>Loading articles…</h3><p>Fetching this view's feeds — articles appear as they arrive.</p>`;
     return;
@@ -844,10 +757,7 @@ function renderEmpty(visible) {
     if (caughtUp) {
       el.innerHTML = `<h3>All caught up 🎉</h3><p>No unread articles here.</p><p class="empty-hint">Over-marked? The ✓ button and its ▾ menu now offer <em>Mark as unread</em> — everything, by age, or before an exact date.</p>`;
     } else if (ui.dateRange !== 'all') {
-      // Empty ONLY because the date filter excludes everything — unread
-      // articles still exist in this scope. "All caught up 🎉" here was a
-      // lie that made working restores look dead (the badge said 806 while
-      // the list celebrated).
+
       const n = scopeUnreadCount(state.scope);
       const label = { today: 'Today', '3d': 'the last 3 days', week: 'this week', month: 'this month' }[ui.dateRange] || 'this range';
       el.innerHTML = `<h3>Nothing in this time range</h3><p>${n ? `${n} unread article${n === 1 ? '' : 's'} in ${esc(scopeTitle())} ${n === 1 ? 'is' : 'are'} older than ${label}. Widen the Date filter (⋯ menu) to see ${n === 1 ? 'it' : 'them'}.` : `No unread articles in ${esc(scopeTitle())} for this time range.`}</p>`;
@@ -859,7 +769,6 @@ function renderEmpty(visible) {
   }
 }
 
-/* ---------------- embeds (YouTube/Vimeo/SoundCloud/audio/video) ---------------- */
 function upgradeEmbeds(root, articleLink) {
   if (!root) return;
   const vimeo = (url) => { const m = url.match(/vimeo\.com\/(\d+)/); return m ? m[1] : null; };
@@ -869,16 +778,12 @@ function upgradeEmbeds(root, articleLink) {
   for (const a of $$('a[href]', root)) {
     const url = a.href;
     if (!/^https?:/.test(url)) continue;
-    // Only standalone links become players: the bare URL itself, or the
-    // article's own link. A "watch this" link inside a sentence — or a
-    // creator's "my other channels" link wall in a description — stays a
-    // link; it used to be replaced by a wall of 16:9 players.
+
     const bare = a.textContent.trim() === url || a.textContent.trim() === (a.getAttribute('href') || '').trim();
     if (!bare && url !== articleLink) continue;
     const wrap = document.createElement('div');
     wrap.className = 'embed';
-    // Clicks must not bubble to the row handler: opening/closing the article
-    // rebuilt the list and instantly killed the player the user just started.
+
     const stop = (fn) => (ev) => { ev.stopPropagation(); fn(); };
     const id = ytId(url);
     if (id) {
@@ -896,7 +801,7 @@ function upgradeEmbeds(root, articleLink) {
       }), { once: true });
       a.replaceWith(wrap); continue;
     }
-    // Track/set links only (2+ path segments): a profile link is not a player.
+
     if (/^https?:\/\/(www\.)?soundcloud\.com\/[^/?#]+\/[^/?#]+/.test(url)) {
       wrap.innerHTML = `<button class="embed-facade embed-audio" type="button" title="Play audio" aria-label="Play audio">▶ SoundCloud</button>`;
       wrap.querySelector('button').addEventListener('click', stop(() => {
@@ -909,12 +814,11 @@ function upgradeEmbeds(root, articleLink) {
   }
 }
 
-/* ---------------- client-side sanitization (defense in depth) ---------------- */
 function sanitizeReaderDom(root) {
   if (!root) return;
   root.querySelectorAll('script, style, link, meta, form, input, button, object, embed, [data-blocked-embed]').forEach((n) => n.remove());
   root.querySelectorAll('*').forEach((el) => {
-    // Feed-supplied classes/styles could hijack app CSS (.hidden, .row, fixed overlays…)
+
     el.removeAttribute('class');
     el.removeAttribute('style');
     for (const attr of [...el.attributes]) {
@@ -924,8 +828,7 @@ function sanitizeReaderDom(root) {
     const tag = el.tagName;
     if (tag === 'A') {
       const href = (el.getAttribute('href') || '').trim();
-      // Strip control chars first: browsers ignore them inside URL schemes, so
-      // "java&#9;script:" used to slip past a naive ^(javascript|data|vbscript):
+
       const scheme = stripCtrl(href).toLowerCase();
       if (/^(javascript|data|vbscript):/.test(scheme)) el.removeAttribute('href');
       else if (/^https?:/i.test(href)) { el.setAttribute('target', '_blank'); el.setAttribute('rel', 'noopener noreferrer'); }
@@ -937,12 +840,9 @@ function sanitizeReaderDom(root) {
   });
 }
 
-/* ---------------- read state actions ---------------- */
-let forceAllowed = false; // explicit user clicks override keepUnread
+let forceAllowed = false; 
 function patchRow(id) {
-  // Flip ONE row's read/keep state in place — no full list rebuild. Keeps
-  // scroll position, keeps playing inline videos, skips a few thousand rows
-  // of innerHTML work on every click.
+
   const safe = (window.CSS && CSS.escape) ? CSS.escape(id) : String(id).replace(/"/g, '\\"');
   const rowEl = $(`.row[data-id="${safe}"]`);
   const a = rowEl ? findArticle(id) : null;
@@ -963,10 +863,7 @@ function patchRow(id) {
   }
   return true;
 }
-/* Patch sidebar counters IN PLACE: a read/unread/keep flip used to rebuild the
-   whole tree (every favicon <img> recreated) on every single click. Falls back
-   to the full renderTree when a badge appears/disappears (structure changed) or
-   updatedOnly hides empty rows — those are structural, not numeric. */
+
 function patchTreeCounts() {
   if (ui.updatedOnly) { renderTree(); return; }
   const plan = [];
@@ -980,16 +877,12 @@ function patchTreeCounts() {
       n = Object.keys(state.index?.feeds || {}).reduce((s, id) => s + (feedMeta(id).folders.includes(fid) ? unreadCount(id) : 0), 0);
     }
     if (n === null) continue;
-    if ((n > 0) !== !!row.querySelector('.badge')) { structural = true; break; } // badge shows/hides → rebuild
+    if ((n > 0) !== !!row.querySelector('.badge')) { structural = true; break; } 
     plan.push([row, n]);
   }
   if (structural) { renderTree(); return; }
   for (const [row, n] of plan) {
-    // A caught-up feed has NO badge element (n === 0, badge absent is the
-    // consistent steady state — it lands in the plan for the class flips).
-    // Writing .textContent on the absent badge threw a TypeError that killed
-    // the whole click handler: the row flipped, but the sidebar badge, the
-    // (N) title counter and the ✓-button flip all FROZE — "marking is broken".
+
     const badge = row.querySelector('.badge');
     if (badge) badge.textContent = String(n);
     row.classList.toggle('unread', n > 0);
@@ -1011,16 +904,13 @@ function markRead(id, on = true) {
   const a = findArticle(id);
   if (!on) {
     delete state.read[id];
-    // The user's explicit un-read must outlive a reload: markRead filters
-    // re-run at every load and used to re-read the article the moment the
-    // tab reopened ("unread is sacred" only held within one session).
+
     if (a?._f?.markRead) { state.userUnread[id] = Date.now(); saveUserUnread(); }
   } else {
     if (a && a._f?.keepUnread && !forceAllowed) return;
-    if (state.userUnread[id]) { delete state.userUnread[id]; saveUserUnread(); } // explicit read clears the guard
+    if (state.userUnread[id]) { delete state.userUnread[id]; saveUserUnread(); } 
     state.read[id] = Date.now();
-    // A row the user just marked read lingers in the Unread view (tick flips to ✓)
-    // until they move on — it never vanishes mid-click.
+
     if (state.visible.some((v) => v.id === id)) state.keepVisible.add(id);
   }
   saveRead();
@@ -1039,24 +929,20 @@ function scheduleMarkRead(a) {
   clearTimeout(state.markTimers.get(a.id));
   state.markTimers.delete(a.id);
   const delay = (Number(ui.markReadAfterSeconds) || 0) * 1000;
-  // markReadOnOpen gates INSTANT marking; a configured delay opts in on its own —
-  // markReadOnOpen:false + markReadAfterSeconds:N is the documented "mark after
-  // N seconds instead" combination and used to be silently dead (nothing ever
-  // marked read).
+
   if (!ui.markReadOnOpen && delay <= 0) return;
   const run = () => {
     state.markTimers.delete(a.id);
-    // open-original mode never expands anything — the delay must not gate it
-    if (delay > 0 && state.expandedId !== a.id && !ui.openOriginal) return; // article was closed before the delay elapsed
+
+    if (delay > 0 && state.expandedId !== a.id && !ui.openOriginal) return; 
     if (!isRead(a) && !isKept(a) && !a._f?.keepUnread) markRead(a.id, true);
   };
   if (delay <= 0) run();
   else state.markTimers.set(a.id, setTimeout(run, delay));
 }
 function collectScopeIds(scope, cutoff = 0) {
-  // 'all'/'today' resolve to EVERY feed here — feedIdsInScope() would quietly
-  // clip the action to whatever the user happens to be looking at.
-  if (scope === 'recently-read') return []; // that view lists READ articles — there is nothing unread in it to mark (the old fall-through nuked the entire unread backlog while the confirm said "Recently read")
+
+  if (scope === 'recently-read') return []; 
   const feedIds = scopeFeedIds(scope);
   const ids = [];
   for (const feedId of feedIds) {
@@ -1069,18 +955,7 @@ function collectScopeIds(scope, cutoff = 0) {
   }
   return ids;
 }
-/* Age bounds for the mark actions. The two directions measure DIFFERENT
-   clocks, on purpose:
-   - "Mark as READ older than X" clears the published-older-than-X backlog
-     (Inoreader semantics — publication age);
-   - "Mark as UNREAD older than X" restores reads older than X — READING age
-     (when you read it), not publication age. The old code compared the
-     published date in both directions: an article published three days ago
-     that the user read an HOUR ago went back to unread, and across a 60-day
-     retention window nearly every read article is "published older than two
-     days", so the restore reliably un-read the ENTIRE reading history
-     (user report: "it unreads the whole history instead of that two days").
-     Reading age keeps what you read recently exactly where you left it. */
+
 const OLDER_LABELS = { 1: 'a day', 2: 'two days', 7: 'a week', 31: 'a month' };
 const cutoffFrom = (olderDays = 0, beforeTs = 0) => (beforeTs > 0 ? beforeTs : olderDays > 0 ? Date.now() - olderDays * 864e5 : 0);
 function describeCutoff(olderDays = 0, beforeTs = 0, unread = false) {
@@ -1090,10 +965,7 @@ function describeCutoff(olderDays = 0, beforeTs = 0, unread = false) {
   if (!when) return '';
   return unread ? ` you read${when}` : (beforeTs > 0 ? ` from${when}` : ` older than ${OLDER_LABELS[olderDays] || olderDays + ' days'}`);
 }
-/* Oldest article the current scope's data actually contains (from
-   index.feeds[*].oldest — the fetcher's retention window). A cutoff older
-   than this can never match anything: the toast says so instead of leaving
-   the user guessing whether the button is broken. */
+
 function dataStartsAt() {
   const feedsMeta = state.index?.feeds || {};
   let min = Infinity;
@@ -1108,11 +980,7 @@ function boundaryHint(cutoff = 0) {
   if (!cutoff || !start || cutoff >= start) return '';
   return ` — data goes back to ${new Date(start).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`;
 }
-/* A scope-level mark action can affect only articles the current LIST view
-   filters out (date filter, search, folder max-age). The action is honest —
-   but with every affected row invisible it LOOKS dead: "Marked 806 articles…"
-   over an unchanged "All caught up" list (user report: "mark as unread, older
-   than a x is broken"). Return a toast note + one-click way to see them. */
+
 function viewHiddenExtra(ids) {
   if (!ids.length) return null;
   const vis = new Set(state.visible.map((a) => a.id));
@@ -1144,9 +1012,7 @@ function markScopeRead(scope, olderDays = 0, beforeTs = 0) {
   const snapshot = ids.map((id) => ({ id, ts: state.read[id], guard: state.userUnread[id] || 0 }));
   for (const id of ids) {
     state.read[id] = Date.now();
-    // A mass read is an explicit read: stale un-read guards on these ids must
-    // go, or the article the user just bulk-read keeps a ghost guard that a
-    // later un-read would silently "restore" from nowhere.
+
     if (state.userUnread[id]) delete state.userUnread[id];
   }
   if (snapshot.some((s) => s.guard)) saveUserUnread();
@@ -1159,25 +1025,22 @@ function markScopeRead(scope, olderDays = 0, beforeTs = 0) {
 }
 function markAllAsReadInScope() {
   if (allReadInScope()) {
-    // Everything here is read — the SAME button flips to "mark as unread" so an
-    // accidental mark-all (or procrastination regret) is one confirmed click away.
+
     confirmDialog('Mark as unread', `Mark every article in "${scopeTitle()}" as unread again?`, () => {
       markScopeUnread(state.scope);
     });
   } else {
     confirmDialog('Mark all as read', `Mark all articles in "${scopeTitle()}" as read? Articles kept unread or hidden by filters are skipped.`, async () => {
-      // wait for whatever is still loading — same rule as the ✓ ▾ menu items
+
       await Promise.race([ensureLoadedForScope(state.scope), sleep(11000)]);
       markScopeRead(state.scope);
     });
   }
 }
 
-/* ---- mark-as-unread: the mirror of markScopeRead, active only when the
-   current scope is fully caught up (see syncMarkButtons) ---- */
 function scopeUnreadCount(scope) {
-  // Same definition as the sidebar badges: not read, not filter-hidden.
-  if (scope === 'recently-read') return 0; // the view is read-by-definition → caught-up flip offers the (honest) mass un-read
+
+  if (scope === 'recently-read') return 0; 
   let n = 0;
   for (const feedId of scopeFeedIds(scope)) {
     for (const a of state.feeds.get(feedId) || []) {
@@ -1190,22 +1053,14 @@ function scopeUnreadCount(scope) {
 }
 function allReadInScope() {
   const ids = feedIdsInScope();
-  // Nothing known (index missing / empty) or feeds still loading — keep the
-  // read mode; "caught up" must never be claimed vacuously or the button
-  // would offer a mark-as-unread that no-ops.
+
   if (!state.index?.feeds || !ids.length) return false;
-  if (ids.some((id) => !state.settled.has(id))) return false; // feeds still loading — keep the read mode
+  if (ids.some((id) => !state.settled.has(id))) return false; 
   return scopeUnreadCount(state.scope) === 0;
 }
 function collectScopeReadIds(scope, cutoff = 0) {
   const ids = [];
-  // The cutoff is READING age — compare the read TIMESTAMP, never the
-  // published date (an article published days ago that you read an hour ago
-  // is a recent read; the old published-date comparison un-read it and, on a
-  // 60-day window, effectively the whole reading history).
-  // The recently-read view must restore exactly what it LISTS (read within
-  // the window, same filters) — scopeFeedIds() falls through to every feed
-  // there, so the old loop un-read the entire reader instead of the view.
+
   if (scope === 'recently-read') {
     for (const feedId of scopeFeedIds(scope)) {
       for (const a of state.feeds.get(feedId) || []) {
@@ -1213,7 +1068,7 @@ function collectScopeReadIds(scope, cutoff = 0) {
         const ts = state.read[a.id] || 0;
         if (ts <= 0 || Date.now() - ts >= RECENTLY_READ_WINDOW) continue;
         if (!dateRangeFilter(a)) continue;
-        if (cutoff && ts >= cutoff) continue; // read within the window — the user's recent reading survives
+        if (cutoff && ts >= cutoff) continue; 
         ids.push(a.id);
       }
     }
@@ -1221,9 +1076,9 @@ function collectScopeReadIds(scope, cutoff = 0) {
   }
   for (const feedId of scopeFeedIds(scope)) {
     for (const a of state.feeds.get(feedId) || []) {
-      if (!isRead(a) || a._f?.hidden) continue; // hidden articles re-read themselves via markRead filters anyway
+      if (!isRead(a) || a._f?.hidden) continue; 
       if (scope === 'today' && a.date < startOfToday()) continue;
-      if (cutoff && (state.read[a.id] || 0) >= cutoff) continue; // read within the window — stays read
+      if (cutoff && (state.read[a.id] || 0) >= cutoff) continue; 
       ids.push(a.id);
     }
   }
@@ -1240,9 +1095,7 @@ function markScopeUnread(scope, olderDays = 0, beforeTs = 0) {
   const snapshot = ids.map((id) => ({ id, ts: state.read[id], guard: state.userUnread[id] || 0 }));
   for (const id of ids) {
     delete state.read[id];
-    // Mass un-read is explicit too: a markRead FILTER would re-read its
-    // article on the next refresh (guards only lived for single toggles
-    // before) — the list then seesawed read↔unread behind the user's back.
+
     const a = findArticle(id);
     if (a?._f?.markRead && !state.userUnread[id]) state.userUnread[id] = Date.now();
   }
@@ -1264,11 +1117,7 @@ function syncMarkButtons(forceReset = false) {
   if (use) use.setAttribute('href', caughtUp ? '#i-unread' : '#i-read');
   const split = $('#btn-mark-all-split');
   if (split) split.title = caughtUp ? 'Mark as unread — more options' : 'Mark as read — more options';
-  // Exactly ONE ▾ group is offered — the same rule as the main button flip:
-  // unread articles exist → "Mark as read"; everything here is read →
-  // "Mark as unread". Never both at once. (While the menu is OPEN the user may
-  // have expanded the inverse group via #mark-alt-toggle — a render landing
-  // mid-menu must not collapse it under their cursor.)
+
   const menuOpen = !forceReset && !$('#mark-menu')?.classList.contains('hidden');
   if (!menuOpen) {
     const gRead = $('#mark-group-read');
@@ -1283,15 +1132,7 @@ function syncMarkButtons(forceReset = false) {
       if (lbl) lbl.textContent = caughtUp ? 'Mark as read by age' : 'Mark as unread by age';
     }
   }
-  // Structurally dead presets hide (they could only ever toast a zero-result
-  // and read as breakage — user report: "mark as unread, older than a x is
-  // broken"):
-  // - Today scope: a Today article was published (and therefore read) today —
-  //   every older-than row in BOTH groups is dead there;
-  // - Recently read: the view can only list reads from the last 7 days, so
-  //   the unread group's week/month presets (reads older than 7 days) can
-  //   never match — the read group's publication-age presets stay live.
-  // "Before…" stays everywhere (a future date works).
+
   const scopeId = state.scope;
   $$('#mark-menu .dropdown-item[data-older]').forEach((b) => {
     const dead = scopeId === 'today'
@@ -1312,14 +1153,14 @@ function bulkMark(on) {
   const snapshot = ids.map((id) => ({ id, ts: state.read[id], guard: state.userUnread[id] || 0 }));
   let n = 0, guardsChanged = false;
   for (const id of ids) {
-    const a = findArticle(id); // may be null: a refresh can prune a selected article
+    const a = findArticle(id); 
     if (on && a && (isKept(a) || a._f?.keepUnread)) continue;
     if (on) {
       state.read[id] = Date.now();
-      if (state.userUnread[id]) { delete state.userUnread[id]; guardsChanged = true; } // explicit bulk read clears guards
+      if (state.userUnread[id]) { delete state.userUnread[id]; guardsChanged = true; } 
     } else {
       delete state.read[id];
-      if (a?._f?.markRead && !state.userUnread[id]) { state.userUnread[id] = Date.now(); guardsChanged = true; } // explicit bulk un-read beats filters
+      if (a?._f?.markRead && !state.userUnread[id]) { state.userUnread[id] = Date.now(); guardsChanged = true; } 
     }
     n++;
   }
@@ -1340,17 +1181,13 @@ function showToast(text, actionLabel, cb, ambient = false, extra = null) {
   const btn2 = $('#toast-action-2');
   const anyActionLive = () => !el.classList.contains('hidden')
     && ((btn && btn.style.display !== 'none') || (btn2 && btn2.style.display !== 'none'));
-  // One slot per action, so priority rules apply: AMBIENT notices (sync
-  // results, "already up to date") must never stomp a live Undo / Show-all;
-  // action feedback (zero-results, confirms, new Undos) always replaces — a
-  // silent button looks broken.
+
   if (ambient && !actionLabel && !extra && anyActionLive()) return;
   $('#toast-text').textContent = text;
   btn.textContent = actionLabel || '';
   btn.style.display = actionLabel ? '' : 'none';
   btn.onclick = () => { if (cb) cb(); hideToast(); };
-  // Second slot: the "your action worked but the current view hides it"
-  // companion (e.g. Show all / Clear search after a filter-invisible restore).
+
   if (btn2) {
     const label2 = extra?.label || '';
     btn2.textContent = label2;
@@ -1363,31 +1200,21 @@ function showToast(text, actionLabel, cb, ambient = false, extra = null) {
 }
 function hideToast() { $('#toast').classList.add('hidden'); }
 
-/* ---------------- open/close article — URL-driven (#article/<id>) ----------------
-   The open article lives in the URL hash, so a refresh reopens it and the
-   browser Back/Forward buttons walk through opened articles (misclick → Back).
-   Opening pushes a history entry; closing replaces it (no "closed" spam). */
 const HASH_PREFIX = '#article/';
 const hashArticleId = () => {
   const h = location.hash || '';
   if (!h.startsWith(HASH_PREFIX)) return null;
-  // A malformed % sequence used to throw out of hashchange/popstate and kill
-  // navigation entirely. Fall back to the raw string: openArticle simply
-  // reports "not available" and the hash clears.
+
   try { return decodeURIComponent(h.slice(HASH_PREFIX.length)); } catch { return h.slice(HASH_PREFIX.length); }
 };
 function setHashArticle(id) {
   const target = HASH_PREFIX + encodeURIComponent(id);
-  if ((location.hash || '') === target) return; // already here
-  // pushState + a direct syncFromHash: opening no longer depends on the
-  // browser firing hashchange for a hash-only navigation (some WebViews and
-  // in-app browsers mishandle it — the reported "id not stored / Back broken"
-  // symptom). pushState is synchronous and fires no events; Back/Forward fire
-  // popstate + hashchange, both wired to the same idempotent sync.
+  if ((location.hash || '') === target) return; 
+
   try {
     history.pushState(null, '', location.pathname + location.search + target);
   } catch {
-    location.hash = target; // opaque-origin fallback: hashchange still opens it
+    location.hash = target; 
     return;
   }
   syncFromHash();
@@ -1399,13 +1226,9 @@ function clearHashArticle() {
 function openArticle(id) {
   const a = findArticle(id);
   if (!a || a._f?.hidden) return false;
-  // The article being left LINGERS (read, ticked) — rows re-filter on
-  // scope/view changes, not on every open. Clearing here broke Back/prev/k:
-  // the row you just read vanished, and "Previous" had nothing to return to.
+
   if (state.expandedId && state.expandedId !== id) {
-    // Moving on cancels the pending delayed mark — the timer's own guard
-    // already no-ops it, but the entry must not sit in markTimers until it
-    // fires (a reopened article would reset its delay, a stale one leaked).
+
     clearTimeout(state.markTimers.get(state.expandedId));
     state.markTimers.delete(state.expandedId);
     state.keepVisible.add(state.expandedId);
@@ -1421,40 +1244,38 @@ function closeArticle(keep = true) {
   if (!state.expandedId) return;
   clearTimeout(state.markTimers.get(state.expandedId));
   state.markTimers.delete(state.expandedId);
-  if (keep) state.keepVisible.add(state.expandedId); // closing keeps the just-read row in place
+  if (keep) state.keepVisible.add(state.expandedId); 
   state.expandedId = null;
   renderList();
 }
 function openViaHash(id) {
-  if (hashArticleId() === id) openArticle(id); // hash already points here (e.g. re-click after Back)
-  else setHashArticle(id);                     // hashchange opens it — one path for every open
+  if (hashArticleId() === id) openArticle(id); 
+  else setHashArticle(id);                     
 }
 function closeViaHash() { clearHashArticle(); closeArticle(true); }
 function syncFromHash(notify = true) {
   const id = hashArticleId();
   if (id) {
     if (state.expandedId === id) return;
-    if (!openArticle(id)) { // left the retention window or hidden by a config filter
+    if (!openArticle(id)) { 
       clearHashArticle();
       if (notify) showToast('That article is no longer available (filtered or past the retention window)');
     }
-  } else closeArticle(true); // Back from #article/<id> to the list closes the reader, row lingers
+  } else closeArticle(true); 
 }
 
-/* ---------------- interactions ---------------- */
 function dispatchAct(act, id) {
   const a = findArticle(id);
   if (!a) return;
   if (act === 'toggle-read') {
     forceAllowed = true; markRead(id, !isRead(a)); forceAllowed = false;
-    if (isRead(a)) { delete state.kept[id]; saveKept(); patchRow(id); } // read beats keep
+    if (isRead(a)) { delete state.kept[id]; saveKept(); patchRow(id); } 
   }
   else if (act === 'keep') {
     if (state.kept[id]) delete state.kept[id];
     else {
       state.kept[id] = Date.now();
-      // "Keep unread" must actually make it UNREAD — leaving the read entry
-      // meant the row vanished the moment you moved on, flag useless.
+
       delete state.read[id];
     }
     saveKept(); saveRead();
@@ -1463,15 +1284,14 @@ function dispatchAct(act, id) {
     const slot = $('#reader-slot');
     if (slot && state.expandedId === id) syncReaderControls(slot, a);
   }
-  else if (act === 'open-original') { /* anchor handles it */ }
-  else if (act === 'collapse') closeViaHash(); // closing keeps the row — read, ticked, in place
+  else if (act === 'open-original') {  }
+  else if (act === 'collapse') closeViaHash(); 
   else if (act === 'prev' || act === 'next') {
     const i = state.visible.indexOf(a);
     const target = state.visible[act === 'prev' ? i - 1 : i + 1];
-    if (target) openViaHash(target.id); // moving on refilters
+    if (target) openViaHash(target.id); 
   }
 }
-
 
 function onListClick(e) {
   const rowEl = e.target.closest('.row');
@@ -1487,9 +1307,7 @@ function onListClick(e) {
     updateBulkBar();
     return;
   }
-  // Inline bodies are CONTENT, not row toggles: embed clicks, links and text
-  // selection inside the article body must never open/close the row around
-  // them (it used to destroy the playing video mid-click).
+
   if (e.target.closest('.row-body-inline') && !e.target.closest('[data-act]')) return;
   const sel = window.getSelection?.();
   if (sel && String(sel).trim()) return;
@@ -1500,7 +1318,7 @@ function onListClick(e) {
     dispatchAct(actBtn.dataset.act, id);
     return;
   }
-  if (ui.bulkSelect) { // bulk mode: clicking anywhere on the row toggles selection
+  if (ui.bulkSelect) { 
     if (state.bulkSel.has(id)) state.bulkSel.delete(id); else state.bulkSel.add(id);
     rowEl.classList.toggle('selected', state.bulkSel.has(id));
     const chk = rowEl.querySelector('.row-check');
@@ -1508,7 +1326,7 @@ function onListClick(e) {
     updateBulkBar();
     return;
   }
-  if (ui.openOriginal) { // "Open original webpages directly"
+  if (ui.openOriginal) { 
     const url = safeHref(a.link);
     if (url !== '#') {
       window.open(url, '_blank', 'noopener');
@@ -1516,13 +1334,13 @@ function onListClick(e) {
     }
     return;
   }
-  if (state.expandedId === id) { closeViaHash(); return; } // collapse — the read row stays put
-  openViaHash(id); // expand — the one URL-driven path (hashchange opens it)
+  if (state.expandedId === id) { closeViaHash(); return; } 
+  openViaHash(id); 
 }
 function listScrollTo(id) {
   const safe = (window.CSS && CSS.escape) ? CSS.escape(id) : String(id).replace(/"/g, '\\"');
   let el = $(`.row[data-id="${safe}"]`);
-  if (!el) { // the row is in the unrendered tail — materialize it, then scroll
+  if (!el) { 
     const i = state.visible.findIndex((a) => a.id === id);
     if (i >= 0) { renderUpTo(i + 1); el = $(`.row[data-id="${safe}"]`); }
   }
@@ -1533,8 +1351,7 @@ function renderAll() { renderTree(); renderList(); }
 
 function bindEvents() {
   $('#list').addEventListener('click', onListClick);
-  // Progressive tail rendering: near the bottom → grow the list by a chunk
-  // (rAF-throttled — a fling fires dozens of scroll events per second).
+
   $('#list').addEventListener('scroll', () => {
     if (listAppendQueued) return;
     listAppendQueued = true;
@@ -1556,9 +1373,6 @@ function bindEvents() {
     if (btn && !btn.disabled) btn.click();
   });
 
-  // Favicon/thumb fallback without inline handlers (CSP-friendly, and a
-  // title starting with ' or " can't break out of an attribute): swap a
-  // failed favicon <img> for its letter tile, drop a dead row thumbnail.
   document.addEventListener('error', (e) => {
     const img = e.target;
     if (!(img instanceof HTMLImageElement)) return;
@@ -1568,8 +1382,6 @@ function bindEvents() {
     } else if (img.classList.contains('row-thumb')) img.remove();
   }, true);
 
-  // Cross-tab sync: another tab writing read/kept state updates this one —
-  // without it, tab B's stale in-memory copy overwrote everything tab A read.
   addEventListener('storage', (e) => {
     if (e.key !== LS_READ && e.key !== LS_KEPT) return;
     state.read = loadObj(LS_READ);
@@ -1586,8 +1398,7 @@ function bindEvents() {
       e.stopPropagation();
       if (!ui.countersClickable) return;
       const scope = markBtn.dataset.markread;
-      // Newsfeed/Today badges cover EVERY feed even when the current view is
-      // a single feed/folder — and wait (bounded) for whatever is still loading.
+
       const run = async () => {
         await Promise.race([ensureLoadedForScope(scope), sleep(11000)]);
         markScopeRead(scope);
@@ -1597,8 +1408,7 @@ function bindEvents() {
     }
     const chev = e.target.closest('.tree-folder > .tree-item .chev');
     if (chev) {
-      // The chevron IS the expand/collapse control. The folder row itself only
-      // selects the folder (shows its articles) — expanding is a separate act.
+
       e.stopPropagation();
       const wrap = chev.closest('.tree-folder');
       const fbtn = chev.closest('.tree-item');
@@ -1616,20 +1426,19 @@ function bindEvents() {
       state.expandedId = null;
       state.keepVisible.clear();
       document.body.classList.remove('sidebar-open');
-      $('#scrim').classList.add('hidden'); // don't leave a stuck overlay after picking a feed (mobile)
+      $('#scrim').classList.add('hidden'); 
       renderAll();
       ensureLoadedForScope();
       return;
     }
   });
-  // Badges are role=button spans: make Enter/Space click them (keyboard a11y)
+
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter' && e.key !== ' ') return;
     const t = e.target?.closest?.('[data-markread]');
     if (t) { e.preventDefault(); t.dispatchEvent(new MouseEvent('click', { bubbles: true })); }
   });
 
-  // ⋯ menu → article list status (their dropdown: All/Unread/Today/Recently read)
   $('#status-items').addEventListener('click', (e) => {
     const item = e.target.closest('[data-status]');
     if (!item) return;
@@ -1639,7 +1448,7 @@ function bindEvents() {
     else { ui.status = v; if (state.scope !== 'all' && !state.scope.startsWith('feed:') && !state.scope.startsWith('folder:')) state.scope = 'all'; }
     clearHashArticle();
     state.expandedId = null;
-    state.keepVisible.clear(); // view change: lingering read rows re-filter out
+    state.keepVisible.clear(); 
     saveUi(); syncControls(); renderAll(); ensureLoadedForScope();
     $('#header-menu').classList.add('hidden');
     syncMenuAria();
@@ -1654,11 +1463,11 @@ function bindEvents() {
     ui.showFiltered = !ui.showFiltered; saveUi(); syncControls(); renderList();
   });
   $('#menu-select-mode').addEventListener('click', () => {
-    ui.bulkSelect = !ui.bulkSelect; state.bulkSel.clear(); syncControls(); renderList(); // not persisted — see USER_KEYS
+    ui.bulkSelect = !ui.bulkSelect; state.bulkSel.clear(); syncControls(); renderList(); 
   });
   $('#menu-refresh').addEventListener('click', () => { $('#header-menu').classList.add('hidden'); refresh(true); });
-  window.addEventListener('hashchange', () => syncFromHash()); // Back/Forward between articles
-  window.addEventListener('popstate', () => syncFromHash());   // belt-and-braces: sync is idempotent on double-fire
+  window.addEventListener('hashchange', () => syncFromHash()); 
+  window.addEventListener('popstate', () => syncFromHash());   
   $('#menu-reset-read').addEventListener('click', () => {
     $('#header-menu').classList.add('hidden');
     syncMenuAria();
@@ -1677,7 +1486,7 @@ function bindEvents() {
       state.search = $('#search-input').value.trim();
       renderList();
       if (state.search) {
-        // search everything: load remaining feeds, then re-render once
+
         const missing = Object.keys(state.index?.feeds || {}).filter((id) => !state.feeds.has(id));
         if (missing.length) { await loadAllFeeds(() => {}); renderTree(); renderList(); }
       }
@@ -1686,21 +1495,15 @@ function bindEvents() {
 
   $('#btn-mark-all').addEventListener('click', markAllAsReadInScope);
   $('#btn-mark-all-split').addEventListener('click', (e) => {
-    e.stopPropagation(); // their ▾ opens the mark menu (ss2)
+    e.stopPropagation(); 
     const menu = $('#mark-menu');
     const opening = menu.classList.contains('hidden');
     menu.classList.toggle('hidden');
-    // Every open starts from the honest default: ONE group per the flip rule,
-    // inverse expander collapsed — a stale expansion must not survive a close.
+
     if (opening) syncMarkButtons(true);
     syncMenuAria();
   });
-  // The subdued expander: reveal the INVERSE group (mark-as-unread while
-  // unread articles exist, mark-as-read once caught up). Restore-by-age must
-  // stay reachable in every state — the old exactly-one-group menu made it
-  // impossible to un-read anything unless the whole scope was caught up, and
-  // with a fetch every ~15 min that almost never happens (user report:
-  // "mark as unread, older than a x is broken").
+
   $('#mark-alt-toggle')?.addEventListener('click', () => {
     const alt = $('#mark-alt-toggle');
     const open = alt.classList.toggle('open');
@@ -1709,10 +1512,7 @@ function bindEvents() {
     const g = caughtUp ? $('#mark-group-read') : $('#mark-group-unread');
     if (g) g.classList.toggle('hidden', !open);
   });
-  // Menu actions wait for the scope's feeds so the count matches the badges —
-  // but never forever: every fetch is capped and this wait is bounded too, so
-  // a slow connection can't dead-end the click. A visible "still loading"
-  // toast replaces the old silent nothing.
+
   const applyMark = async (fn, olderDays, beforeTs) => {
     const load = ensureLoadedForScope(state.scope);
     const slow = setTimeout(() => showToast('Still loading this view — marking what has arrived so far', undefined, undefined, true), 1500);
@@ -1724,9 +1524,9 @@ function bindEvents() {
     fn(state.scope, olderDays, beforeTs);
   };
   $('#mark-menu').addEventListener('click', (e) => {
-    if (e.target.tagName === 'INPUT') return; // date pickers act on change
+    if (e.target.tagName === 'INPUT') return; 
     const custom = e.target.closest('[data-custom]');
-    if (custom) { // "Before…" row → open its date picker
+    if (custom) { 
       const inp = custom.querySelector('input');
       if (inp) { inp.focus(); try { inp.showPicker?.(); } catch {} }
       return;
@@ -1736,13 +1536,13 @@ function bindEvents() {
     $('#mark-menu').classList.add('hidden');
     applyMark(item.dataset.mark === 'unread' ? markScopeUnread : markScopeRead, Number(item.dataset.older) || 0, 0);
   });
-  let datePickTimer = null; // Chromium fires change per completed segment while
-  // typing a date — act only on the value that's still there a beat later.
+  let datePickTimer = null; 
+
   const onMarkDate = (mode) => (e) => {
     clearTimeout(datePickTimer);
     const val = e.target.value || '';
-    const ts = Date.parse(`${val}T00:00:00`); // local midnight of the picked day
-    if (!val || Number.isNaN(ts) || new Date(ts).getFullYear() < 2000) return; // partial junk ("0002") is a no-op
+    const ts = Date.parse(`${val}T00:00:00`); 
+    if (!val || Number.isNaN(ts) || new Date(ts).getFullYear() < 2000) return; 
     datePickTimer = setTimeout(() => {
       $('#mark-menu').classList.add('hidden');
       applyMark(mode === 'unread' ? markScopeUnread : markScopeRead, 0, ts);
@@ -1762,7 +1562,7 @@ function bindEvents() {
   });
   $('#settings-close').addEventListener('click', closeSettingsModal);
   $('#settings-modal').addEventListener('click', (e) => {
-    if (e.target === $('#settings-modal')) closeSettingsModal(); // backdrop click
+    if (e.target === $('#settings-modal')) closeSettingsModal(); 
   });
   $('#set-mark-on-open').addEventListener('change', (e) => applySetting('markReadOnOpen', e.target.checked));
   $('#set-scroll-track').addEventListener('change', (e) => applySetting('scrollTracking', e.target.checked));
@@ -1773,25 +1573,22 @@ function bindEvents() {
     applySetting('markReadAfterSeconds', n);
   });
 
-  // header: expanding search (their search-input-wrapper behavior)
   $('#search-open').addEventListener('click', openSearchFn);
   $('#search-close').addEventListener('click', closeSearchFn);
-  $('#search-input').addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); closeSearchFn(); } }); // Escape in search must not also close the article
+  $('#search-input').addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); closeSearchFn(); } }); 
 
-  // header ⋯ More menu (status/date/sort/view — their header dropdown)
   $('#btn-more').addEventListener('click', (e) => {
     e.stopPropagation();
     $('#header-menu').classList.toggle('hidden');
     syncMenuAria();
   });
 
-  // resizable sidebar (pointer events: works with touch, not just a mouse)
   const resizer = $('#sidebar_resizer');
   if (resizer) {
     resizer.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       const startX = e.clientX;
-      const startW = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--sidebar-width'), 10) || 242; // the CSS default — 310 used to make it jump
+      const startW = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--sidebar-width'), 10) || 242; 
       let cur = startW;
       const move = (ev) => {
         cur = Math.min(480, Math.max(210, startW + (ev.clientX - startX)));
@@ -1820,10 +1617,7 @@ function bindEvents() {
   $('#bulk-clear').addEventListener('click', () => { state.bulkSel.clear(); renderList(); });
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
-    // Escape peels ONE layer: the confirm dialog (cancelled properly — focus
-    // restored through its own done()), then menus, then the mobile sidebar —
-    // only a bare Escape closes the open article. It used to close all of
-    // them at once, article included, out from under the user.
+
     const modal = $('#confirm-modal');
     if (modal && !modal.classList.contains('hidden')) { $('#confirm-no')?.click(); return; }
     const settings = $('#settings-modal');
@@ -1836,15 +1630,14 @@ function bindEvents() {
     $('#scrim')?.classList.add('hidden');
     syncMenuAria();
     if (menuOpen || sidebarOpen) return;
-    if (state.expandedId) closeViaHash(); // closing keeps the row in place and clears the hash
+    if (state.expandedId) closeViaHash(); 
   });
-  // j/k: Inoreader-style next/previous article; m/o/s/“/”: mark, open original,
-  // keep unread, focus search (skips typing contexts and open overlays).
+
   document.addEventListener('keydown', (e) => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     const t = e.target;
     if (t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable)) return;
-    if (document.querySelector('.modal:not(.hidden), .dropdown:not(.hidden)')) return; // an overlay owns the keys
+    if (document.querySelector('.modal:not(.hidden), .dropdown:not(.hidden)')) return; 
     if (e.key === 'j' || e.key === 'k') {
       if (!state.visible.length) return;
       const i = state.expandedId ? state.visible.findIndex((a) => a.id === state.expandedId) : -1;
@@ -1856,7 +1649,7 @@ function bindEvents() {
     }
     const id = state.expandedId;
     const a = id ? findArticle(id) : null;
-    if (e.key === 'm' && a) { dispatchAct('toggle-read', id); } // same path as the row tick (incl. keep cleanup + in-place patch)
+    if (e.key === 'm' && a) { dispatchAct('toggle-read', id); } 
     else if ((e.key === 'o' || e.key === 'v') && a) { const url = safeHref(a.link); if (url !== '#') window.open(url, '_blank', 'noopener'); }
     else if (e.key === 's' && a) { dispatchAct('keep', id); }
     else if (e.key === '/') { e.preventDefault(); openSearchFn(); }
@@ -1865,9 +1658,7 @@ function bindEvents() {
 
 function applyTheme() {
   document.documentElement.dataset.theme = ui.theme;
-  // Cache the last-applied theme so the inline <head> script in index.html can
-  // paint dark BEFORE the CSS/config arrive — returning dark-mode visitors
-  // used to get a white flash on every single load.
+
   try { localStorage.setItem('ghrss:theme', JSON.stringify(ui.theme)); } catch {}
 }
 function applySidebarMode() {
@@ -1884,7 +1675,7 @@ function closeSearchFn() {
   $('#search-open').classList.remove('hidden');
   const inp = $('#search-input');
   if (inp) inp.value = '';
-  if (state.search) { state.search = ''; renderList(); } // closing search also clears the active filter
+  if (state.search) { state.search = ''; renderList(); } 
 }
 function syncControls() {
   const status = state.scope === 'today' ? 'today' : state.scope === 'recently-read' ? 'recently-read' : ui.status;
@@ -1898,7 +1689,6 @@ function syncControls() {
   applySidebarMode();
 }
 
-/* Inoreader "scroll tracking": mark items read when scrolled past (opt-in) */
 let scrollObserver = null;
 function setupScrollTracking() {
   if (scrollObserver) { scrollObserver.disconnect(); scrollObserver = null; }
@@ -1910,10 +1700,7 @@ function setupScrollTracking() {
       const a = findArticle(en.target.dataset.id);
       if (!a || isRead(a) || isKept(a) || a._f?.keepUnread || a._f?.hidden) continue;
       state.read[a.id] = Date.now();
-      // Linger + patch the row IN PLACE. Rebuilding the list removed the row,
-      // the content jumped up under the fixed scrollTop, the rows above the
-      // fold entered the observer, got marked, and so on — one scroll drained
-      // the whole unread view in a runaway cascade.
+
       state.keepVisible.add(a.id);
       en.target.classList.remove('unread');
       dirty = true;
@@ -1928,16 +1715,12 @@ function setupScrollTracking() {
   $$('#list .row').forEach((r) => scrollObserver.observe(r));
 }
 
-/* ---------------- settings / stats ---------------- */
 function syncMenuAria() {
-  // aria-expanded must track the menus its buttons describe — screen readers
-  // announce a stale "collapsed" otherwise.
+
   $('#btn-more')?.setAttribute('aria-expanded', String(!$('#header-menu')?.classList.contains('hidden')));
   $('#btn-mark-all-split')?.setAttribute('aria-expanded', String(!$('#mark-menu')?.classList.contains('hidden')));
 }
-/* ---------------- settings modal ----------------
-   The mark-read behavior (instant / delayed / manual) finally has a UI:
-   config.json ships the defaults, the modal persists local overrides. */
+
 function markHintText() {
   const delay = Math.max(0, Number(ui.markReadAfterSeconds) || 0);
   if (delay > 0) return `Articles are marked read ${delay} second${delay === 1 ? '' : 's'} after you open them — closing one before then keeps it unread.`;
@@ -1987,26 +1770,19 @@ function confirmDialog(title, text, onYes) {
   yes.focus();
 }
 
-/* ---------------- refresh / polling ----------------
-   The Action publishes at :05/:20/:35/:50 (self-healing quarter-hourly
-   schedule, landing ~2–3 min after the slot). Polls run on a wall-clock grid
-   (period = refreshMinutes, min 5) so a tab that's been open for hours still
-   picks up fresh data at the next boundary instead of "an hour after it
-   happened to load". Backgrounded tabs idle; they catch up on focus. */
 async function refresh(manual = false) {
   state.lastPollAt = Date.now();
   try {
     const index = await fetchJson('data/index.json');
     const changed = index.generatedAt !== state.index?.generatedAt;
     state.index = index;
-    if (!changed && !manual) { renderTree(); flashUpdated(); return; } // cheap poll: freshen status icons + the Updated line (it used to go stale for hours)
-    // Prefer the consolidated single-request payload for speed.
+    if (!changed && !manual) { renderTree(); flashUpdated(); return; } 
+
     const beforeIds = new Set();
     for (const arts of state.feeds.values()) for (const a of arts) beforeIds.add(a.id);
     const consolidated = await loadConsolidatedIntoState();
     if (!consolidated) {
-      // Reload the feeds we already have — in parallel, and a feed whose
-      // reload fails keeps its previous articles instead of vanishing.
+
       await loadMany([...state.feeds.keys()], null, true);
     }
     renderAll();
@@ -2031,14 +1807,14 @@ function startPolling() {
   clearTimeout(state.refreshTimer);
   const period = Math.max(5, Number(state.config?.settings?.refreshMinutes) || 5) * 60000;
   const schedule = () => {
-    const delay = period - (Date.now() % period) + 2500; // next wall-clock boundary + 2.5s
+    const delay = period - (Date.now() % period) + 2500; 
     state.refreshTimer = setTimeout(async () => {
-      if (document.visibilityState === 'visible') await refresh(false); // hidden tabs idle (battery)
+      if (document.visibilityState === 'visible') await refresh(false); 
       schedule();
     }, delay);
   };
   schedule();
-  // Returning to a backgrounded tab: catch up immediately if the grid missed.
+
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return;
     if (!state.lastPollAt || Date.now() - state.lastPollAt > period) refresh(false);
@@ -2047,8 +1823,7 @@ function startPolling() {
 async function ensureLoadedForScope(scope = state.scope) {
   let ids = scopeFeedIds(scope).filter((id) => !state.feeds.has(id));
   if (!ids.length) return;
-  // Many feeds missing → one consolidated request beats dozens of files
-  // (this also self-heals a boot where all-feeds.json failed the first time).
+
   if (ids.length > 8) {
     await loadConsolidatedIntoState();
     ids = scopeFeedIds(scope).filter((id) => !state.feeds.has(id));
@@ -2057,20 +1832,11 @@ async function ensureLoadedForScope(scope = state.scope) {
   renderAll();
 }
 
-/* ---------------- consolidated (all-feeds.json) loader ----------------
-   Read-state GC: localStorage has a fixed quota and article ids churn (4chan
-   threads rekey hourly) — unpruned maps eventually make saveObj throw
-   silently, and reads stop persisting with no symptom at all. Rules:
-   - read entries older than the retention window (+2wk grace) are gone from
-     the data anyway;
-   - ids that no longer exist anywhere are dropped only when EVERY feed
-     settled AND none failed its last fetch (its articles may simply not have
-     arrived yet — pruning then would eat live state). */
 function pruneReadState() {
   if (!state.index?.feeds) return;
   const retention = Number(state.config?.settings?.retentionDays) > 0 ? Number(state.config.settings.retentionDays) : 60;
   const cutoff = Date.now() - (retention + 14) * 864e5;
-  const Y2K = 946684800000; // sanity floor: garbage/epoch-0 timestamps are "unknown age", kept
+  const Y2K = 946684800000; 
   let dropped = false;
   for (const k of Object.keys(state.read)) {
     const ts = state.read[k];
@@ -2091,13 +1857,9 @@ function pruneReadState() {
 async function loadConsolidatedIntoState() {
   try {
     const allData = await fetchJson('data/all-feeds.json');
-    // An EMPTY articles array is valid (every feed has zero articles) — only a
-    // malformed payload falls back to per-feed files. And every configured
-    // feed gets an entry (even empty): a feed with no articles used to look
-    // "not loaded", so every search and mark re-downloaded all-feeds.json.
+
     if (!Array.isArray(allData?.articles) || !state.index?.feeds) return false;
-    // Same id + same content keeps the article's original fetchedAt, so the open
-    // reader pane (and a playing embed) is NOT rebuilt when a sync lands.
+
     const prevById = new Map();
     for (const arts of state.feeds.values()) for (const a of arts) prevById.set(a.id, a);
     const grouped = new Map();
@@ -2118,7 +1880,7 @@ async function loadConsolidatedIntoState() {
       state.feeds.set(feedId, arts);
     }
     for (const id of Object.keys(state.index.feeds)) {
-      if (!state.feeds.has(id)) state.feeds.set(id, []); // zero-article feed: exists, settled
+      if (!state.feeds.has(id)) state.feeds.set(id, []); 
       state.settled.add(id);
     }
     const feedsMeta = { ...state.index.feeds };
@@ -2139,26 +1901,22 @@ async function loadConsolidatedIntoState() {
   }
 }
 
-/* ---------------- boot ---------------- */
 async function boot() {
   applyTheme();
   bindEvents();
   try {
     state.config = await fetchJson('config.json');
     const s = state.config.settings || {};
-    // config.json owns every pref without an in-UI toggle — re-applied on EVERY
-    // load, so editing settings + pushing is all it takes to change behavior.
+
     for (const k of CONFIG_KEYS) if (k in s) ui[k] = s[k];
-    // …but the visitor's own Settings-modal choices (saved locally) win over
-    // the site defaults for exactly the SETTING_KEYS the modal exposes.
+
     for (const k of SETTING_KEYS) if (k in ui.settings) ui[k] = ui.settings[k];
-    if (s.view && !localStorage.getItem(LS_UI)) ui.layout = s.view; // default layout for new visitors
+    if (s.view && !localStorage.getItem(LS_UI)) ui.layout = s.view; 
     baseTitle = s.siteName || 'My RSSFeed';
     document.title = baseTitle;
-    applyTheme(); // theme may have just changed via config
+    applyTheme(); 
     compileFilters();
-    // Clamp a stored sidebar width: the drag path clamps 210–480, the boot
-    // path used to apply any stale garbage unclamped (broken layout).
+
     if (ui.sidebarW) {
       const w = Math.min(480, Math.max(210, Number(ui.sidebarW) || 242));
       ui.sidebarW = w;
@@ -2180,8 +1938,7 @@ async function boot() {
   flashUpdated();
   await ensureLoadedForScope();
   startPolling();
-  // Deep link: #article/<id> reopens that article after a refresh — behaving
-  // exactly like clicking the row (mark-read rules included).
+
   const hid = hashArticleId();
   if (hid && !openArticle(hid)) {
     clearHashArticle();

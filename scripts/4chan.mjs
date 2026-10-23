@@ -1,20 +1,7 @@
-// 4chan read-only JSON API (https://github.com/4chan/4chan-API) → reader articles.
-// Pure functions only — fetch.mjs owns all network I/O, the 1-request/second
-// throttle, If-Modified-Since and the sanitize-html pipeline that these
-// articles pass through, exactly like RSS bodies.
-//
-// Endpoint shapes used here:
-//   https://a.4cdn.org/boards.json           → { boards: [{ board: "g", title: "/g/ - Technology", ws_board: 1 }] }
-//   https://a.4cdn.org/<board>/catalog.json  → [ { threads: [ ... ] }, ... ]  (pages, bump order)
-// Thread (OP) fields we consume: no, sub, com, name, time, replies, images,
-// sticky, closed, tim, ext.
-
 import crypto from 'node:crypto';
 
 const sha1 = (s) => crypto.createHash('sha1').update(s).digest('hex');
 
-// OP comments are HTML-ish: <br> line breaks, <span class="quote"> greentext,
-// <wbr> inside long words, HTML entities. Flatten to plain text.
 export function stripChanHtml(html) {
   return String(html || '')
     .replace(/<br\s*\/?>/gi, '\n')
