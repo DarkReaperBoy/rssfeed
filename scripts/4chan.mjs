@@ -78,7 +78,23 @@ export function chanThreadToArticle(t, { board, worksafe = true, now = Date.now(
     // small square thumb in the body, linking to the full OP image
     parts.push(`<p><a href="${cdn(board, `${t.tim}${t.ext}`)}"><img src="${cdn(board, `${t.tim}s.jpg`)}" alt="OP image"></a></p>`);
   }
-  if (t.com) parts.push(`<p>${t.com}</p>`);
+  if (t.com) {
+    // Fix up OP-comment markup for a static reader: quotelinks arrive as
+    // RELATIVE hrefs (#p123 / /board/thread/123#p456) that would 404 off the
+    // Pages site, and greentext arrives as <span class="quote"> — which the
+    // sanitizer strips (no class attrs survive). Rewrite quotelinks to the
+    // real thread URLs and greentext lines to <blockquote> so they keep their
+    // signature styling in the reader.
+    const com = String(t.com)
+      .replace(/href="#p(\d+)"/g, `href="${link}#p$1"`)
+      .replace(/href="\/([a-z0-9]+)\/thread\/(\d+)(#[^"]*)?"/gi, 'href="https://boards.4chan.org/$1/thread/$2$3"');
+    // One line per <br>: whole-line greentext becomes a blockquote, the rest paragraphs.
+    for (const ln of com.split(/<br\s*\/?>/i)) {
+      const gt = /^<span class="quote">([\s\S]*?)<\/span>$/.exec(ln.trim());
+      if (gt) parts.push(`<blockquote>${gt[1]}</blockquote>`);
+      else if (ln.trim()) parts.push(`<p>${ln}</p>`);
+    }
+  }
   parts.push(`<p>${replies} replies · ${images} images · <a href="${link}">Open the thread</a></p>`);
   return {
     id: sha1(link).slice(0, 16),

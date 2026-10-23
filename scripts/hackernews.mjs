@@ -60,6 +60,10 @@ export function hnApiUrl(feed, { retentionDays = 30, now = Date.now(), fromSec =
 export async function hnFetchAllPages(doFetch, feed, { retentionDays = 30, now = Date.now(), maxRequests = 6 } = {}) {
   const nowSec = Math.floor(now / 1000);
   const startSec = nowSec - Math.max(1, retentionDays) * 86400;
+  const { minPoints, minComments } = hnFeedOptions(feed);
+  // No-caps queries hit the fixed front_page index — the URL ignores range
+  // bounds, so splitting would only re-fetch the SAME url and duplicate hits.
+  const splittable = !!(minPoints || minComments);
   const hits = [];
   let requests = 0;
   let truncated = false;
@@ -80,7 +84,7 @@ export async function hnFetchAllPages(doFetch, feed, { retentionDays = 30, now =
     }
     const pageHits = Array.isArray(json?.hits) ? json.hits : [];
     const nbHits = Number(json?.nbHits) || 0;
-    if (nbHits > pageHits.length && requests < maxRequests) {
+    if (splittable && nbHits > pageHits.length && requests < maxRequests) {
       // Truncated at the 1000-hit cap: cover this exact range via two halves.
       const mid = Math.floor((fromSec + (toSec || nowSec)) / 2);
       await fetchRange(mid, toSec);    // newer half: (mid, toSec]
@@ -122,7 +126,7 @@ export function hnHitToArticle(hit, { now = Date.now() } = {}) {
   const parts = [
     `<p>${points} points · ${comments} comments · <a href="${itemUrl}">Discuss on Hacker News</a></p>`,
   ];
-  if (storyText) parts.push(`<p>${storyText}</p>`);
+  if (storyText) parts.push(/<p[\s>]/i.test(storyText) ? storyText : `<p>${storyText}</p>`); // Algolia self-posts ship <p> already — no nested <p>
   return {
     id: sha1(`hn|${oid}`).slice(0, 16),
     title,

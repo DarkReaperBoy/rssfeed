@@ -10,24 +10,26 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import Parser from 'rss-parser';
 import { JSDOM } from 'jsdom';
 import { Readability } from '@mozilla/readability';
 import sanitizeHtml from 'sanitize-html';
 import { chanThreadsFromCatalog, chanThreadPasses, chanThreadToArticle } from './4chan.mjs';
-import { hnApiUrl, hnHitToArticle, hnFeedOptions, hnFetchAllPages } from './hackernews.mjs';
+import { hnHitToArticle, hnFeedOptions, hnFetchAllPages } from './hackernews.mjs';
 
-const ROOT = new URL('..', import.meta.url).pathname;
+// fileURLToPath, not .pathname: a clone into "C:\My Code\rssfeed" or any path
+// with spaces / a Windows drive would otherwise arrive URL-encoded and ENOENT.
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const DATA_DIR = path.join(ROOT, 'data');
 const FEEDS_DIR = path.join(DATA_DIR, 'feeds');
-const UA = 'Mozilla/5.0 (compatible; ghrss-fetcher/1.0; +https://github.com/)';
+const UA = 'Mozilla/5.0 (compatible; ghrss-fetcher/1.0; +https://github.com/DarkReaperBoy/rssfeed)';
 const TEXT_EXTRACT_BUDGET = 20;
 const TEXT_EXTRACT_MIN_LEN = 400;
-const RETENTION_DAYS = 30;
+const DEFAULT_RETENTION_DAYS = 60; // config.settings.retentionDays overrides this
+const FETCH_CONCURRENCY = 5;       // parallel feed pool; 4chan stays serial (its API's 1 req/s rule)
 
 const parser = new Parser({
-  timeout: 30000,
   headers: { 'User-Agent': UA, Accept: 'application/rss+xml, application/atom+xml, application/xml;q=0.9, */*;q=0.8' },
   customFields: { item: [['media:group', 'mediaGroup'], ['media:content', 'mediaContent', { keepArray: true }], ['media:thumbnail', 'mediaThumbnail']] },
 });
@@ -39,12 +41,15 @@ const sanitizeOpts = {
   allowedAttributes: {
     ...sanitizeHtml.defaults.allowedAttributes,
     a: ['href', 'title', 'rel', 'target'],
-    img: ['src', 'srcset', 'alt', 'title', 'width', 'height', 'loading'],
+    img: ['src', 'srcset', 'alt', 'title', 'width', 'height', 'loading', 'decoding', 'referrerpolicy'],
     source: ['src', 'type', 'srcset'],
     video: ['src', 'controls', 'width', 'height', 'poster', 'preload'],
     audio: ['src', 'controls', 'preload'],
     iframe: ['src', 'width', 'height', 'frameborder', 'allow', 'allowfullscreen', 'loading', 'title'],
-    '*': ['class', 'style'],
+    // No '*' => ['class','style']: feed-supplied classes could collide with
+    // the app's own (.hidden, .modal, .row…) and inline styles could overlay
+    // fixed-position UI or fire tracking-pixel requests. The client strips
+    // these anyway — the stored data shouldn't carry them either.
   },
   // No global 'data' scheme: <a href="data:text/html,…"> must never survive (only images get data:).
   allowedSchemes: ['http', 'https', 'mailto'],
@@ -55,6 +60,12 @@ const sanitizeOpts = {
       tagName: 'a',
       attribs: { ...attrs, rel: 'noopener noreferrer', target: '_blank' },
     }),
+    img: (tag, attrs) => ({
+      tagName: 'img',
+      // lazy + async decode + no referrer: hotlinked feed images shouldn't
+      // block first paint or leak the reader's referer upstream
+      attribs: { ...attrs, loading: 'lazy', decoding: 'async', referrerpolicy: 'no-referrer' },
+    }),
     iframe: (tag, attrs) => {
       const src = attrs.src || '';
       const ok = /^https:\/\/(www\.)?(youtube-nocookie\.com\/embed\/|player\.vimeo\.com\/video\/|soundcloud\.com\/)/.test(src);
@@ -64,27 +75,36 @@ const sanitizeOpts = {
 };
 const sanitize = (html) => sanitizeHtml(html || '', sanitizeOpts);
 
-const stripTags = (html) =>
+// Decode entities for titles/summaries. Numeric references are DECODED (they
+// used to become " " — &#8217; left a stray ";" mid-word: "Don ;t"); &amp;
+// goes LAST so double-escaped summaries ("&amp;lt;p&amp;gt;") can't double-decode.
+export const stripTags = (html) =>
   (html || '')
     .replace(/<(script|style)[\s\S]*?<\/\1>/gi, ' ')
     .replace(/<br\s*\/?>/gi, ' ')
     .replace(/<\/(p|div|h[1-6]|li|blockquote)>/gi, ' ')
     .replace(/<[^>]+>/g, '')
     .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
+    .replace(/&#x([0-9a-f]+);/gi, (m, hex) => { try { return String.fromCodePoint(parseInt(hex, 16)); } catch { return ' '; } })
+    .replace(/&#(\d+);/g, (m, dec) => { try { return String.fromCodePoint(parseInt(dec, 10)); } catch { return ' '; } })
+    .replace(/&mdash;/gi, '\u2014').replace(/&ndash;/gi, '\u2013').replace(/&hellip;/gi, '\u2026')
+    .replace(/&rsquo;|&lsquo;/gi, "'").replace(/&rdquo;|&ldquo;/gi, '"').replace(/&middot;/gi, '\u00b7')
     .replace(/&lt;/gi, '<')
     .replace(/&gt;/gi, '>')
     .replace(/&quot;/gi, '"')
     .replace(/&#0?39;|&apos;/gi, "'")
-    .replace(/&#x[0-9a-f]+;/gi, ' ')
-    .replace(/&#\d+/g, ' ')
+    .replace(/&amp;/gi, '&')
     .replace(/\s+/g, ' ')
     .trim();
 
 const sha1 = (s) => crypto.createHash('sha1').update(s).digest('hex');
-const stableId = (link, title) => (sha1(`${link}|${title}`).slice(0, 16));
+// Ids key on the item's GUID/link — NOT its title. YouTube creators A/B-test
+// titles after publishing; hashing the title meant every retitle minted a new
+// id, resurrecting the video as a fresh unread duplicate. Callers migrate
+// stored ids by link match (see prevIdByKey in main).
+export const stableId = (key) => sha1(String(key)).slice(0, 16);
 
-const isYouTubeFeed = (url) => /(?:^https?:\/\/)(?:www\.)?youtube\.com\/feeds\//i.test(url || '') || /youtu\.be\//i.test(url || '');
+const isYouTubeFeed = (url) => /(?:^https?:\/\/)(?:www\.)?youtube\.com\/feeds\//i.test(url || '');
 
 // YouTube ships Shorts in channel feeds with /shorts/<id> links (regular videos
 // use watch?v=) — confirmed against live feeds; creators also tag #short(s).
@@ -101,7 +121,11 @@ export function compileMatcherSrv(v) {
   const s = String(v);
   const m = s.match(/^\/(.+)\/([a-z]*)$/);
   if (m) {
-    try { const re = new RegExp(m[1], (m[2] || 'i').replace('g', '')); return (hay) => re.test(String(hay || '')); }
+    // Default 'i' survives even when the user passes other flags — an
+    // explicit /x/m used to silently turn matching case-SENSITIVE.
+    let flags = (m[2] || '').replace(/g/g, '');
+    if (!flags.includes('i')) flags += 'i';
+    try { const re = new RegExp(m[1], flags); return (hay) => re.test(String(hay || '')); }
     catch { return () => false; }
   }
   const lc = s.toLowerCase();
@@ -109,9 +133,14 @@ export function compileMatcherSrv(v) {
 }
 export function compileBlockSrv(block) {
   const out = {};
-  for (const field of ['title', 'content', 'author', 'link']) {
+  // Both spellings accepted: the README's UI filters use `authors`/`links`,
+  // so per-feed filters written the same way must not be silently ignored.
+  for (const [field, norm] of [['title', 'title'], ['content', 'content'], ['author', 'author'], ['authors', 'author'], ['link', 'link'], ['links', 'link']]) {
     const arr = block?.[field];
-    if (Array.isArray(arr) && arr.length) out[field] = arr.map(compileMatcherSrv);
+    if (Array.isArray(arr) && arr.length) {
+      if (!out[norm]) out[norm] = [];
+      out[norm].push(...arr.map(compileMatcherSrv));
+    }
   }
   return Object.keys(out).length ? out : null;
 }
@@ -151,7 +180,15 @@ async function fetchText(url, { maxBytes = 5_000_000 } = {}) {
   if (len && len > maxBytes) return null;
   const buf = Buffer.from(await res.arrayBuffer());
   if (buf.length > maxBytes) return null;
-  return buf.toString('utf8');
+  return decodeBuffer(buf, type);
+}
+
+/* Feeds declare their charset in the XML prolog or the HTTP content-type;
+   res.text() would force UTF-8 and mojibake Windows-1251 / ISO-8859-1 feeds. */
+function decodeBuffer(buf, contentType) {
+  let charset = /charset=["']?([\w-]+)/i.exec(contentType || '')?.[1];
+  if (!charset) charset = /encoding=["']?([\w-]+)/i.exec(buf.subarray(0, 256).toString('latin1'))?.[1];
+  try { return new TextDecoder(charset || 'utf-8').decode(buf); } catch { return buf.toString('utf8'); }
 }
 
 /* No retries by design: upstream 404/429 blips (YouTube/Blogger under load)
@@ -184,20 +221,36 @@ function pickDate(item) {
   return null;
 }
 
-function pickContent(item) {
+// A realistic tag opener: known HTML tags only. The old check (/<[a-z]/)
+// misread plain text like "if (a<b && c> d)" as markup and collapsed
+// multi-paragraph YouTube descriptions into one wall of text.
+const LOOKS_HTML = /<\/(?:p|div|span|a|b|i|u|em|strong|li|ul|ol|h[1-6]|blockquote|pre|code|table|td|tr|figure|figcaption)\b|<(?:p|br|div|span|a|img|figure|figcaption|h[1-6]|ul|ol|li|table|tbody|tr|td|th|blockquote|pre|code|hr|em|strong|b|i|u|sub|sup|center|small|font)\b/i;
+
+// Linkify bare URLs in PLAIN TEXT only — running it on markup corrupted
+// attributes (<img src="<a href=…">). Sentence punctuation (and an unopened
+// closing paren) stays out of the href; wiki-style internal parens survive.
+const linkify = (text) => text.replace(/https?:\/\/[^\s<]+/gi, (u0) => {
+  let u = u0;
+  while (/[.,;:!?'"]$/.test(u) || (/\)$/.test(u) && !/\(/.test(u))) u = u.slice(0, -1);
+  if (!/^https?:\/\/.{4,}/i.test(u)) return u0; // nothing linkable left
+  const attr = u.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+  // the stripped punctuation belongs to the surrounding sentence — keep it
+  const trail = u0.slice(u.length);
+  return `<a href="${attr}">${attr}</a>${trail}`;
+});
+
+export function pickContent(item) {
   let raw = item['content:encoded'] || item.content || item.description || item.summary || item.contentSnippet || '';
   if (!raw && item.mediaGroup) {
     const desc = item.mediaGroup['media:description'];
     raw = Array.isArray(desc) ? (desc[0] || '') : (desc?._ || desc || '');
   }
   raw = typeof raw === 'string' ? raw : String(raw ?? '');
-  // Pretty-print plain-text descriptions (e.g. YouTube) as paragraphs.
-  if (raw && !/<[a-z][\s\S]*>/i.test(raw)) {
+  // Pretty-print plain-text descriptions (e.g. YouTube) as paragraphs — and
+  // linkify while it is still text, so markup attributes can never corrupt.
+  if (raw && !LOOKS_HTML.test(raw)) {
+    raw = linkify(raw);
     raw = raw.split(/\n{2,}/).map((p) => `<p>${p.replace(/\n/g, '<br>')}</p>`).join('');
-  }
-  // Linkify bare URLs so embeds (YouTube etc.) can be upgraded client-side.
-  if (raw && !/<a\s/i.test(raw)) {
-    raw = raw.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1">$1</a>');
   }
   return raw;
 }
@@ -396,7 +449,7 @@ async function main() {
   const settings = config.settings || {};
   const fullTextDefault = !!settings.fullTextDefault;
   const dropShortsDefault = settings.dropShorts !== false; // YouTube Shorts are banned by default
-  const retentionDays = Number(settings.retentionDays) > 0 ? Number(settings.retentionDays) : RETENTION_DAYS;
+  const retentionDays = Number(settings.retentionDays) > 0 ? Number(settings.retentionDays) : DEFAULT_RETENTION_DAYS;
   const { feeds, folders: folderDefs } = await resolveFeeds(config);
   if (!feeds.length) {
     console.error('no feeds found (config.json feeds or feeds.opml)');
@@ -417,13 +470,29 @@ async function main() {
   let failures = 0;
 
   const currentFeedIds = new Set();
+  const written = new Map(); // feedId -> articles just stored (the consolidated payload is built from memory)
 
-  for (const feed of feeds) {
+  // Purge the retained set through the live config rules (dropShorts, word
+  // filters, retention): a rule added today cleans history too, not just
+  // tomorrow's items. 304/failure paths keep using it so nothing stale sticks.
+  const purgePrev = (prev, { ytShorts = false, feedBlocks = null } = {}) => {
+    let list = prev.articles || [];
+    if (ytShorts) list = list.filter((a) => !isShortItem(a.link, a.title, a.content));
+    if (feedBlocks) list = list.filter((a) => !feedFilterDrop(a, feedBlocks));
+    return list.filter((a) => now - a.date < retainMs);
+  };
+
+  const processFeed = async (feed) => {
     currentFeedIds.add(feed.id);
 
     const file = path.join(FEEDS_DIR, `${feed.id}.json`);
     const prev = await loadJson(file, { articles: [] });
     const prevById = new Map((prev.articles || []).map((a) => [a.id, a]));
+    // Retitle migration index: a stored article keyed by its link (or title
+    // when linkless) keeps its id even though fresh items key on guid/link —
+    // a creator editing a title must not rekey the article into a duplicate.
+    const prevIdByKey = new Map();
+    for (const a of prev.articles || []) prevIdByKey.set(a.link ? `l:${a.link}` : `t:${a.title}`, a.id);
 
     const prevStatus = prevFeedMeta[feed.id]?.status || {};
     const status = {
@@ -432,11 +501,13 @@ async function main() {
       lastSuccess: prevStatus.lastSuccess || null,
       consecutiveFailures: prevStatus.consecutiveFailures || 0,
       error: null,
+      etag: prevStatus.etag || null,
+      lastModified: prevStatus.lastModified || null,
     };
 
     if (feed.enabled === false) {
-      // Keep existing articles but filter to 30 days
-      let kept = [...(prev.articles || [])].filter((a) => now - a.date < retainMs);
+      // Keep existing articles, still pruned to the retention window
+      const kept = purgePrev(prev);
       await fs.writeFile(file, JSON.stringify({ articles: kept }));
       index.feeds[feed.id] = {
         ...summarizeFeed(feed, kept),
@@ -449,8 +520,9 @@ async function main() {
           error: 'Feed disabled in config',
         },
       };
+      written.set(feed.id, kept);
       console.log(`[${feed.id}] disabled, keeping ${kept.length} articles (last ${retentionDays} days)`);
-      continue;
+      return;
     }
 
     if (feed.type === '4chan') {
@@ -461,19 +533,22 @@ async function main() {
         failures++;
         await fs.writeFile(file, JSON.stringify({ articles: prev.articles || [] }));
         index.feeds[feed.id] = { ...summarizeFeed({ ...feed, site: feed.site || 'https://boards.4channel.org' }, prev.articles || []), status: { ...status, ok: false, error: '4chan feed needs a "board"' } };
+        written.set(feed.id, prev.articles || []);
         console.error(`[${feed.id}] CONFIG ERROR: 4chan feed needs a "board" (e.g. "g")`);
-        continue;
+        return;
       }
       if (boards && !meta) {
         failures++;
         await fs.writeFile(file, JSON.stringify({ articles: prev.articles || [] }));
         index.feeds[feed.id] = { ...summarizeFeed({ ...feed, site: feed.site || 'https://boards.4channel.org' }, prev.articles || []), status: { ...status, ok: false, error: `unknown board /${board}/` } };
+        written.set(feed.id, prev.articles || []);
         console.error(`[${feed.id}] FETCH FAILED: unknown 4chan board /${board}/ — keeping ${(prev.articles || []).length} threads`);
-        continue;
+        return;
       }
       const worksafe = meta ? meta.ws_board !== 0 : true;
       const effFeed = { ...feed, title: feed.title || meta?.title || `/${board}/`, site: feed.site || `https://${worksafe ? 'boards.4channel.org' : 'boards.4chan.org'}/${board}/` };
       const feedBlocks = compileFeedFilter(feed);
+      const cap = Number(feed.maxThreads) > 0 ? Number(feed.maxThreads) : 0;
       let res;
       try {
         res = await fetchChanCatalog(board, prevStatus.lastModified || null);
@@ -484,8 +559,9 @@ async function main() {
         status.consecutiveFailures = (prevStatus.consecutiveFailures || 0) + 1;
         await fs.writeFile(file, JSON.stringify({ articles: prev.articles || [] }));
         index.feeds[feed.id] = { ...summarizeFeed(effFeed, prev.articles || []), status };
+        written.set(feed.id, prev.articles || []);
         console.error(`[${feed.id}] FETCH FAILED: ${err.message} — keeping ${(prev.articles || []).length} threads`);
-        continue;
+        return;
       }
       status.ok = true;
       status.lastSuccess = now;
@@ -493,11 +569,16 @@ async function main() {
       status.error = null;
       status.lastModified = res.lastModified || prevStatus.lastModified || null;
       if (res.notModified) {
-        // catalog unchanged since last run — keep the file as-is (API courtesy path)
-        await fs.writeFile(file, JSON.stringify({ articles: prev.articles || [] }));
-        index.feeds[feed.id] = { ...summarizeFeed(effFeed, prev.articles || []), status };
-        console.log(`[${feed.id}] /${board}/: not modified — keeping ${(prev.articles || []).length} live threads`);
-        continue;
+        // catalog unchanged since last run — keep the file, but still purge
+        // through the live rules: tightening minReplies / word filters /
+        // maxThreads must apply without waiting for the board to change.
+        const keptAll = (prev.articles || []).filter((a) => !(feedBlocks && feedFilterDrop(a, feedBlocks)));
+        const kept = cap ? keptAll.slice(0, cap) : keptAll;
+        await fs.writeFile(file, JSON.stringify({ articles: kept }));
+        index.feeds[feed.id] = { ...summarizeFeed(effFeed, kept), status };
+        written.set(feed.id, kept);
+        console.log(`[${feed.id}] /${board}/: not modified — keeping ${kept.length} live threads`);
+        return;
       }
       const opts = {
         minReplies: Number(feed.minReplies) || 0,
@@ -517,7 +598,6 @@ async function main() {
         a.content = sanitize(a.content);
         articles.push(a);
       }
-      const cap = Number(feed.maxThreads) > 0 ? Number(feed.maxThreads) : 0;
       const kept = cap ? articles.slice(0, cap) : articles;
       // 4chan feeds are LIVE: each run replaces the set — threads that left the
       // catalog (404'd) drop out instead of lingering for retentionDays. Thread
@@ -525,8 +605,9 @@ async function main() {
       // retentionDays does not apply: a bumped thread can outlive the window.
       await fs.writeFile(file, JSON.stringify({ articles: kept }));
       index.feeds[feed.id] = { ...summarizeFeed(effFeed, kept), status };
+      written.set(feed.id, kept);
       console.log(`[${feed.id}] /${board}/: ${kept.length} live threads${skipped ? ` (skipped ${skipped} below the reply/word filters)` : ''}${filtered ? ` (dropped ${filtered} by word filter)` : ''}${cap ? ` (capped at ${cap})` : ''}`);
-      continue;
+      return;
     }
 
     if (isHnFeed(feed)) {
@@ -557,8 +638,9 @@ async function main() {
         const keptFail = [...(prev.articles || [])].filter((a) => now - a.date < retainMs);
         await fs.writeFile(file, JSON.stringify({ articles: keptFail }));
         index.feeds[feed.id] = { ...summarizeFeed(effFeed, keptFail), status };
+        written.set(feed.id, keptFail);
         console.error(`[${feed.id}] FETCH FAILED: ${err.message} — keeping ${keptFail.length} stories from last ${retentionDays} days`);
-        continue;
+        return;
       }
       status.ok = true;
       status.lastSuccess = now;
@@ -575,38 +657,66 @@ async function main() {
       }
       // Same retention merge as RSS: a story that left the front page (or the
       // caps window) lingers for retentionDays, and a fresh hit replaces the
-      // stored one by id — points/comment counts stay current.
+      // stored one by id — points/comment counts stay current. Stored stories
+      // also pass through the live word filters, so tightening them cleans.
       const byId = new Map();
-      for (const a of [...(prev.articles || []), ...articles]) byId.set(a.id, a);
+      const prevList = (prev.articles || []).filter((a) => !(feedBlocks && feedFilterDrop(a, feedBlocks)));
+      for (const a of [...prevList, ...articles]) byId.set(a.id, a);
       const merged = [...byId.values()].sort((a, b) => b.date - a.date).filter((a) => now - a.date < retainMs);
       await fs.writeFile(file, JSON.stringify({ articles: merged }));
       index.feeds[feed.id] = { ...summarizeFeed(effFeed, merged), status };
+      written.set(feed.id, merged);
       const capsDesc = minPoints && minComments
         ? `${minPoints}+ points and ${minComments}+ comments`
         : minPoints ? `${minPoints}+ points` : minComments ? `${minComments}+ comments` : 'front page';
       console.log(`[${feed.id}] ${merged.length} stories (${capsDesc}, last ${retentionDays} days)${filtered ? ` (dropped ${filtered} by word filter)` : ''}`);
-      continue;
+      return;
     }
 
     let xml;
     try {
-      const res = await fetch(feed.url, { headers: parser.options.headers, signal: AbortSignal.timeout(35000), redirect: 'follow' });
+      // Conditional GET: send the stored ETag/Last-Modified — a 304 keeps the
+      // stored set and skips parsing entirely (fewer bytes, fewer rate limits).
+      const headers = { ...parser.options.headers };
+      if (prevStatus.etag) headers['If-None-Match'] = prevStatus.etag;
+      else if (prevStatus.lastModified) headers['If-Modified-Since'] = prevStatus.lastModified;
+      const res = await fetch(feed.url, { headers, signal: AbortSignal.timeout(35000), redirect: 'follow' });
+      if (res.status === 304) {
+        status.ok = true;
+        status.lastSuccess = now;
+        status.consecutiveFailures = 0;
+        status.error = null;
+        const kept = purgePrev(prev, {
+          ytShorts: isYouTubeFeed(feed.url) && (feed.dropShorts ?? dropShortsDefault),
+          feedBlocks: compileFeedFilter(feed),
+        });
+        await fs.writeFile(file, JSON.stringify({ articles: kept }));
+        index.feeds[feed.id] = { ...summarizeFeed(feed, kept), status };
+        written.set(feed.id, kept);
+        console.log(`[${feed.id}] not modified — keeping ${kept.length} articles`);
+        return;
+      }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      xml = await res.text();
+      const buf = Buffer.from(await res.arrayBuffer());
+      if (buf.length > 5_000_000) throw new Error('feed exceeds 5 MB');
+      xml = decodeBuffer(buf, res.headers.get('content-type'));
+      status.etag = res.headers.get('etag') || null;
+      status.lastModified = res.headers.get('last-modified') || null;
     } catch (err) {
       failures++;
       status.ok = false;
       status.error = err.message;
       status.consecutiveFailures = (prevStatus.consecutiveFailures || 0) + 1;
-      // Keep previous articles, filter to 30 days
-      let kept = [...(prev.articles || [])].filter((a) => now - a.date < retainMs);
+      // Keep previous articles, filter to the retention window
+      const kept = [...(prev.articles || [])].filter((a) => now - a.date < retainMs);
       await fs.writeFile(file, JSON.stringify({ articles: kept }));
       index.feeds[feed.id] = {
         ...summarizeFeed(feed, kept),
         status,
       };
+      written.set(feed.id, kept);
       console.error(`[${feed.id}] FETCH FAILED: ${err.message} — keeping ${kept.length} articles from last ${retentionDays} days (${status.consecutiveFailures} consecutive failures)`);
-      continue;
+      return;
     }
 
     let parsed;
@@ -623,8 +733,9 @@ async function main() {
         ...summarizeFeed(feed, kept),
         status,
       };
+      written.set(feed.id, kept);
       console.error(`[${feed.id}] PARSE FAILED: ${err.message} — keeping ${kept.length} articles from last ${retentionDays} days`);
-      continue;
+      return;
     }
 
     // Success
@@ -645,14 +756,23 @@ async function main() {
       const link = item.link || item.guid || '';
       const content = pickContent(item);
       if (ytShorts && isShortItem(link, title, content)) { shortsDropped++; continue; }
-      const id = stableId(link || title, title);
-      const date = pickDate(item) || now;
+      const author = stripTags(item.creator || item.author || '').slice(0, 120) || null;
+      // Word filters run BEFORE the expensive full-text extraction — dropped
+      // items used to burn the 20-per-feed extraction budget and its network
+      // time for nothing. summary derives from content, so it can't add a match.
+      if (feedBlocks && feedFilterDrop({ title, content, author, link, summary: '' }, feedBlocks)) { filterDropped++; continue; }
+      // guid/link-keyed id + stored-id migration (a retitle keeps its id —
+      // no duplicate unread copy, no lost read state, deep links survive)
+      const id = prevIdByKey.get(link ? `l:${link}` : `t:${title}`) || stableId(item.guid || item.id || link || title);
       const prevA = prevById.get(id);
+      // Undated items keep their FIRST-SEEN date: stamping `now` on every run
+      // kept them pinned at the top of "Newest" forever, exempt from retention.
+      const date = pickDate(item) ?? prevA?.date ?? now;
       const plain = stripTags(content);
       const summary = plain.slice(0, 300);
       let text = prevA?.text || null;
       const feedGivesEnough = plain.length >= TEXT_EXTRACT_MIN_LEN;
-      if (wantText && !text && !feedGivesEnough && textBudget > 0 && now - date < retentionDays * 86400000 && link) {
+      if (wantText && !text && !feedGivesEnough && textBudget > 0 && now - date < retainMs && link) {
         textBudget--;
         try {
           text = await extractFullText(link);
@@ -665,7 +785,7 @@ async function main() {
         id,
         title,
         link,
-        author: stripTags(item.creator || item.author || '').slice(0, 120) || null,
+        author,
         date,
         summary,
         content: sanitize(content),
@@ -673,17 +793,17 @@ async function main() {
         enclosures: pickEnclosures(item),
         fetchedAt: now,
       };
-      if (feedBlocks && feedFilterDrop(art, feedBlocks)) { filterDropped++; continue; }
       articles.push(art);
     }
     if (shortsDropped) console.log(`[${feed.id}] dropped ${shortsDropped} YouTube short(s)`);
     if (filterDropped) console.log(`[${feed.id}] dropped ${filterDropped} article(s) by the feed's word filter`);
 
     // Merge with previous so ids stay stable — but previously stored Shorts
-    // must not resurrect: dropShorts is a live rule, so the retained set is
-    // purged through the same detector as the fresh items every run.
+    // and word-filtered items must not resurrect: dropShorts and filters are
+    // live rules, so the retained set is purged through the same detectors
+    // as the fresh items every run.
     const byId = new Map();
-    const prevList = ytShorts ? (prev.articles || []).filter((a) => !isShortItem(a.link, a.title, a.content)) : (prev.articles || []);
+    const prevList = purgePrev(prev, { ytShorts, feedBlocks });
     for (const a of [...prevList, ...articles]) byId.set(a.id, a);
     let merged = [...byId.values()].sort((a, b) => b.date - a.date);
     // Keep only the retention window, NO article limit
@@ -694,8 +814,27 @@ async function main() {
       ...summarizeFeed(feed, merged),
       status,
     };
+    written.set(feed.id, merged);
     console.log(`[${feed.id}] ${merged.length} articles (last ${retentionDays} days, no cap) from "${parsed.title || feed.title}"`);
-  }
+  };
+
+  /* Feed fetching: a small concurrency pool. Serial fetching (66 feeds x 35 s
+     timeouts + up to 20 x 25 s full-text extractions per feed) can blow the
+     workflow's 15-minute cap when a few hosts throttle or hang — 5 in flight
+     bounds the worst case while staying gentle on YouTube. 4chan boards run
+     on their own serial chain: their API's global 1-request/second rule is
+     enforced by a shared throttle that must never see concurrent callers. */
+  const chanFeeds = feeds.filter((f) => f.type === '4chan');
+  const poolFeeds = feeds.filter((f) => f.type !== '4chan');
+  const runOne = async (feed) => {
+    try { await processFeed(feed); }
+    catch (err) { failures++; console.error(`[${feed.id}] FAILED: ${err.message}`); }
+  };
+  const chanChain = (async () => { for (const feed of chanFeeds) await runOne(feed); })();
+  const pool = Array.from({ length: Math.min(FETCH_CONCURRENCY, poolFeeds.length) }, async () => {
+    while (poolFeeds.length) await runOne(poolFeeds.shift());
+  });
+  await Promise.all([...pool, chanChain]);
 
   // Purge removed sources
   for (const [oldId] of Object.entries(prevFeedMeta)) {
@@ -707,11 +846,12 @@ async function main() {
     }
   }
 
-  // Consolidated single-file payload for the frontend (fast initial load)
+  // Consolidated single-file payload for the frontend (fast initial load),
+  // built straight from the arrays this run just stored — no re-reading every
+  // per-feed file back off disk.
   const allArticles = [];
-  for (const id of currentFeedIds) {
-    const d = await loadJson(path.join(FEEDS_DIR, `${id}.json`), { articles: [] });
-    for (const a of (d.articles || [])) allArticles.push({ ...a, _feed: id });
+  for (const feed of feeds) {
+    for (const a of written.get(feed.id) || []) allArticles.push({ ...a, _feed: feed.id });
   }
   await fs.writeFile(path.join(DATA_DIR, 'all-feeds.json'), JSON.stringify({ articles: allArticles }));
 
