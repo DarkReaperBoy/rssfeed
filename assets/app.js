@@ -32,7 +32,7 @@ const state = {
   kept: loadObj(LS_KEPT),    // {articleId: true} — "keep unread"
   filters: [],
   markTimers: new Map(),
-  loading: new Set(),
+  loading: new Map(), // feedId → in-flight load promise (joinable, so a mark action waits for — not skips — a load in progress
   settled: new Set(), // feeds that finished loading (or failed) — mark-mode sync waits for these
   refreshTimer: null,
   lastPollAt: 0,
@@ -198,29 +198,68 @@ function applyFiltersToFeed(feedId, articles) {
 }
 
 /* ---------------- data loading ---------------- */
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// Hard cap on every request — a stalled connection (mobile carriers, in-app
+// browsers) can never wedge loading forever. RSS_FETCH_TIMEOUT_MS is a
+// test/debug override; real visitors get 10 s.
+const FETCH_TIMEOUT_MS = Number(window.RSS_FETCH_TIMEOUT_MS) || 10000;
 async function fetchJson(url) {
-  const res = await fetch(url, { cache: 'no-cache' });
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-  return res.json();
-}
-async function loadFeed(feedId) {
-  if (state.feeds.has(feedId) || state.loading.has(feedId)) return;
-  state.loading.add(feedId);
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
   try {
-    const data = await fetchJson(`data/feeds/${encodeURIComponent(feedId)}.json`);
-    applyFiltersToFeed(feedId, data.articles || []);
-    state.feeds.set(feedId, data.articles || []);
-    // fetch failures surface through index.json feed status (sidebar warning icon)
-  } catch {
+    const res = await fetch(url, { cache: 'no-cache', signal: ctrl.signal });
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    return await res.json();
   } finally {
-    state.loading.delete(feedId);
-    state.settled.add(feedId);
+    clearTimeout(timer);
   }
 }
-let loadChain = Promise.resolve();
-function loadFeedQueued(feedId, onChange) {
-  loadChain = loadChain.then(() => loadFeed(feedId)).then(onChange);
-  return loadChain;
+async function loadFeed(feedId, force = false) {
+  // A second request for the same feed JOINS the in-flight load instead of
+  // skipping it — mark actions then cover exactly what was loading, not a
+  // snapshot of whatever happened to be ready.
+  if (state.loading.has(feedId)) return state.loading.get(feedId);
+  if (!force && state.feeds.has(feedId)) return;
+  const done = (async () => {
+    try {
+      const data = await fetchJson(`data/feeds/${encodeURIComponent(feedId)}.json`);
+      applyFiltersToFeed(feedId, data.articles || []);
+      state.feeds.set(feedId, data.articles || []);
+      // fetch failures surface through index.json feed status (sidebar warning icon)
+    } catch {
+      // on a forced reload (refresh fallback) the previous articles stay put —
+      // a network blip must never blank a feed the user is reading
+    } finally {
+      state.loading.delete(feedId);
+      state.settled.add(feedId);
+    }
+  })();
+  state.loading.set(feedId, done);
+  await done;
+}
+/* Loads many feeds in parallel (6 at a time). 60 serial round-trips took
+   minutes on a phone and any stalled request wedged the whole chain — mark
+   actions and search now wait seconds at most (each fetch is also capped by
+   fetchJson). Renders are throttled so a 60-feed load doesn't rebuild the
+   list dozens of times. */
+async function loadMany(ids, onChange, force = false) {
+  const queue = [...new Set(ids)];
+  let renderQueued = false;
+  const renderSoon = () => {
+    if (renderQueued || !onChange) return;
+    renderQueued = true;
+    setTimeout(() => { renderQueued = false; onChange(); }, 250);
+  };
+  const worker = async () => {
+    while (queue.length) {
+      const id = queue.shift();
+      await loadFeed(id, force);
+      renderSoon();
+    }
+  };
+  const n = Math.min(6, queue.length);
+  if (n > 0) await Promise.all(Array.from({ length: n }, worker));
+  if (onChange) onChange();
 }
 function feedIdsInScope() {
   const feeds = state.index?.feeds || {};
@@ -236,7 +275,11 @@ function feedIdsInScope() {
   return Object.keys(feeds);
 }
 async function loadAllFeeds(onChange) {
-  for (const id of Object.keys(state.index?.feeds || {})) await loadFeedQueued(id, onChange);
+  // One consolidated request beats dozens of feed files whenever it works;
+  // whatever it misses (offline feeds, new entries) is fetched in parallel.
+  await loadConsolidatedIntoState();
+  const missing = Object.keys(state.index?.feeds || {}).filter((id) => !state.feeds.has(id));
+  if (missing.length) await loadMany(missing, onChange);
 }
 
 /* ---------------- search ---------------- */
@@ -592,7 +635,7 @@ function renderEmpty(visible) {
     el.innerHTML = `<h3>No matches</h3><p>Nothing matched <code>${esc(state.search)}</code> in this view.<br>Operators: <code>feed:name</code> <code>title:word</code> <code>before:2026-01-01</code> <code>after:2026-01-01</code> <code>unread:true</code> <code>is:read</code></p>`;
   } else if (ui.status === 'unread') {
     const caughtUp = !state.search && ui.dateRange === 'all' && allReadInScope();
-    el.innerHTML = `<h3>All caught up 🎉</h3><p>No unread articles here${ui.dateRange !== 'all' ? ' for this time range' : ''}.</p>${caughtUp ? '<p class="empty-hint">Over-marked? The ✓ button flips to <em>Mark as unread</em>, and the ✓ ▾ menu restores by age or an exact date — even while new articles are still unread.</p>' : ''}`;
+    el.innerHTML = `<h3>All caught up 🎉</h3><p>No unread articles here${ui.dateRange !== 'all' ? ' for this time range' : ''}.</p>${caughtUp ? '<p class="empty-hint">Over-marked? The ✓ button and its ▾ menu now offer <em>Mark as unread</em> — everything, by age, or before an exact date.</p>' : ''}`;
   } else {
     el.innerHTML = `<h3>Nothing here</h3><p>No articles in this view. New items arrive when the hourly fetch runs.</p>`;
   }
@@ -770,6 +813,10 @@ function scopeUnreadCount(scope) {
 }
 function allReadInScope() {
   const ids = feedIdsInScope();
+  // Nothing known (index missing / empty) or feeds still loading — keep the
+  // read mode; "caught up" must never be claimed vacuously or the button
+  // would offer a mark-as-unread that no-ops.
+  if (!state.index?.feeds || !ids.length) return false;
   if (ids.some((id) => !state.settled.has(id))) return false; // feeds still loading — keep the read mode
   return scopeUnreadCount(state.scope) === 0;
 }
@@ -810,8 +857,13 @@ function syncMarkButtons() {
   if (use) use.setAttribute('href', caughtUp ? '#i-unread' : '#i-read');
   const split = $('#btn-mark-all-split');
   if (split) split.title = caughtUp ? 'Mark as unread articles' : 'Mark as read articles';
-  // The ▾ menu itself is mode-independent (explicit read/unread groups) — only
-  // the main button flips when the scope is fully caught up.
+  // Exactly ONE ▾ group is offered — the same rule as the main button flip:
+  // unread articles exist → "Mark as read"; everything here is read →
+  // "Mark as unread". Never both at once.
+  const gRead = $('#mark-group-read');
+  const gUnread = $('#mark-group-unread');
+  if (gRead) gRead.classList.toggle('hidden', caughtUp);
+  if (gUnread) gUnread.classList.toggle('hidden', !caughtUp);
 }
 
 function updateBulkBar() {
@@ -1091,10 +1143,20 @@ function bindEvents() {
     e.stopPropagation(); // their ▾ opens the mark menu (ss2)
     $('#mark-menu').classList.toggle('hidden');
   });
-  // Every menu item states its own direction (explicit read/unread groups) —
-  // no hidden mode. Lazy feeds in the scope are loaded first so the action
-  // covers exactly what the badges count.
-  const applyMark = async (fn, olderDays, beforeTs) => { await ensureScopeLoaded(); fn(state.scope, olderDays, beforeTs); };
+  // Menu actions wait for the scope's feeds so the count matches the badges —
+  // but never forever: every fetch is capped and this wait is bounded too, so
+  // a slow connection can't dead-end the click. A visible "still loading"
+  // toast replaces the old silent nothing.
+  const applyMark = async (fn, olderDays, beforeTs) => {
+    const load = ensureScopeLoaded();
+    const slow = setTimeout(() => showToast('Still loading this view — marking what has arrived so far'), 1500);
+    try {
+      await Promise.race([load, sleep(11000)]);
+    } finally {
+      clearTimeout(slow);
+    }
+    fn(state.scope, olderDays, beforeTs);
+  };
   $('#mark-menu').addEventListener('click', (e) => {
     if (e.target.tagName === 'INPUT') return; // date pickers act on change
     const custom = e.target.closest('[data-custom]');
@@ -1271,9 +1333,9 @@ async function refresh(manual = false) {
     for (const arts of state.feeds.values()) for (const a of arts) beforeIds.add(a.id);
     const consolidated = await loadConsolidatedIntoState();
     if (!consolidated) {
-      // reload loaded feeds (new articles), keep the rest lazy
-      const loaded = [...state.feeds.keys()];
-      for (const id of loaded) { state.feeds.delete(id); await loadFeed(id); }
+      // Reload the feeds we already have — in parallel, and a feed whose
+      // reload fails keeps its previous articles instead of vanishing.
+      await loadMany([...state.feeds.keys()], null, true);
     }
     renderAll();
     flashUpdated();
@@ -1311,9 +1373,15 @@ function startPolling() {
   });
 }
 async function ensureScopeLoaded() {
-  const ids = feedIdsInScope().filter((id) => !state.feeds.has(id));
+  let ids = feedIdsInScope().filter((id) => !state.feeds.has(id));
   if (!ids.length) return;
-  for (const id of ids) await loadFeedQueued(id, () => { renderTree(); renderList(); });
+  // Many feeds missing → one consolidated request beats dozens of files
+  // (this also self-heals a boot where all-feeds.json failed the first time).
+  if (ids.length > 8) {
+    await loadConsolidatedIntoState();
+    ids = feedIdsInScope().filter((id) => !state.feeds.has(id));
+  }
+  if (ids.length) await loadMany(ids, () => { renderTree(); renderList(); });
   renderAll();
 }
 

@@ -1,8 +1,13 @@
 name: Fetch feeds & publish
 
+# GitHub's scheduler skips cron slots at random (observed: 6–9 h gaps on this
+# repo with a plain hourly cron). Two slots per hour + a freshness gate makes
+# the data refresh self-healing: if GitHub skips :00, the :30 run notices the
+# data is stale and fetches. Push/dispatch always run the full pipeline so code
+# changes deploy immediately, regardless of data age.
 on:
   schedule:
-    - cron: '0 * * * *'   # hourly
+    - cron: '*/30 * * * *'  # two chances per hour; the gate keeps the real cadence ~hourly
   workflow_dispatch:        # manual run from the Actions tab
   push:
     branches: [main]        # every push to main deploys via CI/CD
@@ -19,10 +24,33 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      # Scheduled runs first check the age of the published data — fresh data
+      # (<45 min) means the previous slot already refreshed, so this run exits
+      # in ~20 s without touching any upstream feed. Push/dispatch skip the
+      # gate entirely and always deploy.
+      - name: Check data freshness (schedule runs only)
+        if: github.event_name == 'schedule'
+        run: |
+          set -e
+          TS=$(curl -fsSL --max-time 20 "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/gh-pages/data/index.json" 2>/dev/null \
+            | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const t=JSON.parse(s).generatedAt;console.log(Number(t)||"")}catch{console.log("")}})' || true)
+          if [ -n "$TS" ] && [ "$TS" -gt 0 ] 2>/dev/null; then
+            AGE=$(( ($(date -u +%s%3N) - TS) / 60000 ))
+            echo "Published data age: ${AGE} min"
+            if [ "$AGE" -lt 45 ]; then
+              echo "Data is fresh (<45 min) — nothing to do."
+              echo "SKIP_FETCH=true" >> "$GITHUB_ENV"
+            fi
+          else
+            echo "No published data found (or unreadable) — running a full fetch."
+          fi
+
       - name: Checkout
+        if: env.SKIP_FETCH != 'true'
         uses: actions/checkout@v4
 
       - name: Fetch previous data (for 30-day accumulation)
+        if: env.SKIP_FETCH != 'true'
         run: |
           git fetch origin gh-pages --depth=1 2>/dev/null || true
           if git rev-parse --verify origin/gh-pages >/dev/null 2>&1; then
@@ -31,18 +59,22 @@ jobs:
           ls data 2>/dev/null || echo "no previous data (first run)"
 
       - name: Setup Node
+        if: env.SKIP_FETCH != 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
 
       - name: Install deps
+        if: env.SKIP_FETCH != 'true'
         run: npm ci
 
       - name: Fetch feeds
+        if: env.SKIP_FETCH != 'true'
         run: npm run fetch
 
       - name: Assemble site
+        if: env.SKIP_FETCH != 'true'
         run: |
           rm -rf _site
           mkdir -p _site
@@ -53,6 +85,7 @@ jobs:
           touch _site/.nojekyll
 
       - name: Publish to gh-pages branch
+        if: env.SKIP_FETCH != 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

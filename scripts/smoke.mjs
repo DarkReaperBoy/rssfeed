@@ -192,24 +192,17 @@ click($('#toast-action'));
 await settle(50);
 ok(rowCount() === TOTAL - HIDDEN - 1, 'undo restores the rows');
 
-console.log('mark-as-unread by age — explicit group, no caught-up requirement');
-// The user bug: "older than" silently dispatched by a hidden mode that only
-// flipped when everything was read. The menu is now explicit — restoring by
-// age must work right here, while most articles are still UNREAD.
+console.log('mark menu shows exactly ONE group (read ⇄ unread)');
+// User spec: unread articles exist → offer "Mark as read"; everything read →
+// offer "Mark as unread". Never both groups at once.
 ok($('#btn-mark-all').title === 'Mark all as read', 'scope is NOT caught up (newer articles still unread)');
-ok($$('#mark-menu [data-mark="read"]').length === 4, 'explicit "Mark as read" age group present');
-ok($$('#mark-menu [data-mark="unread"]').length === 4, 'explicit "Mark as unread" age group present');
-ok(!!$('#mark-date-unread') && !!$('#mark-date-read'), 'custom "Before…" date pickers present');
-click('#btn-mark-all-split');
-await settle(20);
-click('#mark-menu [data-mark="unread"][data-older="1"]');
-await settle(80);
-ok($('#toast-text').textContent.includes('older than a day as unread'), 'unread-older-than restores while NOT caught up');
-ok($('#toast-text').textContent.includes('1 article'), 'restores exactly the one read day-old article');
-ok(rowCount() === TOTAL - HIDDEN, 'the restored article is back in the unread view');
-click($('#toast-action'));
-await settle(50);
-ok(rowCount() === TOTAL - HIDDEN - 1, 'undo puts the state back');
+ok(!$('#mark-group-read').classList.contains('hidden'), 'unread articles exist → the "Mark as read" group is offered');
+ok($('#mark-group-unread').classList.contains('hidden'), 'the "Mark as unread" group is hidden while not caught up');
+ok($$('#mark-menu [data-mark="read"]').length === 4, 'the read group keeps its four age presets');
+ok(!!$('#mark-date-unread') && !!$('#mark-date-read'), 'custom "Before…" date pickers present (one per group)');
+const visibleGroupLabel = () =>
+  $('#mark-group-unread').classList.contains('hidden') ? $('#mark-group-read .mark-label') : $('#mark-group-unread .mark-label');
+ok(visibleGroupLabel().textContent === 'Mark as read', 'the OFFERED group while not caught up is "Mark as read"');
 
 console.log('search');
 click('#search-open');
@@ -294,8 +287,9 @@ ok(rowCount() === 0, 'badge tick marks the whole Newsfeed read');
 ok($('#empty').textContent.includes('All caught up'), 'empty state says "All caught up 🎉"');
 ok(!!$('#empty .empty-hint'), 'caught-up hint points at the flipped button');
 ok($('#btn-mark-all').title === 'Mark all as unread', 'the SAME button flips to "Mark all as unread"');
-ok($$('#mark-menu .mark-label')[0].textContent === 'Mark as read', 'menu keeps its explicit read group while caught up');
-ok($$('#mark-menu .mark-label')[1].textContent === 'Mark as unread', 'menu keeps its explicit unread group while caught up');
+ok(!$('#mark-group-unread').classList.contains('hidden'), 'caught up → the "Mark as unread" group is offered');
+ok($('#mark-group-read').classList.contains('hidden'), 'the "Mark as read" group is hidden once everything is read');
+ok(visibleGroupLabel().textContent === 'Mark as unread', 'the OFFERED group while caught up is "Mark as unread"');
 click('#btn-mark-all');
 await settle(20);
 ok(!$('#confirm-modal').classList.contains('hidden'), 'mark-as-unread asks for confirmation');
@@ -304,6 +298,7 @@ await settle(50);
 ok(rowCount() === rowsBeforeMarkAll, 'mark as unread restores every article');
 ok($('#toast-text').textContent.includes('articles as unread'), 'restore toast reports the count');
 ok($('#btn-mark-all').title === 'Mark all as read', 'button flips back once articles are unread');
+ok(!$('#mark-group-read').classList.contains('hidden'), 'groups flip back the moment articles become unread');
 
 click('#badge-all-items'); // everything read again
 await settle(50);
@@ -367,7 +362,7 @@ ok($('#reader-slot .reader')?.dataset.id === rowsMid[2], 'k walks back to the un
 
 click('#btn-mark-all-split');
 await settle(20);
-const emptyDate = $('#mark-date-unread');
+const emptyDate = $('#mark-date-read'); // the read group is the one offered while not caught up
 emptyDate.value = '';
 emptyDate.dispatchEvent(new window.Event('change', { bubbles: true }));
 await settle(80);
@@ -386,10 +381,12 @@ click('#menu-refresh');
 await settle(500);
 ok($('#toast-text').textContent.includes('Already up to date'), 'manual refresh with unchanged data says "Already up to date"');
 ok(rowCount() === rowsBeforeSync, 'state settles back to the fixture data');
+click('#badge-all-items'); // caught up first — the unread group is the one offered
+await settle(50);
 click('#btn-mark-all-split');
 await settle(20);
 const dinp2 = $('#mark-date-unread');
-dinp2.value = dstr; // "before tomorrow" = every article again
+dinp2.value = dstr; // "before tomorrow" = every read article again
 dinp2.dispatchEvent(new window.Event('change', { bubbles: true }));
 await settle(120);
 ok(rowCount() === rowsBeforeMarkAll, '"before tomorrow" restore clears the navigation reads before the folder test');
@@ -460,6 +457,104 @@ console.log('feed-storage version reset');
   await settle(1200);
   ok(Number(w4.document.querySelector('#badge-all-items').textContent) === TOTAL - HIDDEN - 1, 'same-version storage is kept (no re-reset)');
   dom4.window.close();
+}
+
+console.log('degraded network: hung feed fetches never wedge the UI');
+{
+  // The reported bug: on a flaky connection a stalled feed request could make
+  // every mark click silent-forever. Fetches are capped now — a hung request
+  // settles as a failure, and mark clicks always answer.
+  const domH = new JSDOM(html, { url: 'https://example.test/', runScripts: 'outside-only', pretendToBeVisual: true });
+  const wH = domH.window;
+  // A stalled connection that HONORS the abort signal, like a real browser
+  // fetch: the request never completes, but abort() rejects it.
+  const stalled = (opts) => new Promise((res, rej) => {
+    opts?.signal?.addEventListener('abort', () => rej(new Error('The operation was aborted')));
+  });
+  wH.fetch = (url, opts) => {
+    const p = String(url).split('?')[0];
+    if (p === 'config.json') return Promise.resolve({ ok: true, status: 200, json: async () => structuredClone(config) });
+    if (p === 'data/index.json') return Promise.resolve({ ok: true, status: 200, json: async () => structuredClone(index) });
+    return stalled(opts); // stalled forever — the old code never recovered from this
+  };
+  wH.RSS_FETCH_TIMEOUT_MS = 120; // test-scale cap (real visitors get 10 s)
+  wH.eval(appSrc);
+  wH.document.dispatchEvent(new wH.Event('DOMContentLoaded', { bubbles: true }));
+  await settle(700);
+  const $$H = (s) => [...wH.document.querySelectorAll(s)];
+  ok($$H('#tree .tree-item').length >= 4, 'sidebar renders from index.json even while feed fetches stall');
+  ok(wH.document.querySelector('#btn-mark-all').title === 'Mark all as unread', 'stalled loads settle via the fetch cap — no feed is stuck "loading" forever');
+  // a mark click must respond within bounds, not hang
+  wH.document.querySelector('#btn-mark-all-split').dispatchEvent(new wH.MouseEvent('click', { bubbles: true }));
+  await settle(30);
+  const item = wH.document.querySelector('#mark-menu [data-mark="unread"][data-older="1"]');
+  item.dispatchEvent(new wH.MouseEvent('click', { bubbles: true }));
+  await settle(400);
+  ok(wH.document.querySelector('#toast-text').textContent.includes('No read articles older than a day here'), 'mark clicks always respond — stalled fetches cannot dead-end them');
+  domH.window.close();
+}
+
+console.log('degraded network: a click during a slow load is visible, then lands');
+{
+  const domS = new JSDOM(html, { url: 'https://example.test/', runScripts: 'outside-only', pretendToBeVisual: true });
+  const wS = domS.window;
+  const DELAY = 2600;
+  wS.fetch = async (url) => {
+    const p = String(url).split('?')[0];
+    if (p === 'config.json') return { ok: true, status: 200, json: async () => structuredClone(config) };
+    if (p === 'data/index.json') return { ok: true, status: 200, json: async () => structuredClone(index) };
+    if (p === 'data/all-feeds.json') return { ok: false, status: 404, statusText: 'Not Found', json: async () => { throw new Error('404'); } };
+    await new Promise((r) => setTimeout(r, DELAY)); // slow but eventual
+    const m = p.match(/^data\/feeds\/(.+)\.json$/);
+    if (m && FIX[m[1]]) return { ok: true, status: 200, json: async () => structuredClone({ articles: FIX[m[1]].articles }) };
+    return { ok: false, status: 404, statusText: 'Not Found', json: async () => { throw new Error('404'); } };
+  };
+  wS.eval(appSrc);
+  wS.document.dispatchEvent(new wS.Event('DOMContentLoaded', { bubbles: true }));
+  await settle(300); // boot is still mid-load (each feed takes 2.6 s)
+  wS.document.querySelector('#btn-mark-all-split').dispatchEvent(new wS.MouseEvent('click', { bubbles: true }));
+  await settle(30);
+  // the click JOINS the in-flight loads instead of dispatching over an empty snapshot
+  wS.document.querySelector('#mark-menu [data-mark="read"][data-older="31"]').dispatchEvent(new wS.MouseEvent('click', { bubbles: true }));
+  await settle(1700); // past the 1.5 s slow-load notice, still before the loads finish
+  ok(wS.document.querySelector('#toast-text').textContent.includes('Still loading this view'), 'a click during a slow load announces itself instead of silently doing nothing');
+  await settle(1800); // loads finish → the queued action dispatches over the full data
+  ok(wS.document.querySelector('#toast-text').textContent.includes('No unread articles older than a month here'), 'the action lands over the FULL data once loading completes');
+  domS.window.close();
+}
+
+console.log('refresh fallback: a failed reload keeps the articles on screen');
+{
+  const domR = new JSDOM(html, { url: 'https://example.test/', runScripts: 'outside-only', pretendToBeVisual: true });
+  const wR = domR.window;
+  let feedsFail = false;
+  let indexGen = now;
+  wR.fetch = async (url) => {
+    const p = String(url).split('?')[0];
+    if (p === 'config.json') return { ok: true, status: 200, json: async () => structuredClone(config) };
+    if (p === 'data/index.json') return { ok: true, status: 200, json: async () => structuredClone({ ...index, generatedAt: indexGen }) };
+    if (p === 'data/all-feeds.json') return { ok: false, status: 404, statusText: 'Not Found', json: async () => { throw new Error('404'); } };
+    if (feedsFail) return { ok: false, status: 503, statusText: 'Service Unavailable', json: async () => { throw new Error('503'); } };
+    const m = p.match(/^data\/feeds\/(.+)\.json$/);
+    if (m && FIX[m[1]]) return { ok: true, status: 200, json: async () => structuredClone({ articles: FIX[m[1]].articles }) };
+    return { ok: false, status: 404, statusText: 'Not Found', json: async () => { throw new Error('404'); } };
+  };
+  wR.eval(appSrc);
+  wR.document.dispatchEvent(new wR.Event('DOMContentLoaded', { bubbles: true }));
+  await settle(1200);
+  const rowsR = () => [...wR.document.querySelectorAll('#list .row')].length;
+  ok(rowsR() === TOTAL - HIDDEN, 'boot loads rows via per-feed files (consolidated 404)');
+  indexGen = now + 45 * 60000; // a new "publish"
+  feedsFail = true; // …and the reload blips
+  wR.document.querySelector('#menu-refresh').dispatchEvent(new wR.MouseEvent('click', { bubbles: true }));
+  await settle(600);
+  ok(rowsR() === TOTAL - HIDDEN, 'a failed reload keeps the previous articles (no blank feed)');
+  ok(!wR.document.querySelector('#toast-text').textContent.includes('new article'), 'nothing is announced as synced when the reload fails');
+  feedsFail = false;
+  wR.document.querySelector('#menu-refresh').dispatchEvent(new wR.MouseEvent('click', { bubbles: true }));
+  await settle(600);
+  ok(rowsR() === TOTAL - HIDDEN, 'the next successful refresh restores the normal flow');
+  domR.window.close();
 }
 
 console.log('YouTube shorts detection (fetch.mjs)');

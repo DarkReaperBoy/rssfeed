@@ -94,22 +94,26 @@
                 <button id="btn-mark-all-split" class="btn-heading btn-split" title="Mark as read articles"><svg><use href="#i-chevron"/></svg></button>
               </div>
               <div id="mark-menu" class="dropdown dropdown-mark hidden">
-                <!-- Explicit two-group menu: every age action states its direction.
-                     No hidden mode state — "Mark as unread → Older than…" works in ANY
-                     scope state, not just when fully caught up. -->
-                <div class="mark-label">Mark as read</div>
-                <button class="dropdown-item" data-mark="read" data-older="1">Older than a day</button>
-                <button class="dropdown-item" data-mark="read" data-older="2">Older than two days</button>
-                <button class="dropdown-item" data-mark="read" data-older="7">Older than a week</button>
-                <button class="dropdown-item" data-mark="read" data-older="31">Older than a month</button>
-                <div class="dropdown-item mark-custom" data-custom="read">Before… <input type="date" id="mark-date-read" title="Mark articles published before this date as read"></div>
-                <div class="dropdown-line"></div>
-                <div class="mark-label">Mark as unread</div>
-                <button class="dropdown-item" data-mark="unread" data-older="1">Older than a day</button>
-                <button class="dropdown-item" data-mark="unread" data-older="2">Older than two days</button>
-                <button class="dropdown-item" data-mark="unread" data-older="7">Older than a week</button>
-                <button class="dropdown-item" data-mark="unread" data-older="31">Older than a month</button>
-                <div class="dropdown-item mark-custom" data-custom="unread">Before… <input type="date" id="mark-date-unread" title="Mark articles published before this date as unread"></div>
+                <!-- Exactly ONE group is offered at a time — the same rule as the
+                     main ✓ button flip: unread articles exist → mark-as-read;
+                     everything here is read → mark-as-unread. syncMarkButtons()
+                     toggles the .hidden classes on every render. -->
+                <div id="mark-group-read">
+                  <div class="mark-label">Mark as read</div>
+                  <button class="dropdown-item" data-mark="read" data-older="1">Older than a day</button>
+                  <button class="dropdown-item" data-mark="read" data-older="2">Older than two days</button>
+                  <button class="dropdown-item" data-mark="read" data-older="7">Older than a week</button>
+                  <button class="dropdown-item" data-mark="read" data-older="31">Older than a month</button>
+                  <div class="dropdown-item mark-custom" data-custom="read">Before… <input type="date" id="mark-date-read" title="Mark articles published before this date as read"></div>
+                </div>
+                <div id="mark-group-unread" class="hidden">
+                  <div class="mark-label">Mark as unread</div>
+                  <button class="dropdown-item" data-mark="unread" data-older="1">Older than a day</button>
+                  <button class="dropdown-item" data-mark="unread" data-older="2">Older than two days</button>
+                  <button class="dropdown-item" data-mark="unread" data-older="7">Older than a week</button>
+                  <button class="dropdown-item" data-mark="unread" data-older="31">Older than a month</button>
+                  <div class="dropdown-item mark-custom" data-custom="unread">Before… <input type="date" id="mark-date-unread" title="Mark articles published before this date as unread"></div>
+                </div>
               </div>
             </div>
 
@@ -209,6 +213,6 @@
   </div>
 </div>
 
-<script src="assets/app.js?v=20261024"></script>
+<script src="assets/app.js?v=20261025"></script>
 </body>
 </html>
