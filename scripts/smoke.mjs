@@ -2,9 +2,10 @@
 // deterministic in-memory fixtures.
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { JSDOM } from 'jsdom';
 
-const ROOT = new URL('..', import.meta.url).pathname;
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
 let pass = 0, fail = 0;
 const ok = (cond, name) => { cond ? (pass++, console.log(`  ✓ ${name}`)) : (fail++, console.error(`  ✗ ${name}`)); };
 const settle = (ms = 300) => new Promise((r) => setTimeout(r, ms));
@@ -39,6 +40,9 @@ const FIX = {
     articles: mkArticles('fixture-bbc', ['Election update', 'Climate summit', 'Market swing', 'Sports final', 'Tech regulation']),
   },
 };
+// full-text fixture: the reader must prefer a.text over the shorter a.content
+FIX['fixture-verge'].articles[2].text = '<p>Extracted full text present</p>';
+FIX['fixture-verge'].articles[2].content = '<p>Short teaser only</p>';
 
 const config = {
   // theme is a config-owned pref with no UI toggle — it must apply on EVERY load.
@@ -49,10 +53,15 @@ const config = {
     { id: 'fixture-verge', title: 'The Verge', url: 'https://theverge.test/rss', site: 'https://www.theverge.com', folder: 'tech' },
     { id: 'fixture-bbc', title: 'BBC News', url: 'https://bbc.test/rss', site: 'https://www.bbc.com/news', folder: 'news' },
   ],
-  filters: [{
-    id: 'test-filter', name: 'test', feeds: ['fixture-hn'],
-    exclude: { title: ['show hn'] }, actions: { hide: true },
-  }],
+  filters: [
+    { id: 'test-filter', name: 'test', feeds: ['fixture-hn'],
+      exclude: { title: ['show hn'] }, actions: { hide: true } },
+    // include + highlight: must tint ONLY the include match, and hide nothing
+    // (the old inverted predicate highlighted everything EXCEPT the match,
+    // and hide:true-by-default nuked the whole scope)
+    { id: 'test-highlight', name: 'hl', feeds: ['fixture-verge'],
+      include: { title: ['laptop'] }, actions: { highlight: true } },
+  ],
 };
 const index = {
   generatedAt: now,
@@ -69,7 +78,7 @@ const TOTAL = Object.values(FIX).reduce((n, f) => n + f.articles.length, 0);
 const HIDDEN = 2;
 
 const html = (await fs.readFile(path.join(ROOT, 'index.html'), 'utf8'))
-  .replace(/<script src="assets\/app\.js\?v=\d+"><\/script>/, '');
+  .replace(/<script src="assets\/app\.js\?v=[^"]*"><\/script>/, ''); // any ?v= shape — CI substitutes a content hash
 const dom = new JSDOM(html, { url: 'https://example.test/', runScripts: 'outside-only', pretendToBeVisual: true });
 const { window } = dom;
 
@@ -123,11 +132,13 @@ ok(!$$('#list .row .star-btn').length, 'star buttons removed');
 ok($$('#list .row [data-act="toggle-read"]').length === rows.length, 'every row has the read/unread tick');
 ok($$('#list .row [data-act="keep"]').length === rows.length, 'every row has keep-unread');
 ok($$('#list .row').filter((r) => r.querySelector('.feed-name')?.textContent === 'Hacker News' && /show hn/i.test(r.querySelector('.row-title').textContent)).length === 0, 'exclude filter hides matching articles');
+ok($$('#list .row.highlight').length === 1 && /laptop/i.test($$('#list .row.highlight .row-title')[0].textContent), 'include+highlight tints ONLY the matching row (nothing hidden)');
 
 console.log('reading');
 const firstRow = $('#list .row');
 const firstId = firstRow.dataset.id;
 const firstLink = firstRow.querySelector('[data-act="open-original"]').getAttribute('href');
+ok($('#list .row.unread [data-act="toggle-read"] use')?.getAttribute('href') === '#i-unread', 'unread rows show the ○ state icon (title carries the action)');
 click(firstRow);
 await settle(50);
 ok(!!$('#reader-slot .reader-body'), 'article opens');
@@ -136,7 +147,36 @@ ok($('#list .row').classList.contains('expanded'), 'open row is highlighted in t
 ok(Number($('#badge-all-items').textContent) === TOTAL - HIDDEN - 1, 'opening marks read');
 ok(window.location.hash === `#article/${firstId}`, 'opening an article puts its id in the URL (#article/<id>)');
 
+console.log('reader prefers extracted full text over the feed teaser');
+{
+  click('#search-open');
+  await settle(20);
+  const s = $('#search-input');
+  s.value = 'AI gadget';
+  s.dispatchEvent(new window.Event('input', { bubbles: true }));
+  await settle(400);
+  ok(rowCount() === 1, 'full-text fixture article found');
+  const ftRow = $('#list .row');
+  const ftId = ftRow.dataset.id;
+  click(ftRow);
+  await settle(50);
+  ok($('#reader-slot .reader-body').textContent.includes('Extracted full text present'), 'the reader shows the extracted text (a.text)');
+  ok(!$('#reader-slot .reader-body').textContent.includes('Short teaser only'), 'not the shorter feed teaser (a.content)');
+  ok(!!$('#reader-slot [data-act="keep"]') && !!$('#reader-slot [data-act="toggle-read"]'), 'reader toolbar carries keep-unread + read toggle (narrow screens have no row buttons)');
+  click('#search-close');
+  await settle(50);
+  ok(window.document.body.classList.contains('article-open'), 'clearing the search keeps the open article (search no longer closes it)');
+  click($(`#list .row[data-id="${ftId}"] [data-act="toggle-read"]`)); // back to unread — leave exactly one read article (the first) for the next sections
+  await settle(50);
+  ok(Number($('#badge-all-items').textContent) === TOTAL - HIDDEN - 1, 'state restored to one read article');
+  click($('#reader-slot [data-act="collapse"]'));
+  await settle(50);
+  ok(!window.document.body.classList.contains('article-open'), 'reader collapsed');
+}
+
 console.log('double-click keeps the read row');
+click($('#list .row')); // re-open the just-read row
+await settle(30);
 click($('#list .row')); // same row again → collapse
 await settle(50);
 ok(!window.document.body.classList.contains('article-open'), 'reader closed');
@@ -145,13 +185,13 @@ ok(!$('#list .row').classList.contains('unread'), 'the row now shows as read');
 ok(Number($('#badge-all-items').textContent) === TOTAL - HIDDEN - 1, 'badge unchanged by the collapse');
 ok(!window.location.hash, 'collapsing the reader clears the hash (no history spam)');
 
-console.log('moving on re-filters the read row');
+console.log('moving on keeps the read row (Back/prev/k can still return to it)');
 const secondRow = $$('#list .row')[1];
 const secondId = secondRow.dataset.id;
 click(secondRow);
 await settle(50);
-ok(rowCount() === TOTAL - HIDDEN - 1, 'previously read article disappears when moving on');
-ok(!$(`#list .row[data-id="${firstId}"]`), 'old row is gone from the list');
+ok(rowCount() === TOTAL - HIDDEN, 'the previously read row lingers (tick flips in place, no vanish)');
+ok(!!$(`#list .row[data-id="${firstId}"]`), 'the old row is still in the list for Back/Previous to return to');
 ok(window.document.body.classList.contains('article-open'), 'new article is selected');
 
 console.log('browser Back/Forward (deep-link history)');
@@ -180,17 +220,26 @@ click(`#list .row[data-id="${secondId}"] [data-act="toggle-read"]`);
 await settle(50);
 ok(Number($('#badge-all-items').textContent) === TOTAL - HIDDEN - 1, 'mark unread restores count (the first article stays read)');
 
+console.log('keep unread actually un-reads');
+ok(!!$(`#list .row[data-id="${firstId}"]`), 'the read row lingers in place');
+click(`#list .row[data-id="${firstId}"] [data-act="keep"]`);
+await settle(50);
+ok(Number($('#badge-all-items').textContent) === TOTAL - HIDDEN, 'keep-unread deletes the read entry too (the badge counts it again)');
+ok($(`#list .row[data-id="${firstId}"] [data-act="keep"]`)?.getAttribute('aria-pressed') === 'true', 'the keep button reports its pressed state');
+click(`#list .row[data-id="${firstId}"] [data-act="keep"]`); // un-keep again (stays unread)
+await settle(50);
+
 console.log('mark-all split');
 click('#btn-mark-all-split');
 await settle(20);
 ok(!$('#mark-menu').classList.contains('hidden'), 'mark menu opens');
 click('#mark-menu [data-mark="read"][data-older="1"]');
 await settle(80);
-ok($('#toast-text').textContent.includes('3 article'), 'older-than-a-day marks exactly 3 articles');
-ok(rowCount() === TOTAL - HIDDEN - 3, 'marked articles re-filter out — the open one stays pinned in place');
+ok($('#toast-text').textContent.includes('4 article'), 'older-than-a-day marks exactly 4 articles (the day-old HN batch)');
+ok(rowCount() === TOTAL - HIDDEN - 4, 'marked articles re-filter out');
 click($('#toast-action'));
 await settle(50);
-ok(rowCount() === TOTAL - HIDDEN - 1, 'undo restores the rows');
+ok(rowCount() === TOTAL - HIDDEN, 'undo restores the rows');
 
 console.log('mark menu shows exactly ONE group (read ⇄ unread)');
 // User spec: unread articles exist → offer "Mark as read"; everything read →
@@ -215,7 +264,7 @@ await settle(400);
 ok(rowCount() === 1, 'search narrows rows');
 click('#search-close');
 await settle(50);
-ok(rowCount() === TOTAL - HIDDEN - 1, 'closing search clears the active filter');
+ok(rowCount() === TOTAL - HIDDEN, 'closing search clears the active filter');
 ok($('#search-input').value === '', 'search input cleared');
 
 console.log('layouts');
@@ -238,12 +287,12 @@ console.log('bulk select');
 click('#menu-select-mode');
 await settle(20);
 ok(window.document.body.classList.contains('bulk-mode'), 'bulk mode toggles on');
-click($$('#list .row')[1]);
+click($$('#list .row')[5]); // not the open article (that row stays pinned)
 await settle(20);
 ok($('#bulk-count').textContent === '1', 'row click selects in bulk mode');
 click('#bulk-read');
 await settle(50);
-ok(rowCount() === TOTAL - HIDDEN - 2, 'bulk mark read removes the row from the unread view');
+ok(rowCount() === TOTAL - HIDDEN - 1, 'bulk mark read removes the row from the unread view');
 ok($('#toast-text').textContent.includes('1 article'), 'bulk toast reports the count');
 click($('#toast-action'));
 await settle(50);
@@ -329,7 +378,7 @@ const dstr = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${
 const dinp = $('#mark-date-unread');
 dinp.value = dstr; // "before tomorrow" = every article
 dinp.dispatchEvent(new window.Event('change', { bubbles: true }));
-await settle(120);
+await settle(450); // past the 250 ms date-picker debounce (Chromium fires change per typed segment)
 ok($('#toast-text').textContent.includes('as unread'), 'date picker action runs');
 ok($('#toast-text').textContent.includes(new Date(`${dstr}T00:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })), 'toast names the picked date');
 ok(rowCount() === rowsBeforeMarkAll, '"before tomorrow" restores every read article');
@@ -372,6 +421,32 @@ click('#confirm-yes');
 await settle(80);
 ok(rowCount() === rowsBeforeMarkAll, 'state restored: everything unread again');
 
+console.log('Newsfeed badge marks ALL feeds, even from inside a feed view');
+click('.tree-item[data-scope="feed:fixture-verge"]'); // a single feed
+await settle(60);
+ok($('#scope-title').textContent === 'The Verge', 'viewing a single feed');
+click('#badge-all-items'); // the Newsfeed tick — must cover every feed, not just the Verge
+await settle(150);
+ok($('#toast-text').textContent.includes(`Marked ${TOTAL - HIDDEN} articles as read`), `the Newsfeed badge covered every feed (${TOTAL - HIDDEN}, not just the one in view)`);
+click($('#toast-action'));
+await settle(60);
+click('.tree-item[data-scope="all"]'); // back to the Newsfeed
+await settle(60);
+
+console.log('an info toast never stomps a live Undo');
+click('#badge-all-items'); // everything read -> "Marked N as read" + Undo
+await settle(150);
+ok($('#toast-action').style.display !== 'none', 'the mark-all toast carries a live Undo button');
+const undoToastText = $('#toast-text').textContent;
+click('#btn-more'); // open the \u22ef menu over it
+await settle(20);
+click('#menu-refresh'); // fires the "Already up to date" info toast
+await settle(500);
+ok($('#toast-text').textContent === undoToastText, 'the info toast does NOT replace the live Undo');
+ok($('#toast-action').style.display !== 'none', 'the Undo button is still there');
+click($('#toast-action')); // clean up: undo the mark-all
+await settle(60);
+
 console.log('j/k keyboard navigation');
 const idsNow = $$('#list .row').map((r) => r.dataset.id);
 window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'j', bubbles: true }));
@@ -380,16 +455,24 @@ ok($('#reader-slot .reader')?.dataset.id === idsNow[0], 'j opens the first visib
 window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'j', bubbles: true }));
 await settle(80);
 ok($('#reader-slot .reader')?.dataset.id === idsNow[1], 'j again moves to the next article');
+console.log('Escape peels one layer at a time');
+click('#btn-more');
+await settle(20);
+ok(!$('#header-menu').classList.contains('hidden'), 'the \u22ef menu opens over the article');
+window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+await settle(40);
+ok($('#header-menu').classList.contains('hidden'), 'Escape closes the menu');
+ok(window.document.body.classList.contains('article-open'), 'the open article SURVIVES that Escape (menu and article no longer close together)');
 window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
 await settle(60);
-ok(!window.document.body.classList.contains('article-open'), 'Escape closes the reader');
-// open a row further down; k must walk back to the unread article above it
+ok(!window.document.body.classList.contains('article-open'), 'a bare Escape closes the reader');
+// open a row further down; k must walk back to the article above it
 const rowsMid = $$('#list .row').map((r) => r.dataset.id);
 click(`#list .row[data-id="${rowsMid[3]}"]`);
 await settle(60);
 window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'k', bubbles: true }));
 await settle(80);
-ok($('#reader-slot .reader')?.dataset.id === rowsMid[2], 'k walks back to the unread article above');
+ok($('#reader-slot .reader')?.dataset.id === rowsMid[2], 'k walks back to the article above (the just-read row lingers)');
 
 click('#btn-mark-all-split');
 await settle(20);
@@ -419,7 +502,7 @@ await settle(20);
 const dinp2 = $('#mark-date-unread');
 dinp2.value = dstr; // "before tomorrow" = every read article again
 dinp2.dispatchEvent(new window.Event('change', { bubbles: true }));
-await settle(120);
+await settle(500); // past the 250 ms date-picker debounce
 ok(rowCount() === rowsBeforeMarkAll, '"before tomorrow" restore clears the navigation reads before the folder test');
 
 console.log('folder click selects, chevron expands');
@@ -645,6 +728,11 @@ console.log('4chan catalog → articles (4chan.mjs)');
   ok(a.author === null, 'Anonymous posts carry no author');
   ok(a.id === chan.chanThreadToArticle(threads[3], { board: 'g', worksafe: true, now: 1 }).id, 'thread ids are stable across fetches');
   ok(chan.chanThreadToArticle(threads[3], { board: 't', worksafe: false }).link.startsWith('https://boards.4chan.org/t/'), 'non-worksafe boards link to 4chan.org');
+  const q = chan.chanThreadToArticle({ no: 107, time: 1745000000, sub: 'quotelink test', com: '<a href="#p106" class="quotelink">&gt;&gt;106</a><br><span class="quote">&gt;implying this works</span>', replies: 320 }, { board: 'g', worksafe: true, now: 1746000000000 });
+  ok(q.content.includes('href="https://boards.4channel.org/g/thread/107#p106"'), 'same-thread quotelinks rewrite to absolute URLs (no more 404s off github.io)');
+  ok(q.content.includes('<blockquote>&gt;implying this works</blockquote>'), 'greentext becomes a styled blockquote');
+  const xq = chan.chanThreadToArticle({ no: 108, time: 1745000000, com: '<a href="/v/thread/99#p1">cross</a>', replies: 5 }, { board: 'g', worksafe: true });
+  ok(xq.content.includes('href="https://boards.4chan.org/v/thread/99#p1"'), 'cross-board quotelinks go absolute too');
   const noSub = chan.chanThreadToArticle(threads[5], { board: 'g', worksafe: true });
   ok(noSub.title === 'pc building thread edition', 'no subject → first comment line is the title');
   const fetchMod = await import('./fetch.mjs');
@@ -678,6 +766,26 @@ console.log('Hacker News → articles (hackernews.mjs)');
   ok(ask.summary.includes('10 points'), 'summary carries stats when there is no story text');
   const fetchMod2 = await import('./fetch.mjs');
   ok(fetchMod2.feedFilterDrop(a, { include: null, exclude: fetchMod2.compileBlockSrv({ title: ['show hn'] }) }) === true, 'word filters work on HN stories like any feed');
+}
+
+console.log('fetch.mjs pure helpers (entity decode, linkify, ids, matchers)');
+{
+  const fetchMod = await import('./fetch.mjs');
+  ok(fetchMod.stripTags('Don&#8217;t &mdash; a &amp; b &quot;q&quot; &#39;s&#39;') === 'Don\u2019t \u2014 a & b "q" \'s\'', 'entity decode: numeric + named decoded, &amp; last (no double-decode, no stray ";")');
+  ok(fetchMod.pickContent({ content: '<img src="https://x.example/a.jpg"> look' }).includes('<img src="https://x.example/a.jpg">'), 'linkify never touches markup attributes (img src intact)');
+  const p2 = fetchMod.pickContent({ content: 'watch https://youtu.be/abc12345 now' });
+  ok(p2.includes('<a href="https://youtu.be/abc12345">') && !p2.includes('now</a>'), 'plain-text URLs linkify; trailing words stay out of the href');
+  const p3 = fetchMod.pickContent({ content: 'see (https://a.dev/page) end' });
+  ok(p3.includes('href="https://a.dev/page"') && p3.includes(') end'), 'a closing paren stays out of the href');
+  ok(fetchMod.stableId('guid-x') === fetchMod.stableId('guid-x') && fetchMod.stableId('a') !== fetchMod.stableId('b'), 'stableId is deterministic and title-independent');
+  const reCi = fetchMod.compileMatcherSrv('/pc build/');
+  ok(reCi('PC BUILD') === true, 'regex without flags stays case-insensitive');
+  const reFlagged = fetchMod.compileMatcherSrv('/pc build/m');
+  ok(reFlagged('PC BUILD') === true, 'an explicit flag no longer silently drops the default i');
+  const bAliased = fetchMod.compileBlockSrv({ authors: ['alice'], links: ['example.com'] });
+  ok(!!bAliased && bAliased.author?.length === 1 && bAliased.link?.length === 1, 'per-feed filters accept BOTH author/authors and link/links spellings');
+  ok(fetchMod.feedFilterDrop({ title: 't', content: '', author: 'alice', link: 'https://example.com/x' }, { include: bAliased }) === false, 'aliased fields match');
+  ok(fetchMod.feedFilterDrop({ title: 't', content: '', author: 'bob', link: 'https://other.dev/' }, { include: bAliased }) === true, 'aliased-field miss drops');
 }
 
 console.log('Hacker News deep windows — Algolia\'s 1000-hit cap splits into date ranges');
@@ -725,6 +833,9 @@ console.log('Hacker News deep windows — Algolia\'s 1000-hit cap splits into da
   let one = 0;
   const single = await hn.hnFetchAllPages(async () => { one++; return { ok: true, status: 200, json: async () => ({ hits: mk(1, 42), nbHits: 42 }) }; }, { minPoints: 150 }, { retentionDays: 30, now: NOW });
   ok(one === 1 && single.hits.length === 42 && !single.truncated, 'an untruncated window stays a single request');
+  let fpCalls = 0;
+  const fp = await hn.hnFetchAllPages(async () => { fpCalls++; return { ok: true, status: 200, json: async () => ({ hits: mk(1, 30), nbHits: 30 }) }; }, {}, { retentionDays: 30, now: NOW });
+  ok(fpCalls === 1 && fp.hits.length === 30 && !fp.truncated, 'no-caps front_page queries never split (the URL ignores ranges — splitting would refetch and duplicate)');
   ok(hn.hnApiUrl({ minPoints: 150 }, { retentionDays: 60, now: NOW }).includes(`created_at_i%3E${START}`), 'window bound derives from retentionDays');
   const sliced = hn.hnApiUrl({ minPoints: 150 }, { retentionDays: 60, now: NOW, fromSec: START, toSec: NOWS - 30 * 86400 });
   ok(sliced.includes('created_at_i%3C%3D'), 'range slicing encodes the closed upper bound');

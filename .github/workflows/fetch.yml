@@ -29,20 +29,26 @@ jobs:
     timeout-minutes: 15
     steps:
       # Scheduled runs first check the age of the published data — fresh data
-      # (<45 min) means the previous slot already refreshed, so this run exits
+      # (<40 min) means the previous slot already refreshed, so this run exits
       # in ~20 s without touching any upstream feed. Push/dispatch skip the
       # gate entirely and always deploy.
       - name: Check data freshness (schedule runs only)
         if: github.event_name == 'schedule'
         run: |
           set -e
-          TS=$(curl -fsSL --max-time 20 "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/gh-pages/data/index.json" 2>/dev/null \
+          # The Authorization header makes this work on private repos too
+          # (raw.githubusercontent 404s unauthenticated there, which used to
+          # force a full fetch every slot).
+          TS=$(curl -fsSL --max-time 20 -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/gh-pages/data/index.json" 2>/dev/null \
             | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const t=JSON.parse(s).generatedAt;console.log(Number(t)||"")}catch{console.log("")}})' || true)
           if [ -n "$TS" ] && [ "$TS" -gt 0 ] 2>/dev/null; then
             AGE=$(( ($(date -u +%s%3N) - TS) / 60000 ))
             echo "Published data age: ${AGE} min"
-            if [ "$AGE" -lt 45 ]; then
-              echo "Data is fresh (<45 min) — nothing to do."
+            # 40, not 45: slots are 15 min apart and integer division truncates —
+            # a 45-min gate let a run 44.9 min old count as "fresh" and skip,
+            # drifting the real cadence to 60-75 min.
+            if [ "$AGE" -lt 40 ]; then
+              echo "Data is fresh (<40 min) — nothing to do."
               echo "SKIP_FETCH=true" >> "$GITHUB_ENV"
             fi
           else
@@ -53,7 +59,7 @@ jobs:
         if: env.SKIP_FETCH != 'true'
         uses: actions/checkout@v4
 
-      - name: Fetch previous data (for 30-day accumulation)
+      - name: Fetch previous data (retention accumulation)
         if: env.SKIP_FETCH != 'true'
         run: |
           git fetch origin gh-pages --depth=1 2>/dev/null || true
@@ -66,12 +72,16 @@ jobs:
         if: env.SKIP_FETCH != 'true'
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22 # Node 20 is past EOL
           cache: npm
 
       - name: Install deps
         if: env.SKIP_FETCH != 'true'
         run: npm ci
+
+      - name: Smoke test (UI + fetcher units)
+        if: env.SKIP_FETCH != 'true'
+        run: npm run test:ui
 
       - name: Fetch feeds
         if: env.SKIP_FETCH != 'true'
@@ -87,6 +97,11 @@ jobs:
           cp config.json _site/
           cp -r data _site/
           touch _site/.nojekyll
+          # Content-addressed cache-buster: same assets → same ?v= (browsers keep
+          # their cache), any asset change flips it. No more hand-bumped dates
+          # serving stale app.js after deploys.
+          ASSET_SHA=$( { sha256sum _site/index.html; find _site/assets -type f -print0 | sort -z | xargs -0 sha256sum; } | sha256sum | cut -c1-10 )
+          sed -i -E "s/(\?v=)[^\"]*/\1$ASSET_SHA/g" _site/index.html
 
       - name: Publish to gh-pages branch
         if: env.SKIP_FETCH != 'true'
@@ -98,10 +113,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          if git diff --cached --quiet; then
-            echo "No site changes."
-            exit 0
-          fi
-          git commit -m "chore: refresh feed data [skip ci]"
+          # A fresh `git init` always has staged changes (per-feed statuses and
+          # timestamps regenerate every run), so the old no-change branch was
+          # dead code — commit and push unconditionally.
+          git commit -m "chore: refresh feed data"
           git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git push --force origin gh-pages
