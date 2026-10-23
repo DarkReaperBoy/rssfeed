@@ -37,7 +37,7 @@ There is no settings modal and no database: **you configure everything by editin
     "retentionDays": 30,           // fetcher prunes everything older (read and unread alike)
     "markReadOnOpen": true,        // opening an article marks it read
     "markReadAfterSeconds": 0,     // …after a delay instead (cancelled if you close it first)
-    "refreshMinutes": 60,          // UI polls data/index.json for refreshes
+    "refreshMinutes": 5,           // UI polls for new data on this wall-clock grid (min 5) — aligned to the hourly fetch
     "fullTextDefault": false,      // extract full article text for every feed (unless feed.fullText overrides)
     "dropShorts": true,            // YouTube: drop Shorts (per-feed "dropShorts": false opts a channel back in)
     "density": "comfort",          // list density: comfort | compact | ultra
@@ -175,7 +175,9 @@ Don't want to hand-write feeds? Export OPML from Inoreader (or any reader), save
 ## Features
 
 - Folders + feeds with live unread counts (folder & global totals) — **click any counter to mark that section read** (with Undo). The **Newsfeed and Today ticks work too** — hover the count, click the ✓
-- **Mark-all flips to mark-as-unread**: when a feed/folder/newsfeed is fully caught up ("All caught up 🎉"), the SAME top ✓ button becomes *Mark all as unread* — one confirmed click un-marks everything (or use the ▾ menu's "Older than…" entries to restore by age). Marked a whole folder read by accident? It's recoverable
+- **Mark by age or exact date, both directions**: the ✓ ▾ menu has explicit **Mark as read** and **Mark as unread** groups — each with *Older than a day / two days / a week / a month* presets and a **“Before… <date>”** picker. “Mark as unread → Older than two days” works in ANY state, not just when caught up
+- **Caught-up flip**: when a feed/folder/newsfeed is fully read ("All caught up 🎉"), the SAME top ✓ button becomes *Mark all as unread* — one confirmed click un-marks everything. Marked a whole folder read by accident? It's recoverable
+- **Hourly auto-sync, aligned to CI**: the Action fetches at :00 and publishes ~:01–:03; open tabs poll on a 5-minute wall-clock grid (`refreshMinutes`), so new articles land within ~5 minutes — announced with a toast, your open article and reading position untouched. A backgrounded tab catches up the moment you focus it
 - **Unread is sacred**: nothing marks an article read except you (open, the tick button, bulk, or a `markRead` filter); `keepUnread` filters — and your explicit "keep unread" flags — beat all of it
 - **Single read-state indicator**: the tick button on each row (✓ = read, ○ = unread); the reader title links to the original article
 - **No vanishing rows**: an article you just read stays in the Unread view (ticked) until you open another article or change the view
@@ -192,6 +194,7 @@ Don't want to hand-write feeds? Export OPML from Inoreader (or any reader), save
 - Search with operators: `feed:bbc title:ai before:2026-01-01 after:2025-12-01 unread:true is:read is:unread`, plus `OR` groups
 - Full-text search across titles, authors, summaries and article bodies
 - Multiple select (bulk mark read/unread with undo), badge-click mark-read with undo, mark-all with confirm
+- **Keyboard**: `j`/`k` = next/previous article, `Escape` closes the reader/menus — typing in an input never triggers them
 - **Every preference lives in config.json** (see the settings block above) — re-read on every load; your own UI toggles (layout, status, date, sort, show-filtered, multi-select) persist in localStorage
 - **4chan boards**: any board as a feed, reply-count windows, sticky/closed skipping, per-board word filters, live thread lists, thumbnails — no API key, just `type: "4chan"`
 - **Hacker News**: point + comment caps (AND when both set, either one alone, live front page when neither), word filters, retention-merged stories with current points/comments — `type: "hackernews"`

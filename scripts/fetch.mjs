@@ -154,6 +154,26 @@ async function fetchText(url, { maxBytes = 5_000_000 } = {}) {
   return buf.toString('utf8');
 }
 
+/* One retry for transient upstream blips (upstreams like YouTube/Blogger 404 or
+   429 randomly for a few hours a day from datacenter IPs). A fresh AbortSignal
+   per attempt keeps the full timeout budget on the second try; on final failure
+   the caller keeps the previously stored articles, so a bad hour never wipes a
+   feed. */
+async function fetchWithRetry(url, makeOpts, { tries = 2, backoffMs = 3000 } = {}) {
+  let lastErr;
+  for (let attempt = 0; attempt < tries; attempt++) {
+    if (attempt) await sleep(backoffMs * attempt);
+    try {
+      const res = await fetch(url, makeOpts());
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res;
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr;
+}
+
 async function extractFullText(link) {
   if (!/^https?:\/\//.test(link || '')) return null;
   const html = await fetchText(link);
@@ -530,11 +550,10 @@ async function main() {
       const { minPoints, minComments } = hnFeedOptions(feed);
       let json;
       try {
-        const res = await fetch(hnApiUrl(feed, { retentionDays, now }), {
+        const res = await fetchWithRetry(hnApiUrl(feed, { retentionDays, now }), () => ({
           headers: { 'User-Agent': UA, Accept: 'application/json' },
           signal: AbortSignal.timeout(35000), redirect: 'follow',
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        }));
         json = await res.json();
       } catch (err) {
         failures++;
@@ -577,8 +596,7 @@ async function main() {
 
     let xml;
     try {
-      const res = await fetch(feed.url, { headers: parser.options.headers, signal: AbortSignal.timeout(35000), redirect: 'follow' });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const res = await fetchWithRetry(feed.url, () => ({ headers: parser.options.headers, signal: AbortSignal.timeout(35000), redirect: 'follow' }));
       xml = await res.text();
     } catch (err) {
       failures++;

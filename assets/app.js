@@ -35,6 +35,7 @@ const state = {
   loading: new Set(),
   settled: new Set(), // feeds that finished loading (or failed) — mark-mode sync waits for these
   refreshTimer: null,
+  lastPollAt: 0,
   bulkSel: new Set(),
 };
 
@@ -330,10 +331,11 @@ function computeVisible() {
       : dir * (x.date - y.date);
   });
   // The currently open article stays visible even once it stops matching
-  // (e.g. marked read under the "Unread" filter) until it is collapsed.
+  // (e.g. marked read under the "Unread" filter) until it is collapsed —
+  // EXCEPT under an active search: a query narrows the list to exact matches.
   if (state.expandedId && !out.some((a) => a.id === state.expandedId)) {
     const open = findArticle(state.expandedId);
-    if (open && !open._f?.hidden && scopeFilter(open) && dateRangeFilter(open)) out.push(open);
+    if (open && !open._f?.hidden && !state.search && scopeFilter(open) && dateRangeFilter(open)) out.push(open);
     // a vanished or hidden open article is dropped — renderList clears it + the URL hash
   }
   state.visible = out;
@@ -590,7 +592,7 @@ function renderEmpty(visible) {
     el.innerHTML = `<h3>No matches</h3><p>Nothing matched <code>${esc(state.search)}</code> in this view.<br>Operators: <code>feed:name</code> <code>title:word</code> <code>before:2026-01-01</code> <code>after:2026-01-01</code> <code>unread:true</code> <code>is:read</code></p>`;
   } else if (ui.status === 'unread') {
     const caughtUp = !state.search && ui.dateRange === 'all' && allReadInScope();
-    el.innerHTML = `<h3>All caught up 🎉</h3><p>No unread articles here${ui.dateRange !== 'all' ? ' for this time range' : ''}.</p>${caughtUp ? '<p class="empty-hint">Marked everything read by accident? The ✓ button up top now marks articles as unread.</p>' : ''}`;
+    el.innerHTML = `<h3>All caught up 🎉</h3><p>No unread articles here${ui.dateRange !== 'all' ? ' for this time range' : ''}.</p>${caughtUp ? '<p class="empty-hint">Over-marked? The ✓ button flips to <em>Mark as unread</em>, and the ✓ ▾ menu restores by age or an exact date — even while new articles are still unread.</p>' : ''}`;
   } else {
     el.innerHTML = `<h3>Nothing here</h3><p>No articles in this view. New items arrive when the hourly fetch runs.</p>`;
   }
@@ -696,9 +698,8 @@ function scheduleMarkRead(a) {
   if (delay <= 0) run();
   else state.markTimers.set(a.id, setTimeout(run, delay));
 }
-function collectScopeIds(scope, olderDays = 0) {
+function collectScopeIds(scope, cutoff = 0) {
   let feedIds;
-  const cutoff = olderDays ? Date.now() - olderDays * 864e5 : 0;
   if (scope.startsWith('feed:')) feedIds = [scope.slice(5)];
   else if (scope.startsWith('folder:')) {
     const fid = scope.slice(7);
@@ -715,17 +716,25 @@ function collectScopeIds(scope, olderDays = 0) {
   }
   return ids;
 }
-const OLDER_LABELS = { 1: 'a day', 2: 'two days', 3: 'three days', 7: 'a week', 14: 'two weeks', 21: 'three weeks', 28: 'four weeks' };
-function markScopeRead(scope, olderDays = 0) {
-  const ids = collectScopeIds(scope, olderDays);
+/* Age bounds for the mark actions: either "older than N days" (menu presets)
+   or an explicit "published before <date>" (the Before… date pickers). */
+const OLDER_LABELS = { 1: 'a day', 2: 'two days', 7: 'a week', 31: 'a month' };
+const cutoffFrom = (olderDays = 0, beforeTs = 0) => (beforeTs > 0 ? beforeTs : olderDays > 0 ? Date.now() - olderDays * 864e5 : 0);
+function describeCutoff(olderDays = 0, beforeTs = 0) {
+  if (beforeTs > 0) return ` from before ${new Date(beforeTs).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`;
+  if (olderDays > 0) return ` older than ${OLDER_LABELS[olderDays] || olderDays + ' days'}`;
+  return '';
+}
+function markScopeRead(scope, olderDays = 0, beforeTs = 0) {
+  const what = describeCutoff(olderDays, beforeTs);
+  const ids = collectScopeIds(scope, cutoffFrom(olderDays, beforeTs));
   if (!ids.length) {
-    showToast(olderDays ? 'Nothing older than that — everything here is read' : 'Nothing to mark — everything here is read');
+    showToast(olderDays || beforeTs ? `No unread articles${what} here` : 'Nothing to mark — everything here is read');
     return;
   }
   const snapshot = ids.map((id) => ({ id, ts: state.read[id] }));
   for (const id of ids) state.read[id] = Date.now();
-  saveRead(); clearHashArticle(); state.expandedId = null; state.keepVisible.clear(); renderTree(); renderList();
-  const what = olderDays ? ` older than ${OLDER_LABELS[olderDays] || olderDays + ' days'}` : '';
+  saveRead(); state.keepVisible.clear(); renderTree(); renderList();
   showToast(`Marked ${ids.length} article${ids.length === 1 ? '' : 's'}${what} as read`, 'Undo', () => {
     for (const { id, ts } of snapshot) { if (ts) state.read[id] = ts; else delete state.read[id]; }
     saveRead(); renderTree(); renderList();
@@ -764,8 +773,7 @@ function allReadInScope() {
   if (ids.some((id) => !state.settled.has(id))) return false; // feeds still loading — keep the read mode
   return scopeUnreadCount(state.scope) === 0;
 }
-function collectScopeReadIds(scope, olderDays = 0) {
-  const cutoff = olderDays ? Date.now() - olderDays * 864e5 : 0;
+function collectScopeReadIds(scope, cutoff = 0) {
   const ids = [];
   for (const feedId of feedIdsInScope()) {
     for (const a of state.feeds.get(feedId) || []) {
@@ -777,17 +785,17 @@ function collectScopeReadIds(scope, olderDays = 0) {
   }
   return ids;
 }
-function markScopeUnread(scope, olderDays = 0) {
-  const ids = collectScopeReadIds(scope, olderDays);
+function markScopeUnread(scope, olderDays = 0, beforeTs = 0) {
+  const what = describeCutoff(olderDays, beforeTs);
+  const ids = collectScopeReadIds(scope, cutoffFrom(olderDays, beforeTs));
   if (!ids.length) {
-    showToast(olderDays ? 'Nothing older than that is read here' : 'Nothing to restore — no read articles here');
+    showToast(olderDays || beforeTs ? `No read articles${what} here` : 'Nothing to restore — no read articles here');
     return;
   }
   const snapshot = ids.map((id) => ({ id, ts: state.read[id] }));
   for (const id of ids) delete state.read[id];
   state.keepVisible.clear();
   saveRead(); renderTree(); renderList();
-  const what = olderDays ? ` older than ${OLDER_LABELS[olderDays] || olderDays + ' days'}` : '';
   showToast(`Marked ${ids.length} article${ids.length === 1 ? '' : 's'}${what} as unread`, 'Undo', () => {
     for (const { id, ts } of snapshot) { if (ts) state.read[id] = ts; else delete state.read[id]; }
     saveRead(); renderTree(); renderList();
@@ -802,10 +810,8 @@ function syncMarkButtons() {
   if (use) use.setAttribute('href', caughtUp ? '#i-unread' : '#i-read');
   const split = $('#btn-mark-all-split');
   if (split) split.title = caughtUp ? 'Mark as unread articles' : 'Mark as read articles';
-  const label = $('#mark-menu .mark-label');
-  if (label) label.textContent = caughtUp ? 'Mark as unread articles' : 'Mark as read articles';
-  const menu = $('#mark-menu');
-  if (menu) menu.dataset.mode = caughtUp ? 'unread' : 'read';
+  // The ▾ menu itself is mode-independent (explicit read/unread groups) — only
+  // the main button flips when the scope is fully caught up.
 }
 
 function updateBulkBar() {
@@ -1082,17 +1088,34 @@ function bindEvents() {
 
   $('#btn-mark-all').addEventListener('click', markAllAsReadInScope);
   $('#btn-mark-all-split').addEventListener('click', (e) => {
-    e.stopPropagation(); // their ▾ opens the "Mark as read articles" menu (ss2)
+    e.stopPropagation(); // their ▾ opens the mark menu (ss2)
     $('#mark-menu').classList.toggle('hidden');
   });
+  // Every menu item states its own direction (explicit read/unread groups) —
+  // no hidden mode. Lazy feeds in the scope are loaded first so the action
+  // covers exactly what the badges count.
+  const applyMark = async (fn, olderDays, beforeTs) => { await ensureScopeLoaded(); fn(state.scope, olderDays, beforeTs); };
   $('#mark-menu').addEventListener('click', (e) => {
+    if (e.target.tagName === 'INPUT') return; // date pickers act on change
+    const custom = e.target.closest('[data-custom]');
+    if (custom) { // "Before…" row → open its date picker
+      const inp = custom.querySelector('input');
+      if (inp) { inp.focus(); try { inp.showPicker?.(); } catch {} }
+      return;
+    }
     const item = e.target.closest('[data-older]');
     if (!item) return;
     $('#mark-menu').classList.add('hidden');
-    const older = Number(item.dataset.older);
-    if ($('#mark-menu').dataset.mode === 'unread') markScopeUnread(state.scope, older); // caught up: restore by age
-    else markScopeRead(state.scope, older);
+    applyMark(item.dataset.mark === 'unread' ? markScopeUnread : markScopeRead, Number(item.dataset.older) || 0, 0);
   });
+  const onMarkDate = (mode) => (e) => {
+    const ts = Date.parse(`${e.target.value || ''}T00:00:00`); // local midnight of the picked day
+    if (!e.target.value || Number.isNaN(ts)) return;
+    $('#mark-menu').classList.add('hidden');
+    applyMark(mode === 'unread' ? markScopeUnread : markScopeRead, 0, ts);
+  };
+  $('#mark-date-read').addEventListener('change', onMarkDate('read'));
+  $('#mark-date-unread').addEventListener('change', onMarkDate('unread'));
   $('#sort-items').addEventListener('click', (e) => {
     const item = e.target.closest('[data-sort]');
     if (!item) return;
@@ -1150,6 +1173,19 @@ function bindEvents() {
     document.body.classList.remove('sidebar-open');
     $('#scrim')?.classList.add('hidden');
     if (state.expandedId) closeViaHash(); // closing keeps the row in place and clears the hash
+  });
+  // j/k: Inoreader-style next/previous article (skips typing contexts).
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'j' && e.key !== 'k') return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const t = e.target;
+    if (t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable)) return;
+    if (!state.visible.length) return;
+    const i = state.expandedId ? state.visible.findIndex((a) => a.id === state.expandedId) : -1;
+    const target = e.key === 'j'
+      ? state.visible[Math.min(state.visible.length - 1, i + 1)]
+      : state.visible[Math.max(0, i - 1)];
+    if (target && target.id !== state.expandedId) openViaHash(target.id);
   });
 }
 
@@ -1218,14 +1254,21 @@ function confirmDialog(title, text, onYes) {
   yes.focus();
 }
 
-/* ---------------- refresh / polling ---------------- */
+/* ---------------- refresh / polling ----------------
+   The Action fetches at :00 sharp and publishes around :01–:03, so polls run on
+   a WALL-CLOCK grid (period = refreshMinutes, min 5) — new data is picked up on
+   the next boundary tick (:05 with the default), not "an hour after the tab
+   happened to load". Tabs left open in the background catch up on focus. */
 async function refresh(manual = false) {
+  state.lastPollAt = Date.now();
   try {
     const index = await fetchJson('data/index.json');
     const changed = index.generatedAt !== state.index?.generatedAt;
     state.index = index;
-    if (!changed && !manual) return; // poll only re-downloads payloads when data actually changed
+    if (!changed && !manual) { renderTree(); return; } // cheap poll: only freshen feed status icons
     // Prefer the consolidated single-request payload for speed.
+    const beforeIds = new Set();
+    for (const arts of state.feeds.values()) for (const a of arts) beforeIds.add(a.id);
     const consolidated = await loadConsolidatedIntoState();
     if (!consolidated) {
       // reload loaded feeds (new articles), keep the rest lazy
@@ -1234,6 +1277,10 @@ async function refresh(manual = false) {
     }
     renderAll();
     flashUpdated();
+    let fresh = 0;
+    for (const arts of state.feeds.values()) for (const a of arts) if (!beforeIds.has(a.id)) fresh++;
+    if (fresh) showToast(`${fresh} new article${fresh === 1 ? '' : 's'} synced`);
+    else if (manual) showToast('Already up to date');
   } catch (err) {
     if (manual) flashUpdated('offline — showing last data');
   }
@@ -1247,9 +1294,21 @@ function flashUpdated(msg) {
   el.title = ts ? fullTime(ts) : '';
 }
 function startPolling() {
-  clearInterval(state.refreshTimer);
-  const mins = Math.max(5, Number(state.config?.settings?.refreshMinutes) || 60);
-  state.refreshTimer = setInterval(() => refresh(false), mins * 60000);
+  clearTimeout(state.refreshTimer);
+  const period = Math.max(5, Number(state.config?.settings?.refreshMinutes) || 5) * 60000;
+  const schedule = () => {
+    const delay = period - (Date.now() % period) + 2500; // next wall-clock boundary + 2.5s
+    state.refreshTimer = setTimeout(async () => {
+      if (document.visibilityState === 'visible') await refresh(false); // hidden tabs idle (battery)
+      schedule();
+    }, delay);
+  };
+  schedule();
+  // Returning to a backgrounded tab: catch up immediately if the grid missed.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    if (!state.lastPollAt || Date.now() - state.lastPollAt > period) refresh(false);
+  });
 }
 async function ensureScopeLoaded() {
   const ids = feedIdsInScope().filter((id) => !state.feeds.has(id));
@@ -1263,10 +1322,19 @@ async function loadConsolidatedIntoState() {
   try {
     const allData = await fetchJson('data/all-feeds.json');
     if (!Array.isArray(allData?.articles) || !allData.articles.length || !state.index?.feeds) return false;
+    // Same id + same content keeps the article's original fetchedAt, so the open
+    // reader pane (and a playing embed) is NOT rebuilt when a sync lands.
+    const prevById = new Map();
+    for (const arts of state.feeds.values()) for (const a of arts) prevById.set(a.id, a);
     const grouped = new Map();
     for (const a of allData.articles) {
       const feedId = a._feed;
       if (!feedId) continue;
+      const old = prevById.get(a.id);
+      if (old && old.content === a.content && old.title === a.title && old.link === a.link
+        && old.summary === a.summary && (old.enclosures || []).length === (a.enclosures || []).length) {
+        a.fetchedAt = old.fetchedAt || a.fetchedAt;
+      }
       if (!grouped.has(feedId)) grouped.set(feedId, []);
       grouped.get(feedId).push(a);
     }
@@ -1276,6 +1344,10 @@ async function loadConsolidatedIntoState() {
       state.feeds.set(feedId, arts);
       state.settled.add(feedId);
     }
+    // Every configured feed is settled after a consolidated load — a feed with
+    // ZERO articles (brand-new, or emptied by upstream 404s) must never block
+    // the caught-up flip that allReadInScope() waits on.
+    for (const id of Object.keys(state.index.feeds)) state.settled.add(id);
     const feedsMeta = { ...state.index.feeds };
     for (const [feedId, arts] of state.feeds.entries()) {
       const meta = feedsMeta[feedId];

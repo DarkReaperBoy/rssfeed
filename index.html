@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="assets/styles.css?v=20261023">
+<link rel="stylesheet" href="assets/styles.css?v=20261024">
 </head>
 <body>
 
@@ -94,14 +94,22 @@
                 <button id="btn-mark-all-split" class="btn-heading btn-split" title="Mark as read articles"><svg><use href="#i-chevron"/></svg></button>
               </div>
               <div id="mark-menu" class="dropdown dropdown-mark hidden">
-                <div class="mark-label">Mark as read articles</div>
-                <button class="dropdown-item" data-older="1">Older than a day</button>
-                <button class="dropdown-item" data-older="2">Older than two days</button>
-                <button class="dropdown-item" data-older="3">Older than three days</button>
-                <button class="dropdown-item" data-older="7">Older than a week</button>
-                <button class="dropdown-item" data-older="14">Older than two weeks</button>
-                <button class="dropdown-item" data-older="21">Older than three weeks</button>
-                <button class="dropdown-item" data-older="28">Older than four weeks</button>
+                <!-- Explicit two-group menu: every age action states its direction.
+                     No hidden mode state — "Mark as unread → Older than…" works in ANY
+                     scope state, not just when fully caught up. -->
+                <div class="mark-label">Mark as read</div>
+                <button class="dropdown-item" data-mark="read" data-older="1">Older than a day</button>
+                <button class="dropdown-item" data-mark="read" data-older="2">Older than two days</button>
+                <button class="dropdown-item" data-mark="read" data-older="7">Older than a week</button>
+                <button class="dropdown-item" data-mark="read" data-older="31">Older than a month</button>
+                <div class="dropdown-item mark-custom" data-custom="read">Before… <input type="date" id="mark-date-read" title="Mark articles published before this date as read"></div>
+                <div class="dropdown-line"></div>
+                <div class="mark-label">Mark as unread</div>
+                <button class="dropdown-item" data-mark="unread" data-older="1">Older than a day</button>
+                <button class="dropdown-item" data-mark="unread" data-older="2">Older than two days</button>
+                <button class="dropdown-item" data-mark="unread" data-older="7">Older than a week</button>
+                <button class="dropdown-item" data-mark="unread" data-older="31">Older than a month</button>
+                <div class="dropdown-item mark-custom" data-custom="unread">Before… <input type="date" id="mark-date-unread" title="Mark articles published before this date as unread"></div>
               </div>
             </div>
 
@@ -201,6 +209,6 @@
   </div>
 </div>
 
-<script src="assets/app.js?v=20261023"></script>
+<script src="assets/app.js?v=20261024"></script>
 </body>
 </html>

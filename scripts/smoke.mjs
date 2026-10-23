@@ -73,11 +73,17 @@ const html = (await fs.readFile(path.join(ROOT, 'index.html'), 'utf8'))
 const dom = new JSDOM(html, { url: 'https://example.test/', runScripts: 'outside-only', pretendToBeVisual: true });
 const { window } = dom;
 
+let dataFlip = false; // flipped during the sync test: the mock "publishes" new data
 window.fetch = async (url) => {
   const p = String(url).split('?')[0];
   if (p === 'config.json') return { ok: true, status: 200, json: async () => structuredClone(config) };
-  if (p === 'data/index.json') return { ok: true, status: 200, json: async () => structuredClone(index) };
-  if (p === 'data/all-feeds.json') return { ok: true, status: 200, json: async () => structuredClone(allFeeds) };
+  if (p === 'data/index.json') return { ok: true, status: 200, json: async () => structuredClone(dataFlip ? { ...index, generatedAt: now + 45 * 60000 } : index) };
+  if (p === 'data/all-feeds.json') {
+    const payload = dataFlip
+      ? { articles: [...allFeeds.articles, { ...allFeeds.articles[0], id: 'fixture-hn-fresh', title: 'Fresh synced story', date: now + 40 * 60000, summary: 'Fresh synced story' }] }
+      : allFeeds;
+    return { ok: true, status: 200, json: async () => structuredClone(payload) };
+  }
   const m = p.match(/^data\/feeds\/(.+)\.json$/);
   if (m && FIX[m[1]]) return { ok: true, status: 200, json: async () => structuredClone({ articles: FIX[m[1]].articles }) };
   return { ok: false, status: 404, statusText: 'Not Found', json: async () => { throw new Error('404'); } };
@@ -178,13 +184,32 @@ console.log('mark-all split');
 click('#btn-mark-all-split');
 await settle(20);
 ok(!$('#mark-menu').classList.contains('hidden'), 'mark menu opens');
-click('#mark-menu [data-older="1"]');
-await settle(50);
+click('#mark-menu [data-mark="read"][data-older="1"]');
+await settle(80);
 ok($('#toast-text').textContent.includes('3 article'), 'older-than-a-day marks exactly 3 articles');
-ok(rowCount() === TOTAL - HIDDEN - 4, 'marked articles re-filter out of the unread view');
+ok(rowCount() === TOTAL - HIDDEN - 3, 'marked articles re-filter out — the open one stays pinned in place');
 click($('#toast-action'));
 await settle(50);
 ok(rowCount() === TOTAL - HIDDEN - 1, 'undo restores the rows');
+
+console.log('mark-as-unread by age — explicit group, no caught-up requirement');
+// The user bug: "older than" silently dispatched by a hidden mode that only
+// flipped when everything was read. The menu is now explicit — restoring by
+// age must work right here, while most articles are still UNREAD.
+ok($('#btn-mark-all').title === 'Mark all as read', 'scope is NOT caught up (newer articles still unread)');
+ok($$('#mark-menu [data-mark="read"]').length === 4, 'explicit "Mark as read" age group present');
+ok($$('#mark-menu [data-mark="unread"]').length === 4, 'explicit "Mark as unread" age group present');
+ok(!!$('#mark-date-unread') && !!$('#mark-date-read'), 'custom "Before…" date pickers present');
+click('#btn-mark-all-split');
+await settle(20);
+click('#mark-menu [data-mark="unread"][data-older="1"]');
+await settle(80);
+ok($('#toast-text').textContent.includes('older than a day as unread'), 'unread-older-than restores while NOT caught up');
+ok($('#toast-text').textContent.includes('1 article'), 'restores exactly the one read day-old article');
+ok(rowCount() === TOTAL - HIDDEN, 'the restored article is back in the unread view');
+click($('#toast-action'));
+await settle(50);
+ok(rowCount() === TOTAL - HIDDEN - 1, 'undo puts the state back');
 
 console.log('search');
 click('#search-open');
@@ -269,8 +294,8 @@ ok(rowCount() === 0, 'badge tick marks the whole Newsfeed read');
 ok($('#empty').textContent.includes('All caught up'), 'empty state says "All caught up 🎉"');
 ok(!!$('#empty .empty-hint'), 'caught-up hint points at the flipped button');
 ok($('#btn-mark-all').title === 'Mark all as unread', 'the SAME button flips to "Mark all as unread"');
-ok($('#mark-menu .mark-label').textContent === 'Mark as unread articles', 'dropdown label flips to "Mark as unread articles"');
-ok($('#mark-menu').dataset.mode === 'unread', 'mark menu carries the unread mode');
+ok($$('#mark-menu .mark-label')[0].textContent === 'Mark as read', 'menu keeps its explicit read group while caught up');
+ok($$('#mark-menu .mark-label')[1].textContent === 'Mark as unread', 'menu keeps its explicit unread group while caught up');
 click('#btn-mark-all');
 await settle(20);
 ok(!$('#confirm-modal').classList.contains('hidden'), 'mark-as-unread asks for confirmation');
@@ -285,9 +310,8 @@ await settle(50);
 ok(rowCount() === 0, 'badge tick re-marks everything read');
 click('#btn-mark-all-split');
 await settle(20);
-ok($('#mark-menu .mark-label').textContent === 'Mark as unread articles', 'split menu label in unread mode');
-click('#mark-menu [data-older="1"]');
-await settle(50);
+click('#mark-menu [data-mark="unread"][data-older="1"]');
+await settle(80);
 ok($('#toast-text').textContent.includes('older than a day as unread'), 'older-than items restore by age in unread mode');
 ok(rowCount() === 4, 'only the day-old articles came back unread');
 click('#btn-mark-all'); // 4 unread left → read mode again
@@ -300,6 +324,75 @@ await settle(20);
 click('#confirm-yes');
 await settle(50);
 ok(rowCount() === rowsBeforeMarkAll, 'back to unread after the second restore');
+
+console.log('custom "Before…" date picker');
+click('#badge-all-items'); // everything read again
+await settle(50);
+ok(rowCount() === 0, 'badge tick re-marks everything read for the date test');
+const t = new Date(now + 864e5);
+const dstr = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+const dinp = $('#mark-date-unread');
+dinp.value = dstr; // "before tomorrow" = every article
+dinp.dispatchEvent(new window.Event('change', { bubbles: true }));
+await settle(120);
+ok($('#toast-text').textContent.includes('as unread'), 'date picker action runs');
+ok($('#toast-text').textContent.includes(new Date(`${dstr}T00:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })), 'toast names the picked date');
+ok(rowCount() === rowsBeforeMarkAll, '"before tomorrow" restores every read article');
+
+click('#btn-mark-all-split');
+await settle(20);
+click('#mark-menu [data-mark="read"][data-older="31"]');
+await settle(120);
+ok($('#toast-text').textContent.includes('No unread articles older than a month here'), 'read-side zero toast explains itself');
+ok(rowCount() === rowsBeforeMarkAll, 'a month cutoff matches nothing in the fixtures (all within ~2 days)');
+
+console.log('j/k keyboard navigation');
+const idsNow = $$('#list .row').map((r) => r.dataset.id);
+window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'j', bubbles: true }));
+await settle(80);
+ok($('#reader-slot .reader')?.dataset.id === idsNow[0], 'j opens the first visible article when nothing is open');
+window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'j', bubbles: true }));
+await settle(80);
+ok($('#reader-slot .reader')?.dataset.id === idsNow[1], 'j again moves to the next article');
+window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+await settle(60);
+ok(!window.document.body.classList.contains('article-open'), 'Escape closes the reader');
+// open a row further down; k must walk back to the unread article above it
+const rowsMid = $$('#list .row').map((r) => r.dataset.id);
+click(`#list .row[data-id="${rowsMid[3]}"]`);
+await settle(60);
+window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'k', bubbles: true }));
+await settle(80);
+ok($('#reader-slot .reader')?.dataset.id === rowsMid[2], 'k walks back to the unread article above');
+
+click('#btn-mark-all-split');
+await settle(20);
+const emptyDate = $('#mark-date-unread');
+emptyDate.value = '';
+emptyDate.dispatchEvent(new window.Event('change', { bubbles: true }));
+await settle(80);
+ok(!$('#mark-menu').classList.contains('hidden'), 'an empty date pick is a no-op (menu stays)');
+
+console.log('sync: refresh picks up new data + announces it');
+const rowsBeforeSync = rowCount();
+dataFlip = true;
+click('#menu-refresh');
+await settle(500);
+ok($('#toast-text').textContent.includes('1 new article synced'), 'refresh announces the synced article');
+ok($('#last-updated-text').textContent.includes('just now'), 'updated line refreshes');
+ok(rowCount() === rowsBeforeSync + 1, 'the fresh article appears in the list');
+dataFlip = false;
+click('#menu-refresh');
+await settle(500);
+ok($('#toast-text').textContent.includes('Already up to date'), 'manual refresh with unchanged data says "Already up to date"');
+ok(rowCount() === rowsBeforeSync, 'state settles back to the fixture data');
+click('#btn-mark-all-split');
+await settle(20);
+const dinp2 = $('#mark-date-unread');
+dinp2.value = dstr; // "before tomorrow" = every article again
+dinp2.dispatchEvent(new window.Event('change', { bubbles: true }));
+await settle(120);
+ok(rowCount() === rowsBeforeMarkAll, '"before tomorrow" restore clears the navigation reads before the folder test');
 
 console.log('folder click selects, chevron expands');
 const folderSel = '#tree .tree-folder .tree-item[data-folder="tech"]';

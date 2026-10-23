@@ -6,7 +6,7 @@
     "retentionDays": 30,
     "markReadOnOpen": true,
     "markReadAfterSeconds": 0,
-    "refreshMinutes": 60,
+    "refreshMinutes": 5,
     "fullTextDefault": false,
     "dropShorts": true
   },
