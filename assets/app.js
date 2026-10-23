@@ -1069,14 +1069,26 @@ function collectScopeIds(scope, cutoff = 0) {
   }
   return ids;
 }
-/* Age bounds for the mark actions: either "older than N days" (menu presets)
-   or an explicit "published before <date>" (the Before… date pickers). */
+/* Age bounds for the mark actions. The two directions measure DIFFERENT
+   clocks, on purpose:
+   - "Mark as READ older than X" clears the published-older-than-X backlog
+     (Inoreader semantics — publication age);
+   - "Mark as UNREAD older than X" restores reads older than X — READING age
+     (when you read it), not publication age. The old code compared the
+     published date in both directions: an article published three days ago
+     that the user read an HOUR ago went back to unread, and across a 60-day
+     retention window nearly every read article is "published older than two
+     days", so the restore reliably un-read the ENTIRE reading history
+     (user report: "it unreads the whole history instead of that two days").
+     Reading age keeps what you read recently exactly where you left it. */
 const OLDER_LABELS = { 1: 'a day', 2: 'two days', 7: 'a week', 31: 'a month' };
 const cutoffFrom = (olderDays = 0, beforeTs = 0) => (beforeTs > 0 ? beforeTs : olderDays > 0 ? Date.now() - olderDays * 864e5 : 0);
-function describeCutoff(olderDays = 0, beforeTs = 0) {
-  if (beforeTs > 0) return ` from before ${new Date(beforeTs).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`;
-  if (olderDays > 0) return ` older than ${OLDER_LABELS[olderDays] || olderDays + ' days'}`;
-  return '';
+function describeCutoff(olderDays = 0, beforeTs = 0, unread = false) {
+  const when = beforeTs > 0
+    ? ` before ${new Date(beforeTs).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`
+    : olderDays > 0 ? ` more than ${OLDER_LABELS[olderDays] || olderDays + ' days'} ago` : '';
+  if (!when) return '';
+  return unread ? ` you read${when}` : (beforeTs > 0 ? ` from${when}` : ` older than ${OLDER_LABELS[olderDays] || olderDays + ' days'}`);
 }
 /* Oldest article the current scope's data actually contains (from
    index.feeds[*].oldest — the fetcher's retention window). A cutoff older
@@ -1187,6 +1199,10 @@ function allReadInScope() {
 }
 function collectScopeReadIds(scope, cutoff = 0) {
   const ids = [];
+  // The cutoff is READING age — compare the read TIMESTAMP, never the
+  // published date (an article published days ago that you read an hour ago
+  // is a recent read; the old published-date comparison un-read it and, on a
+  // 60-day window, effectively the whole reading history).
   // The recently-read view must restore exactly what it LISTS (read within
   // the window, same filters) — scopeFeedIds() falls through to every feed
   // there, so the old loop un-read the entire reader instead of the view.
@@ -1197,7 +1213,7 @@ function collectScopeReadIds(scope, cutoff = 0) {
         const ts = state.read[a.id] || 0;
         if (ts <= 0 || Date.now() - ts >= RECENTLY_READ_WINDOW) continue;
         if (!dateRangeFilter(a)) continue;
-        if (cutoff && a.date >= cutoff) continue;
+        if (cutoff && ts >= cutoff) continue; // read within the window — the user's recent reading survives
         ids.push(a.id);
       }
     }
@@ -1207,18 +1223,18 @@ function collectScopeReadIds(scope, cutoff = 0) {
     for (const a of state.feeds.get(feedId) || []) {
       if (!isRead(a) || a._f?.hidden) continue; // hidden articles re-read themselves via markRead filters anyway
       if (scope === 'today' && a.date < startOfToday()) continue;
-      if (cutoff && a.date >= cutoff) continue;
+      if (cutoff && (state.read[a.id] || 0) >= cutoff) continue; // read within the window — stays read
       ids.push(a.id);
     }
   }
   return ids;
 }
 function markScopeUnread(scope, olderDays = 0, beforeTs = 0) {
-  const what = describeCutoff(olderDays, beforeTs);
+  const what = describeCutoff(olderDays, beforeTs, true);
   const cutoff = cutoffFrom(olderDays, beforeTs);
   const ids = collectScopeReadIds(scope, cutoff);
   if (!ids.length) {
-    showToast(olderDays || beforeTs ? `No read articles${what} here${boundaryHint(cutoff)}` : 'Nothing to restore — no read articles here');
+    showToast(olderDays || beforeTs ? `No articles${what} here${boundaryHint(cutoff)}` : 'Nothing to restore — no read articles here');
     return;
   }
   const snapshot = ids.map((id) => ({ id, ts: state.read[id], guard: state.userUnread[id] || 0 }));
@@ -1267,12 +1283,21 @@ function syncMarkButtons(forceReset = false) {
       if (lbl) lbl.textContent = caughtUp ? 'Mark as read by age' : 'Mark as unread by age';
     }
   }
-  // In the Today scope the older-than presets are structurally dead — a Today
-  // article is never older than a day — so they can only ever produce "No
-  // articles older than … here" (user report: "mark as unread, older than a x
-  // is broken"). Hide the dead rows; "Before…" stays (a future date works).
-  const today = state.scope === 'today';
-  $$('#mark-menu .dropdown-item[data-older]').forEach((b) => b.classList.toggle('hidden', today));
+  // Structurally dead presets hide (they could only ever toast a zero-result
+  // and read as breakage — user report: "mark as unread, older than a x is
+  // broken"):
+  // - Today scope: a Today article was published (and therefore read) today —
+  //   every older-than row in BOTH groups is dead there;
+  // - Recently read: the view can only list reads from the last 7 days, so
+  //   the unread group's week/month presets (reads older than 7 days) can
+  //   never match — the read group's publication-age presets stay live.
+  // "Before…" stays everywhere (a future date works).
+  const scopeId = state.scope;
+  $$('#mark-menu .dropdown-item[data-older]').forEach((b) => {
+    const dead = scopeId === 'today'
+      || (scopeId === 'recently-read' && b.dataset.mark === 'unread' && Number(b.dataset.older) >= 7);
+    b.classList.toggle('hidden', dead);
+  });
 }
 
 function updateBulkBar() {

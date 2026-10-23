@@ -118,11 +118,13 @@ try {
                 </div>
                 <div id="mark-group-unread" class="hidden">
                   <div class="mark-label">Mark as unread</div>
-                  <button class="dropdown-item" data-mark="unread" data-older="1">Older than a day</button>
-                  <button class="dropdown-item" data-mark="unread" data-older="2">Older than two days</button>
-                  <button class="dropdown-item" data-mark="unread" data-older="7">Older than a week</button>
-                  <button class="dropdown-item" data-mark="unread" data-older="31">Older than a month</button>
-                  <div class="dropdown-item mark-custom" data-custom="unread">Before… <input type="date" id="mark-date-unread" title="Mark articles published before this date as unread"></div>
+                  <!-- The unread direction restores by READING age (when you read
+                       it), not publication age — the labels say so outright. -->
+                  <button class="dropdown-item" data-mark="unread" data-older="1">Read more than a day ago</button>
+                  <button class="dropdown-item" data-mark="unread" data-older="2">Read more than two days ago</button>
+                  <button class="dropdown-item" data-mark="unread" data-older="7">Read more than a week ago</button>
+                  <button class="dropdown-item" data-mark="unread" data-older="31">Read more than a month ago</button>
+                  <div class="dropdown-item mark-custom" data-custom="unread">Before… <input type="date" id="mark-date-unread" title="Mark articles you read before this date as unread"></div>
                 </div>
                 <!-- The inverse direction stays one click away: the menu OPENS
                      offering exactly one group (the flip rule above); this subdued
