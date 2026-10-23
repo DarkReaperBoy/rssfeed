@@ -34,7 +34,7 @@ There is no settings modal and no database: **you configure everything by editin
     "siteName": "My RSSFeed",     // tab title: "(N) siteName - open article title"
     "theme": "auto",               // auto | light | dark
     "view": "list",                // default layout for new visitors: list | expanded | column | cards | magazine
-    "retentionDays": 30,           // fetcher prunes everything older (read and unread alike)
+    "retentionDays": 60,           // fetcher prunes everything older (read and unread alike) — 60 days so "older than a month" restore has real history to work with
     "markReadOnOpen": true,        // opening an article marks it read
     "markReadAfterSeconds": 0,     // …after a delay instead (cancelled if you close it first)
     "refreshMinutes": 5,           // UI polls for new data on this wall-clock grid (min 5) — aligned to the CI refresh
@@ -132,6 +132,7 @@ How the caps work:
 - **only one set** → the unset cap is ignored, only the set one applies
 - **neither set** → no filter: the live HN front page (~30 stories), like visiting the site
 - stories within the last `retentionDays` are queried newest-first; a story that later falls off the front page (or below the caps) lingers for `retentionDays` from its publish date — and its points/comments line stays current because fresh hits replace stored ones by id
+- a window wider than Algolia's hard 1000-hit response cap is **split into date sub-ranges** (the API reports `nbPages: 1` while truncating, so paging cannot reach it) — recursive halving covers the whole window in one run, with a 6-request cap that self-heals on the next hourly run if hit
 - ids are `sha1("hn|<objectID>")` — HN item numbers never change, so deep links and read state survive everything, even title edits
 - Ask HN / text posts have no external URL — those articles link to the HN discussion page itself
 
@@ -175,7 +176,7 @@ Don't want to hand-write feeds? Export OPML from Inoreader (or any reader), save
 ## Features
 
 - Folders + feeds with live unread counts (folder & global totals) — **click any counter to mark that section read** (with Undo). The **Newsfeed and Today ticks work too** — hover the count, click the ✓
-- **Mark by age or exact date**: the ✓ ▾ menu offers **exactly one group** — *Mark as read* while unread articles exist, *Mark as unread* once everything here is read (the same rule as the ✓ button flip). The offered group carries *Older than a day / two days / a week / a month* presets and a **“Before… <date>”** picker. Clicks always respond: they wait for feeds that are still loading (capped, with a visible "still loading" notice) — never silently dead-end
+- **Mark by age or exact date**: the ✓ ▾ menu offers **exactly one group** — *Mark as read* while unread articles exist, *Mark as unread* once everything here is read (the same rule as the ✓ button flip). The offered group carries *Older than a day / two days / a week / a month* presets and a **“Before… <date>”** picker. Clicks always respond: they wait for feeds that are still loading (capped, with a visible "still loading" notice) — never silently dead-end. Zero-result actions explain themselves — and when the cutoff is older than the data itself (past `retentionDays`), the toast says where the data starts: *"No read articles from before Aug 10, 2026 here — data goes back to Aug 24, 2026"*
 - **Caught-up flip**: when a feed/folder/newsfeed is fully read ("All caught up 🎉"), the SAME top ✓ button becomes *Mark all as unread* — one confirmed click un-marks everything. Marked a whole folder read by accident? It's recoverable
 - **Auto-sync aligned with CI**: the Action refreshes on a self-healing quarter-hourly schedule (gate-capped at ~hourly) and publishes ~1–3 min after it starts; open tabs poll on a 5-minute wall-clock grid (`refreshMinutes`), so new articles land within ~5 minutes — announced with a toast, your open article and reading position untouched. A backgrounded tab catches up the moment you focus it
 - **Unread is sacred**: nothing marks an article read except you (open, the tick button, bulk, or a `markRead` filter); `keepUnread` filters — and your explicit "keep unread" flags — beat all of it

@@ -16,7 +16,7 @@ import { JSDOM } from 'jsdom';
 import { Readability } from '@mozilla/readability';
 import sanitizeHtml from 'sanitize-html';
 import { chanThreadsFromCatalog, chanThreadPasses, chanThreadToArticle } from './4chan.mjs';
-import { hnApiUrl, hnHitToArticle, hnFeedOptions } from './hackernews.mjs';
+import { hnApiUrl, hnHitToArticle, hnFeedOptions, hnFetchAllPages } from './hackernews.mjs';
 
 const ROOT = new URL('..', import.meta.url).pathname;
 const DATA_DIR = path.join(ROOT, 'data');
@@ -533,14 +533,22 @@ async function main() {
       const effFeed = { ...feed, title: feed.title || 'Hacker News', site: feed.site || 'https://news.ycombinator.com/' };
       const feedBlocks = compileFeedFilter(feed);
       const { minPoints, minComments } = hnFeedOptions(feed);
-      let json;
+      let hits;
       try {
-        const res = await fetch(hnApiUrl(feed, { retentionDays, now }), {
-          headers: { 'User-Agent': UA, Accept: 'application/json' },
-          signal: AbortSignal.timeout(35000), redirect: 'follow',
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        json = await res.json();
+        // Full window coverage: Algolia truncates a single response at 1000
+        // hits (and lies about nbPages), so hnFetchAllPages splits too-wide
+        // windows into date ranges — the 60-day window backfills in this run
+        // instead of only accumulating forward.
+        const res = await hnFetchAllPages(
+          (url) => fetch(url, {
+            headers: { 'User-Agent': UA, Accept: 'application/json' },
+            signal: AbortSignal.timeout(35000), redirect: 'follow',
+          }),
+          feed, { retentionDays, now },
+        );
+        hits = res.hits;
+        if (res.requests > 1) console.log(`[${feed.id}] ${retentionDays}-day window needed ${res.requests} ranged requests (Algolia's 1000-hit response cap)`);
+        if (res.truncated) console.log(`[${feed.id}] note: request cap hit — window partially covered, the next run heals the rest`);
       } catch (err) {
         failures++;
         status.ok = false;
@@ -558,7 +566,7 @@ async function main() {
       status.error = null;
       const articles = [];
       let filtered = 0;
-      for (const hit of json?.hits || []) {
+      for (const hit of hits) {
         if (!hit || !hit.objectID) continue;
         const a = hnHitToArticle(hit, { now });
         if (feedBlocks && feedFilterDrop(a, feedBlocks)) { filtered++; continue; }

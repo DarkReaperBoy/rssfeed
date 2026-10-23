@@ -25,7 +25,7 @@ export function hnFeedOptions(feed) {
   return { minPoints, minComments };
 }
 
-export function hnApiUrl(feed, { retentionDays = 30, now = Date.now() } = {}) {
+export function hnApiUrl(feed, { retentionDays = 30, now = Date.now(), fromSec = 0, toSec = 0 } = {}) {
   const { minPoints, minComments } = hnFeedOptions(feed);
   const base = 'https://hn.algolia.com/api/v1';
   if (!minPoints && !minComments) {
@@ -36,11 +36,62 @@ export function hnApiUrl(feed, { retentionDays = 30, now = Date.now() } = {}) {
   // are comma-joined = AND on the server, matching the both-caps semantics;
   // a single cap simply omits the other condition. The created_at window keeps
   // the response to recent stories (Algolia's index covers all of history).
-  const parts = [`created_at_i>${Math.floor(now / 1000) - Math.max(1, retentionDays) * 86400}`];
+  // fromSec/toSec override the window bounds (<= on the upper edge) — that is
+  // how hnFetchAllPages slices a window too wide for one response.
+  const parts = [`created_at_i>${fromSec > 0 ? fromSec : Math.floor(now / 1000) - Math.max(1, retentionDays) * 86400}`];
+  if (toSec > 0) parts.push(`created_at_i<=${toSec}`);
   if (minPoints) parts.push(`points>=${minPoints}`);
   if (minComments) parts.push(`num_comments>=${minComments}`);
   const filters = parts.map((p) => encodeURIComponent(p)).join(',');
   return `${base}/search_by_date?tags=story&numericFilters=${filters}&hitsPerPage=1000`;
+}
+
+// Algolia's search index truncates at 1000 hits AND reports nbPages: 1 while
+// doing it (verified live: nbHits 1388, 1000 hits returned, &page=1 → empty),
+// so page offsets can never reach a window wider than ~5 weeks at the shipped
+// caps. Instead: fetch the whole window; when nbHits exceeds what came back,
+// split the range into two date halves and fetch both — recursively, so any
+// story density resolves. `doFetch` is injected so tests drive this without
+// network: it receives a URL and returns { ok, status, json }.
+//   root request failing   → throws (the feed reports failure, old data kept)
+//   a half failing         → soft miss (the merge holds stored stories; the
+//                           next hourly run heals the gap)
+//   maxRequests exhausted  → stops splitting, sets truncated (self-heals)
+export async function hnFetchAllPages(doFetch, feed, { retentionDays = 30, now = Date.now(), maxRequests = 6 } = {}) {
+  const nowSec = Math.floor(now / 1000);
+  const startSec = nowSec - Math.max(1, retentionDays) * 86400;
+  const hits = [];
+  let requests = 0;
+  let truncated = false;
+  const fetchRange = async (fromSec, toSec = 0, root = false) => {
+    if (requests >= maxRequests) { truncated = true; return; }
+    requests++;
+    let json;
+    try {
+      const res = await doFetch(hnApiUrl(feed, { now, fromSec, toSec }));
+      if (!res.ok) {
+        if (root) { const err = new Error(`HTTP ${res.status}`); err.code = 'HTTP'; throw err; }
+        return;
+      }
+      json = await res.json();
+    } catch (err) {
+      if (root) throw err;
+      return;
+    }
+    const pageHits = Array.isArray(json?.hits) ? json.hits : [];
+    const nbHits = Number(json?.nbHits) || 0;
+    if (nbHits > pageHits.length && requests < maxRequests) {
+      // Truncated at the 1000-hit cap: cover this exact range via two halves.
+      const mid = Math.floor((fromSec + (toSec || nowSec)) / 2);
+      await fetchRange(mid, toSec);    // newer half: (mid, toSec]
+      await fetchRange(fromSec, mid);  // older half: (fromSec, mid]
+      return;
+    }
+    if (nbHits > pageHits.length) truncated = true;
+    hits.push(...pageHits);
+  };
+  await fetchRange(startSec, 0, true);
+  return { hits, requests, truncated };
 }
 
 const stripHnHtml = (html) =>

@@ -3,7 +3,7 @@
     "siteName": "My RSSFeed",
     "theme": "auto",
     "view": "list",
-    "retentionDays": 30,
+    "retentionDays": 60,
     "markReadOnOpen": true,
     "markReadAfterSeconds": 0,
     "refreshMinutes": 5,

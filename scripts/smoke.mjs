@@ -341,6 +341,37 @@ await settle(120);
 ok($('#toast-text').textContent.includes('No unread articles older than a month here'), 'read-side zero toast explains itself');
 ok(rowCount() === rowsBeforeMarkAll, 'a month cutoff matches nothing in the fixtures (all within ~2 days)');
 
+console.log('zero-result toasts name the data boundary');
+// The month cutoff predates ALL fixture data (~33 h old) → the toast must say
+// where the data starts instead of looking like a dead button (user report:
+// "No read articles older than a month here" -_- with 30-day retention).
+ok($('#toast-text').textContent.includes('data goes back to'), 'a cutoff past the data start names the boundary');
+ok($('#toast-text').textContent.includes(new Date(FIX['fixture-hn'].articles.at(-1).date).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })), 'the boundary date is the oldest article in the scope');
+// Zero results WITHIN the data window keep the plain message (no false boundary)
+click('#tree .tree-item[data-scope="feed:fixture-hn"] .badge'); // HN read
+await settle(60);
+click('.tree-item[data-scope="feed:fixture-hn"]'); // select the HN feed
+await settle(60);
+click('#btn-mark-all-split');
+await settle(20);
+click('#mark-menu [data-mark="read"][data-older="1"]');
+await settle(120);
+ok($('#toast-text').textContent === 'No unread articles older than a day here', 'cutoff within the data window: plain zero-result toast, no boundary clause');
+click('#btn-mark-all-split');
+await settle(20);
+click('#mark-menu [data-mark="unread"][data-older="31"]');
+await settle(120);
+ok($('#toast-text').textContent.includes('No read articles older than a month here — data goes back to'), 'unread-side month cutoff also names the boundary');
+click('.tree-item[data-scope="all"]'); // back to the Newsfeed
+await settle(60);
+click('#badge-all-items'); // everything read
+await settle(60);
+click('#btn-mark-all'); // caught up → confirm
+await settle(20);
+click('#confirm-yes');
+await settle(80);
+ok(rowCount() === rowsBeforeMarkAll, 'state restored: everything unread again');
+
 console.log('j/k keyboard navigation');
 const idsNow = $$('#list .row').map((r) => r.dataset.id);
 window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'j', bubbles: true }));
@@ -647,6 +678,56 @@ console.log('Hacker News → articles (hackernews.mjs)');
   ok(ask.summary.includes('10 points'), 'summary carries stats when there is no story text');
   const fetchMod2 = await import('./fetch.mjs');
   ok(fetchMod2.feedFilterDrop(a, { include: null, exclude: fetchMod2.compileBlockSrv({ title: ['show hn'] }) }) === true, 'word filters work on HN stories like any feed');
+}
+
+console.log('Hacker News deep windows — Algolia\'s 1000-hit cap splits into date ranges');
+{
+  const hn = await import('./hackernews.mjs');
+  const mk = (from, n) => Array.from({ length: n }, (_, i) => ({ objectID: from + i, title: `story ${from + i}` }));
+  const NOWS = 1746000000; // fixed test clock (seconds)
+  const NOW = NOWS * 1000;
+  const START = NOWS - 60 * 86400;
+  // Parse the range bounds back out of the URL the way the real API sees them
+  const bounds = (url) => {
+    const f = Number(decodeURIComponent(url).match(/created_at_i>(\d+)/)?.[1] || 0);
+    const t = Number(decodeURIComponent(url).match(/created_at_i<=(\d+)/)?.[1] || 0);
+    return { f, t };
+  };
+  let calls = 0;
+  const urls = [];
+  const r = await hn.hnFetchAllPages(async (url) => {
+    calls++; urls.push(url);
+    const { f, t } = bounds(url);
+    if (f === START && !t) return { ok: true, status: 200, json: async () => ({ hits: mk(1, 1000), nbHits: 1388 }) }; // root: truncated
+    if (f > START && !t) return { ok: true, status: 200, json: async () => ({ hits: mk(2000, 705), nbHits: 705 }) };   // newer half
+    return { ok: true, status: 200, json: async () => ({ hits: mk(3000, 683), nbHits: 683 }) };                          // older half
+  }, { minPoints: 150, minComments: 100 }, { retentionDays: 60, now: NOW });
+  ok(calls === 3 && r.requests === 3, 'a truncated window costs exactly 3 requests: probe + two halves');
+  ok(r.hits.length === 1388 && !r.truncated, 'the split window returns EVERY hit (705 newer + 683 older = 1388)');
+  ok(r.hits.some((h) => h.objectID >= 3000) && r.hits.some((h) => h.objectID >= 2000 && h.objectID < 3000), 'both halves\' stories are present');
+  const lower = urls.map(bounds).find((b) => b.t > 0);
+  ok(!!lower && lower.t > lower.f, 'the older half carries the closed upper bound created_at_i<=mid');
+  ok(urls[0].includes('created_at_i%3E') && !urls[0].includes('%3C'), 'the root probe is the plain open window');
+  let threw = false;
+  try { await hn.hnFetchAllPages(async () => ({ ok: false, status: 503, json: async () => ({}) }), { minPoints: 150 }, { retentionDays: 60, now: NOW }); }
+  catch { threw = true; }
+  ok(threw, 'root failure throws — the feed reports failure, old articles kept');
+  const soft = await hn.hnFetchAllPages(async (url) => {
+    const { f, t } = bounds(url);
+    if (f === START && !t) return { ok: true, status: 200, json: async () => ({ hits: mk(1, 1000), nbHits: 1388 }) };
+    if (t > 0) return { ok: false, status: 500, json: async () => ({}) }; // older half dies
+    return { ok: true, status: 200, json: async () => ({ hits: mk(2000, 705), nbHits: 705 }) };
+  }, { minPoints: 150 }, { retentionDays: 60, now: NOW });
+  ok(soft.hits.length === 705 && !soft.truncated, 'a half failing is a soft miss — the other half still lands');
+  let n = 0;
+  const capped = await hn.hnFetchAllPages(async () => { n++; return { ok: true, status: 200, json: async () => ({ hits: mk(n, 1), nbHits: 5000 }) }; }, { minPoints: 150 }, { retentionDays: 90, now: NOW, maxRequests: 6 });
+  ok(n === 6 && capped.truncated, 'the request cap holds even when every range truncates — no loops in a scheduled job');
+  let one = 0;
+  const single = await hn.hnFetchAllPages(async () => { one++; return { ok: true, status: 200, json: async () => ({ hits: mk(1, 42), nbHits: 42 }) }; }, { minPoints: 150 }, { retentionDays: 30, now: NOW });
+  ok(one === 1 && single.hits.length === 42 && !single.truncated, 'an untruncated window stays a single request');
+  ok(hn.hnApiUrl({ minPoints: 150 }, { retentionDays: 60, now: NOW }).includes(`created_at_i%3E${START}`), 'window bound derives from retentionDays');
+  const sliced = hn.hnApiUrl({ minPoints: 150 }, { retentionDays: 60, now: NOW, fromSec: START, toSec: NOWS - 30 * 86400 });
+  ok(sliced.includes('created_at_i%3C%3D'), 'range slicing encodes the closed upper bound');
 }
 
 console.log('');

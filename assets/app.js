@@ -768,11 +768,30 @@ function describeCutoff(olderDays = 0, beforeTs = 0) {
   if (olderDays > 0) return ` older than ${OLDER_LABELS[olderDays] || olderDays + ' days'}`;
   return '';
 }
+/* Oldest article the current scope's data actually contains (from
+   index.feeds[*].oldest — the fetcher's retention window). A cutoff older
+   than this can never match anything: the toast says so instead of leaving
+   the user guessing whether the button is broken. */
+function dataStartsAt() {
+  const feedsMeta = state.index?.feeds || {};
+  let min = Infinity;
+  for (const id of feedIdsInScope()) {
+    const o = feedsMeta[id]?.oldest;
+    if (typeof o === 'number' && o > 0 && o < min) min = o;
+  }
+  return min === Infinity ? 0 : min;
+}
+function boundaryHint(cutoff = 0) {
+  const start = dataStartsAt();
+  if (!cutoff || !start || cutoff >= start) return '';
+  return ` — data goes back to ${new Date(start).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`;
+}
 function markScopeRead(scope, olderDays = 0, beforeTs = 0) {
   const what = describeCutoff(olderDays, beforeTs);
-  const ids = collectScopeIds(scope, cutoffFrom(olderDays, beforeTs));
+  const cutoff = cutoffFrom(olderDays, beforeTs);
+  const ids = collectScopeIds(scope, cutoff);
   if (!ids.length) {
-    showToast(olderDays || beforeTs ? `No unread articles${what} here` : 'Nothing to mark — everything here is read');
+    showToast(olderDays || beforeTs ? `No unread articles${what} here${boundaryHint(cutoff)}` : 'Nothing to mark — everything here is read');
     return;
   }
   const snapshot = ids.map((id) => ({ id, ts: state.read[id] }));
@@ -834,9 +853,10 @@ function collectScopeReadIds(scope, cutoff = 0) {
 }
 function markScopeUnread(scope, olderDays = 0, beforeTs = 0) {
   const what = describeCutoff(olderDays, beforeTs);
-  const ids = collectScopeReadIds(scope, cutoffFrom(olderDays, beforeTs));
+  const cutoff = cutoffFrom(olderDays, beforeTs);
+  const ids = collectScopeReadIds(scope, cutoff);
   if (!ids.length) {
-    showToast(olderDays || beforeTs ? `No read articles${what} here` : 'Nothing to restore — no read articles here');
+    showToast(olderDays || beforeTs ? `No read articles${what} here${boundaryHint(cutoff)}` : 'Nothing to restore — no read articles here');
     return;
   }
   const snapshot = ids.map((id) => ({ id, ts: state.read[id] }));
