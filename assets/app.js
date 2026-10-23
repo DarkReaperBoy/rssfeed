@@ -50,7 +50,7 @@ const ui = Object.assign({
   theme: 'auto', layout: 'list', status: 'unread', dateRange: 'all',
   showFiltered: false, openFolders: {},
   markReadOnOpen: true, markReadAfterSeconds: 0,
-  density: 'comfort', sortDir: 'newest',
+  density: 'comfort', sortDir: 'oldest',
   updatedOnly: false, dimRead: false, sortAZ: false, scrollTracking: false,
   titlesOnly: false, openOriginal: false, showFavicons: true, columnThumbs: true,
   bulkSelect: false, autoScroll: true, absoluteDates: false, fontSize: '14.5px',
@@ -62,7 +62,11 @@ if (savedUi.settings && typeof savedUi.settings === 'object') {
 }
 
 if (ui.layout === 'compact') { ui.layout = 'list'; ui.density = 'compact'; }
-if (ui.status === 'read') ui.status = 'all'; 
+if (ui.status === 'read') ui.status = 'all';
+if (!savedUi.sortFlip) {
+  if (ui.sortDir === 'newest') ui.sortDir = 'oldest';
+  try { localStorage.setItem(LS_UI, JSON.stringify(Object.assign(savedUi, { sortFlip: 1 }))); } catch {}
+}
 
 function loadObj(k) {
 
@@ -77,7 +81,7 @@ function saveObj(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } cat
 function saveRead() { saveObj(LS_READ, state.read); }
 function saveKept() { saveObj(LS_KEPT, state.kept); }
 function saveUserUnread() { saveObj(LS_USERUNREAD, state.userUnread); }
-function saveUi() { saveObj(LS_UI, Object.assign(Object.fromEntries(USER_KEYS.map((k) => [k, ui[k]])), { settings: ui.settings })); }
+function saveUi() { saveObj(LS_UI, Object.assign(Object.fromEntries(USER_KEYS.map((k) => [k, ui[k]])), { settings: ui.settings, sortFlip: 1 })); }
 
 const isRead = (a) => !!state.read[a.id];
 const isKept = (a) => !!state.kept[a.id];
@@ -763,7 +767,7 @@ function renderEmpty(visible) {
   } else if (ui.status === 'unread') {
     const caughtUp = !state.search && ui.dateRange === 'all' && allReadInScope();
     if (caughtUp) {
-      el.innerHTML = `<h3>All caught up 🎉</h3><p>No unread articles here.</p><p class="empty-hint">Over-marked? The ✓ button and its ▾ menu now offer <em>Mark as unread</em> — everything, by age, or before an exact date.</p>`;
+      el.innerHTML = `<h3>All caught up 🎉</h3><p>No unread articles here.</p><p class="empty-hint">Over-marked? The ✓ button and its ▾ menu now offer <em>Mark as unread</em> — everything, from a day or a week ago, or since an exact date.</p>`;
     } else if (ui.dateRange !== 'all') {
 
       const n = scopeUnreadCount(state.scope);
@@ -970,12 +974,11 @@ function collectScopeIds(scope, cutoff = 0) {
 
 const OLDER_LABELS = { 1: 'a day', 2: 'two days', 7: 'a week', 31: 'a month' };
 const cutoffFrom = (olderDays = 0, beforeTs = 0) => (beforeTs > 0 ? beforeTs : olderDays > 0 ? Date.now() - olderDays * 864e5 : 0);
-function describeCutoff(olderDays = 0, beforeTs = 0, clock = 'pub') {
-  const when = beforeTs > 0
-    ? ` before ${new Date(beforeTs).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`
-    : olderDays > 0 ? ` more than ${OLDER_LABELS[olderDays] || olderDays + ' days'} ago` : '';
-  if (!when) return '';
-  return clock === 'read' ? ` you read${when}` : (beforeTs > 0 ? ` from${when}` : ` older than ${OLDER_LABELS[olderDays] || olderDays + ' days'}`);
+function describeCutoff(olderDays = 0, beforeTs = 0, clock = 'pub', forUnread = false) {
+  const label = OLDER_LABELS[olderDays] || (olderDays > 0 ? `${olderDays} days` : '');
+  if (clock === 'read') return olderDays > 0 ? ` you read more than ${label} ago` : '';
+  if (beforeTs > 0) return ` ${forUnread ? 'since' : 'before'} ${new Date(beforeTs).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`;
+  return olderDays > 0 ? (forUnread ? ` from ${label} ago` : ` older than ${label}`) : '';
 }
 
 function dataStartsAt() {
@@ -1081,7 +1084,7 @@ function collectScopeReadIds(scope, cutoff = 0, clock = 'pub') {
         const ts = state.read[a.id] || 0;
         if (ts <= 0 || Date.now() - ts >= RECENTLY_READ_WINDOW) continue;
         if (!dateRangeFilter(a)) continue;
-        if (cutoff && (clock === 'read' ? ts : a.date) >= cutoff) continue;
+        if (cutoff && (clock === 'read' ? ts >= cutoff : a.date < cutoff)) continue;
         ids.push(a.id);
       }
     }
@@ -1091,14 +1094,14 @@ function collectScopeReadIds(scope, cutoff = 0, clock = 'pub') {
     for (const a of state.feeds.get(feedId) || []) {
       if (!isRead(a) || a._f?.hidden) continue; 
       if (scope === 'today' && a.date < startOfToday()) continue;
-      if (cutoff && (clock === 'read' ? (state.read[a.id] || 0) : a.date) >= cutoff) continue;
+      if (cutoff && (clock === 'read' ? (state.read[a.id] || 0) >= cutoff : a.date < cutoff)) continue;
       ids.push(a.id);
     }
   }
   return ids;
 }
 function markScopeUnread(scope, olderDays = 0, beforeTs = 0, clock = 'pub') {
-  const what = describeCutoff(olderDays, beforeTs, clock);
+  const what = describeCutoff(olderDays, beforeTs, clock, true);
   const cutoff = cutoffFrom(olderDays, beforeTs);
   const ids = collectScopeReadIds(scope, cutoff, clock);
   if (!ids.length) {
@@ -1144,7 +1147,7 @@ function syncMarkButtons(forceReset = false) {
       alt.setAttribute('aria-expanded', 'false');
       alt.classList.remove('open');
       const lbl = $('#mark-alt-label');
-      if (lbl) lbl.textContent = caughtUp ? 'Mark as read by age' : 'Mark as unread by age';
+      if (lbl) lbl.textContent = caughtUp ? 'Mark as read by age' : 'Mark as unread by time';
     }
   }
 
