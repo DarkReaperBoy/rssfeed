@@ -1,13 +1,15 @@
 name: Fetch feeds & publish
 
-# GitHub's scheduler skips cron slots at random (observed: 6–9 h gaps on this
-# repo with a plain hourly cron). Two slots per hour + a freshness gate makes
-# the data refresh self-healing: if GitHub skips :00, the :30 run notices the
-# data is stale and fetches. Push/dispatch always run the full pipeline so code
-# changes deploy immediately, regardless of data age.
+# GitHub's scheduler skips cron slots at random — observed 6–9 h gaps and
+# multi-hour skip streaks on this repo with plain hourly crons. Four trigger
+# slots per hour + a freshness gate makes the data refresh self-healing:
+# whichever slot lands first after the data goes stale does the fetch, so a
+# skipped GitHub slot heals within ~15 min instead of stalling for hours.
+# Push/dispatch always run the full pipeline so code changes deploy
+# immediately, regardless of data age.
 on:
   schedule:
-    - cron: '*/30 * * * *'  # two chances per hour; the gate keeps the real cadence ~hourly
+    - cron: '*/15 * * * *'  # 4 chances per hour; the gate keeps the real cadence at most ~hourly
   workflow_dispatch:        # manual run from the Actions tab
   push:
     branches: [main]        # every push to main deploys via CI/CD

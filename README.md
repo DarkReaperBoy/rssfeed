@@ -2,7 +2,7 @@
 
 A self-hosted RSS reader with **no server and no database**:
 
-- **GitHub Actions** refreshes the data **at least hourly, self-healing** (RSS + Atom + YouTube channels + 4chan boards + Hacker News): it's scheduled twice per hour and skips the run when the published data is <45 min old, so a GitHub-skipped cron slot heals within ~30 min instead of stalling for hours. It extracts clean full text and publishes the site to the **`gh-pages` branch**
+- **GitHub Actions** refreshes the data **at least hourly, self-healing** (RSS + Atom + YouTube channels + 4chan boards + Hacker News): GitHub's scheduler skips cron slots at random (multi-hour streaks observed), so the workflow is scheduled every 15 minutes and skips early when the published data is <45 min old — the real cadence stays ~hourly, but whichever slot lands first after the data goes stale does the fetch. It extracts clean full text and publishes the site to the **`gh-pages` branch**
 - **GitHub Pages** serves the Inoreader-style reader UI
 - **`config.json`** is the entire configuration: settings, folders, feeds, per-feed word filters and content filters — plus an optional **`feeds.opml`** export (e.g. Inoreader's) that can provide the feed list, imported server-side by the fetcher
 - **YouTube Shorts are banned by default** (`settings.dropShorts`) — shorts slop never enters your unread list, and previously stored Shorts are purged from the retained data on every run (turning the filter on later cleans old articles too)
@@ -22,7 +22,7 @@ A self-hosted RSS reader with **no server and no database**:
 3. **Run the workflow once**: *Actions → "Fetch feeds & publish" → Run workflow*. After it finishes, the site is live at `https://<you>.github.io/<repo>/`.
 4. **Edit `config.json`** on GitHub (web editor is fine) to add your feeds/folders/filters, or drop an Inoreader OPML export as `feeds.opml`, then run the workflow again (or wait for the next scheduled run).
 
-That's it. The Action re-fetches feeds on a self-healing twice-hourly schedule (fresh data <45 min old → the run skips early) and force-updates `gh-pages` (which Pages auto-deploys).
+That's it. The Action re-fetches feeds on a self-healing every-15-minutes schedule with a freshness gate (fresh data <45 min old → the run skips early in ~20 s) and force-updates `gh-pages` (which Pages auto-deploys).
 
 ## config.json
 
@@ -177,7 +177,7 @@ Don't want to hand-write feeds? Export OPML from Inoreader (or any reader), save
 - Folders + feeds with live unread counts (folder & global totals) — **click any counter to mark that section read** (with Undo). The **Newsfeed and Today ticks work too** — hover the count, click the ✓
 - **Mark by age or exact date**: the ✓ ▾ menu offers **exactly one group** — *Mark as read* while unread articles exist, *Mark as unread* once everything here is read (the same rule as the ✓ button flip). The offered group carries *Older than a day / two days / a week / a month* presets and a **“Before… <date>”** picker. Clicks always respond: they wait for feeds that are still loading (capped, with a visible "still loading" notice) — never silently dead-end
 - **Caught-up flip**: when a feed/folder/newsfeed is fully read ("All caught up 🎉"), the SAME top ✓ button becomes *Mark all as unread* — one confirmed click un-marks everything. Marked a whole folder read by accident? It's recoverable
-- **Auto-sync aligned with CI**: the Action refreshes on a self-healing twice-hourly schedule and publishes ~1–3 min after it starts; open tabs poll on a 5-minute wall-clock grid (`refreshMinutes`), so new articles land within ~5 minutes — announced with a toast, your open article and reading position untouched. A backgrounded tab catches up the moment you focus it
+- **Auto-sync aligned with CI**: the Action refreshes on a self-healing quarter-hourly schedule (gate-capped at ~hourly) and publishes ~1–3 min after it starts; open tabs poll on a 5-minute wall-clock grid (`refreshMinutes`), so new articles land within ~5 minutes — announced with a toast, your open article and reading position untouched. A backgrounded tab catches up the moment you focus it
 - **Unread is sacred**: nothing marks an article read except you (open, the tick button, bulk, or a `markRead` filter); `keepUnread` filters — and your explicit "keep unread" flags — beat all of it
 - **Single read-state indicator**: the tick button on each row (✓ = read, ○ = unread); the reader title links to the original article
 - **No vanishing rows**: an article you just read stays in the Unread view (ticked) until you open another article or change the view
