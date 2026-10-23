@@ -30,6 +30,7 @@ const state = {
   markTimers: new Map(),
   loading: new Map(), 
   settled: new Set(), 
+  failed: new Set(),
   refreshTimer: null,
   lastPollAt: 0,
   bulkSel: new Set(),
@@ -233,9 +234,9 @@ async function loadFeed(feedId, force = false) {
       const data = await fetchJson(`data/feeds/${encodeURIComponent(feedId)}.json`);
       applyFiltersToFeed(feedId, data.articles || []);
       state.feeds.set(feedId, data.articles || []);
-
+      state.failed.delete(feedId);
     } catch {
-
+      state.failed.add(feedId);
     } finally {
       state.loading.delete(feedId);
       state.settled.add(feedId);
@@ -323,10 +324,11 @@ function parseQuery(q) {
 function compileSearch(q) {
   if (!q || !String(q).trim()) return null;
 
-  return String(q).split(/\s+OR\s+/).map((group) => parseQuery(group));
+  const groups = String(q).split(/\s+OR\s+/).map((group) => parseQuery(group)).filter(({ ops, terms }) => ops.feed.length || ops.title.length || ops.before !== null || ops.after !== null || ops.unread !== null || terms.length);
+  return groups.length ? groups : null;
 }
 function searchMatchesCompiled(a, groups) {
-  return groups.some(({ ops, terms }) => searchGroupMatches(a, ops, terms));
+  return !groups || groups.some(({ ops, terms }) => searchGroupMatches(a, ops, terms));
 }
 function searchGroupMatches(a, ops, terms) {
   if (ops.feed.length && !ops.feed.some((f) => a._feed.toLowerCase().includes(f) || feedTitle(a._feed).toLowerCase().includes(f))) return false;
@@ -382,7 +384,7 @@ function computeVisible() {
       if (state.scope !== 'recently-read') {
         if (ui.status === 'unread' && read && !state.keepVisible.has(a.id) && a.id !== state.expandedId) continue;
       }
-      if (state.search && !searchMatchesCompiled(a, searchGroups)) continue;
+      if (searchGroups && !searchMatchesCompiled(a, searchGroups)) continue;
       out.push(a);
     }
   }
@@ -502,13 +504,14 @@ function rowHtml(a) {
   const thumb = thumbWanted ? thumbFor(a) : null;
   const isExpanded = state.expandedId === a.id && ui.layout !== 'expanded';
   const timeHtml = ui.absoluteDates ? absTime(a.date) : relTime(a.date);
+  const showAuthor = a.author && a.author.toLowerCase() !== String(feed.title || '').toLowerCase();
   return `<article class="row ${read ? '' : 'unread'} ${f.highlight ? 'highlight' : ''} ${isExpanded ? 'expanded' : ''} ${state.bulkSel.has(a.id) ? 'selected' : ''}" data-id="${esc(a.id)}">
     ${ui.bulkSelect ? `<input type="checkbox" class="row-check" aria-label="Select article" ${state.bulkSel.has(a.id) ? 'checked' : ''} title="Select">` : ''}
     ${thumb ? `<img class="row-thumb" loading="lazy" src="${esc(thumb)}" alt="">` : ''}
     <div class="row-main">
       <div class="row-meta">
         ${faviconHtml(feed)}<span class="feed-name">${esc(feed.title)}</span>
-        ${a.author ? `<span class="author">${esc(a.author)}</span>` : ''}
+        ${showAuthor ? `<span class="author">${esc(a.author)}</span>` : ''}
         ${f.hidden ? '<span class="author" title="Filtered">[filtered]</span>' : ''}
       </div>
       <div class="row-title">${esc(a.title)}</div>
@@ -543,6 +546,7 @@ function readerHtml(a) {
   const idx = state.visible.indexOf(a);
   const read = isRead(a), kept = isKept(a);
   const link = safeHref(a.link); 
+  const showAuthor = a.author && a.author.toLowerCase() !== String(feed.title || '').toLowerCase();
   return `<div class="reader" data-id="${esc(a.id)}">
     <div class="reader-toolbar">
       <span class="spacer"></span>
@@ -556,7 +560,7 @@ function readerHtml(a) {
     <h2 class="reader-title">${link !== '#' ? `<a href="${esc(link)}" target="_blank" rel="noopener noreferrer" title="Open original article">${esc(a.title)}</a>` : esc(a.title)}</h2>
     <div class="reader-sub">
       <span class="sub-feed" data-scope="feed:${esc(a._feed)}" title="Show this feed">${esc(feed.title)}</span>
-      ${a.author ? `<span>by ${esc(a.author)}</span>` : ''}
+      ${showAuthor ? `<span>by ${esc(a.author)}</span>` : ''}
       <span title="${esc(fullTime(a.date))}">${esc(ui.absoluteDates ? absTime(a.date) : relTime(a.date))}</span>
       ${readingTime(a) ? `<span>· ${esc(readingTime(a))}</span>` : ''}
     </div>
@@ -750,6 +754,10 @@ function renderEmpty(visible) {
     el.innerHTML = `<h3>Loading articles…</h3><p>Fetching this view's feeds — articles appear as they arrive.</p>`;
     return;
   }
+  if (feedIdsInScope().some((id) => state.failed.has(id))) {
+    el.innerHTML = `<h3>Couldn't load articles</h3><p>Some feeds didn't arrive${navigator.onLine ? '' : ' — you look offline'}, so this view can't be trusted yet. Your read state is safe.</p><p><button class="tool-btn tool-primary" data-retry>Try again</button></p>`;
+    return;
+  }
   if (state.search) {
     el.innerHTML = `<h3>No matches</h3><p>Nothing matched <code>${esc(state.search)}</code> in any feed.<br>Operators: <code>feed:name</code> <code>title:word</code> <code>before:2026-01-01</code> <code>after:2026-01-01</code> <code>unread:true</code> <code>is:read</code></p>`;
   } else if (ui.status === 'unread') {
@@ -900,8 +908,13 @@ function patchTreeCounts() {
   if (all) all.textContent = total > 0 ? String(total) : '';
   if (td) td.textContent = todayN > 0 ? String(todayN) : '';
 }
+function cancelMarkTimer(id) {
+  clearTimeout(state.markTimers.get(id));
+  state.markTimers.delete(id);
+}
 function markRead(id, on = true) {
   const a = findArticle(id);
+  cancelMarkTimer(id);
   if (!on) {
     delete state.read[id];
 
@@ -926,8 +939,7 @@ function findArticle(id) {
   return null;
 }
 function scheduleMarkRead(a) {
-  clearTimeout(state.markTimers.get(a.id));
-  state.markTimers.delete(a.id);
+  cancelMarkTimer(a.id);
   const delay = (Number(ui.markReadAfterSeconds) || 0) * 1000;
 
   if (!ui.markReadOnOpen && delay <= 0) return;
@@ -1056,6 +1068,7 @@ function allReadInScope() {
 
   if (!state.index?.feeds || !ids.length) return false;
   if (ids.some((id) => !state.settled.has(id))) return false; 
+  if (ids.some((id) => state.failed.has(id))) return false;
   return scopeUnreadCount(state.scope) === 0;
 }
 function collectScopeReadIds(scope, cutoff = 0) {
@@ -1094,6 +1107,7 @@ function markScopeUnread(scope, olderDays = 0, beforeTs = 0) {
   }
   const snapshot = ids.map((id) => ({ id, ts: state.read[id], guard: state.userUnread[id] || 0 }));
   for (const id of ids) {
+    cancelMarkTimer(id);
     delete state.read[id];
 
     const a = findArticle(id);
@@ -1104,7 +1118,7 @@ function markScopeUnread(scope, olderDays = 0, beforeTs = 0) {
   saveRead(); renderTree(); renderList();
   const extra = viewHiddenExtra(ids);
   showToast(`Marked ${ids.length} article${ids.length === 1 ? '' : 's'}${what} as unread${extra?.note || ''}`, 'Undo', () => {
-    for (const { id, ts, guard } of snapshot) { if (ts) state.read[id] = ts; else delete state.read[id]; if (guard) state.userUnread[id] = guard; else delete state.userUnread[id]; }
+    for (const { id, ts, guard } of snapshot) { cancelMarkTimer(id); if (ts) state.read[id] = ts; else delete state.read[id]; if (guard) state.userUnread[id] = guard; else delete state.userUnread[id]; }
     saveRead(); saveUserUnread(); renderTree(); renderList();
   }, false, extra && extra.label ? extra : null);
 }
@@ -1113,6 +1127,7 @@ function syncMarkButtons(forceReset = false) {
   const btn = $('#btn-mark-all');
   if (!btn) return;
   btn.title = caughtUp ? 'Mark all as unread' : 'Mark all as read';
+  btn.setAttribute('aria-label', btn.title);
   const use = btn.querySelector('use');
   if (use) use.setAttribute('href', caughtUp ? '#i-unread' : '#i-read');
   const split = $('#btn-mark-all-split');
@@ -1159,6 +1174,7 @@ function bulkMark(on) {
       state.read[id] = Date.now();
       if (state.userUnread[id]) { delete state.userUnread[id]; guardsChanged = true; } 
     } else {
+      cancelMarkTimer(id);
       delete state.read[id];
       if (a?._f?.markRead && !state.userUnread[id]) { state.userUnread[id] = Date.now(); guardsChanged = true; } 
     }
@@ -1169,7 +1185,7 @@ function bulkMark(on) {
   if (guardsChanged) saveUserUnread();
   saveRead(); renderTree(); renderList();
   showToast(`${on ? 'Marked' : 'Unmarked'} ${n} article${n === 1 ? '' : 's'}${on ? ' as read' : ' as unread'}`, 'Undo', () => {
-    for (const { id, ts, guard } of snapshot) { if (ts) state.read[id] = ts; else delete state.read[id]; if (guard) state.userUnread[id] = guard; else delete state.userUnread[id]; }
+    for (const { id, ts, guard } of snapshot) { cancelMarkTimer(id); if (ts) state.read[id] = ts; else delete state.read[id]; if (guard) state.userUnread[id] = guard; else delete state.userUnread[id]; }
     saveRead(); saveUserUnread(); renderTree(); renderList();
   });
 }
@@ -1229,8 +1245,7 @@ function openArticle(id) {
 
   if (state.expandedId && state.expandedId !== id) {
 
-    clearTimeout(state.markTimers.get(state.expandedId));
-    state.markTimers.delete(state.expandedId);
+    cancelMarkTimer(state.expandedId);
     state.keepVisible.add(state.expandedId);
   } else if (state.expandedId) state.keepVisible.add(state.expandedId);
   state.expandedId = id;
@@ -1242,8 +1257,7 @@ function openArticle(id) {
 }
 function closeArticle(keep = true) {
   if (!state.expandedId) return;
-  clearTimeout(state.markTimers.get(state.expandedId));
-  state.markTimers.delete(state.expandedId);
+  cancelMarkTimer(state.expandedId);
   if (keep) state.keepVisible.add(state.expandedId); 
   state.expandedId = null;
   renderList();
@@ -1383,9 +1397,10 @@ function bindEvents() {
   }, true);
 
   addEventListener('storage', (e) => {
-    if (e.key !== LS_READ && e.key !== LS_KEPT) return;
+    if (e.key !== LS_READ && e.key !== LS_KEPT && e.key !== LS_USERUNREAD) return;
     state.read = loadObj(LS_READ);
     state.kept = loadObj(LS_KEPT);
+    state.userUnread = loadObj(LS_USERUNREAD);
     renderAll();
   });
 
@@ -1466,6 +1481,10 @@ function bindEvents() {
     ui.bulkSelect = !ui.bulkSelect; state.bulkSel.clear(); syncControls(); renderList(); 
   });
   $('#menu-refresh').addEventListener('click', () => { $('#header-menu').classList.add('hidden'); refresh(true); });
+  $('#empty').addEventListener('click', (e) => {
+    if (!e.target.closest('[data-retry]')) return;
+    refresh(true);
+  });
   window.addEventListener('hashchange', () => syncFromHash()); 
   window.addEventListener('popstate', () => syncFromHash());   
   $('#menu-reset-read').addEventListener('click', () => {
@@ -1783,7 +1802,7 @@ async function refresh(manual = false) {
     const consolidated = await loadConsolidatedIntoState();
     if (!consolidated) {
 
-      await loadMany([...state.feeds.keys()], null, true);
+      await loadMany([...new Set([...state.feeds.keys(), ...state.failed])], null, true);
     }
     renderAll();
     flashUpdated();
@@ -1894,6 +1913,7 @@ async function loadConsolidatedIntoState() {
       }
     }
     state.index = { ...state.index, feeds: feedsMeta };
+    state.failed.clear();
     pruneReadState();
     return true;
   } catch {

@@ -745,7 +745,9 @@ console.log('degraded network: hung feed fetches never wedge the UI');
   await settle(700);
   const $$H = (s) => [...wH.document.querySelectorAll(s)];
   ok($$H('#tree .tree-item').length >= 4, 'sidebar renders from index.json even while feed fetches stall');
-  ok(wH.document.querySelector('#btn-mark-all').title === 'Mark all as unread', 'stalled loads settle via the fetch cap — no feed is stuck "loading" forever');
+  ok(wH.document.querySelector('#btn-mark-all').title === 'Mark all as read', 'stalled loads settle via the fetch cap — and a stalled feed never fakes "caught up"');
+  ok(wH.document.querySelector('#empty h3').textContent === "Couldn't load articles", 'the empty state names the load failure instead of celebrating');
+  ok(!!wH.document.querySelector('#empty [data-retry]'), 'the failed-load state offers a retry');
   wH.document.querySelector('#btn-mark-all-split').dispatchEvent(new wH.MouseEvent('click', { bubbles: true }));
   await settle(30);
   const item = wH.document.querySelector('#mark-menu [data-mark="unread"][data-older="1"]');
@@ -1375,6 +1377,111 @@ console.log('recently-read scope: restore-by-reading-age inside the 7-day view')
   const rowA = wV.document.querySelector('#list .row[data-id="v-a"]');
   ok(!!rowA && !rowA.classList.contains('unread'), 'the twelve-hour-old read stays read');
   domV.window.close();
+}
+console.log('an explicit mark-as-unread is never reverted by the pending delayed mark-read timer');
+{
+  const domW = new JSDOM(html, { url: 'https://example.test/', runScripts: 'outside-only', pretendToBeVisual: true });
+  const wW = domW.window;
+  const cfgW = { ...config, settings: { ...config.settings, markReadOnOpen: true, markReadAfterSeconds: 0.4 } };
+  wW.fetch = async (url) => {
+    const p = String(url).split('?')[0];
+    if (p === 'config.json') return { ok: true, status: 200, json: async () => structuredClone(cfgW) };
+    if (p === 'data/index.json') return { ok: true, status: 200, json: async () => structuredClone(index) };
+    if (p === 'data/all-feeds.json') return { ok: true, status: 200, json: async () => structuredClone(allFeeds) };
+    return { ok: false, status: 404, statusText: 'Not Found', json: async () => { throw new Error('404'); } };
+  };
+  wW.eval(appSrc);
+  await settle(1200);
+  const badgeW = () => Number(wW.document.querySelector('#badge-all-items').textContent);
+  const beforeW = badgeW();
+  const rowW = wW.document.querySelector('#list .row');
+  const idW = rowW.dataset.id;
+  rowW.dispatchEvent(new wW.MouseEvent('click', { bubbles: true }));
+  await settle(80);
+  wW.document.querySelector('#reader-slot [data-act="toggle-read"]').dispatchEvent(new wW.MouseEvent('click', { bubbles: true }));
+  await settle(80);
+  ok(badgeW() === beforeW - 1, 'manual toggle marks the open article read before the delay fires');
+  wW.document.querySelector('#reader-slot [data-act="toggle-read"]').dispatchEvent(new wW.MouseEvent('click', { bubbles: true }));
+  await settle(80);
+  ok(badgeW() === beforeW, 'explicit mark-as-unread on the open article lands');
+  await settle(900);
+  ok(badgeW() === beforeW, 'the pending delayed mark-read timer no longer reverts the explicit unread');
+  ok(!!wW.document.querySelector(`#list .row[data-id="${idW}"]`)?.classList.contains('unread'), 'the row still shows unread after the timer window passed');
+  wW.document.querySelector('#btn-mark-all').dispatchEvent(new wW.MouseEvent('click', { bubbles: true }));
+  await settle(30);
+  wW.document.querySelector('#confirm-yes').dispatchEvent(new wW.MouseEvent('click', { bubbles: true }));
+  await settle(200);
+  ok(badgeW() === 0, 'mark-all-as-read lands');
+  wW.document.querySelector('#btn-mark-all').dispatchEvent(new wW.MouseEvent('click', { bubbles: true }));
+  await settle(30);
+  wW.document.querySelector('#confirm-yes').dispatchEvent(new wW.MouseEvent('click', { bubbles: true }));
+  await settle(200);
+  ok(badgeW() === beforeW, 'mark-all-as-unread restores everything');
+  const openRow = wW.document.querySelector(`#list .row[data-id="${idW}"]`);
+  openRow.dispatchEvent(new wW.MouseEvent('click', { bubbles: true }));
+  await settle(120);
+  wW.document.querySelector('#btn-mark-all').dispatchEvent(new wW.MouseEvent('click', { bubbles: true }));
+  await settle(30);
+  wW.document.querySelector('#confirm-yes').dispatchEvent(new wW.MouseEvent('click', { bubbles: true }));
+  await settle(200);
+  wW.document.querySelector('#btn-mark-all').dispatchEvent(new wW.MouseEvent('click', { bubbles: true }));
+  await settle(30);
+  wW.document.querySelector('#confirm-yes').dispatchEvent(new wW.MouseEvent('click', { bubbles: true }));
+  await settle(900);
+  ok(badgeW() === beforeW, 'mass unread over an open article with a pending timer is not reverted either');
+  domW.window.close();
+}
+console.log('search: a trailing OR no longer matches everything; OR still unions groups');
+{
+  click('#search-open');
+  await settle(20);
+  const s = $('#search-input');
+  s.value = 'zzz-nothing-matches-this OR';
+  s.dispatchEvent(new window.Event('input', { bubbles: true }));
+  await settle(400);
+  ok(rowCount() === 0, 'a trailing OR with a dead term does not degrade into match-everything');
+  s.value = 'zzz-nothing-matches OR AI model';
+  s.dispatchEvent(new window.Event('input', { bubbles: true }));
+  await settle(400);
+  ok(rowCount() === 1, 'OR still unions groups (dead term OR real term = the real one)');
+  click('#search-close');
+  await settle(50);
+}
+console.log('author shown only when it differs from the feed title');
+{
+  const domX = new JSDOM(html, { url: 'https://example.test/', runScripts: 'outside-only', pretendToBeVisual: true });
+  const wX = domX.window;
+  const fixX = {
+    'fixture-tect': {
+      title: 'Tectone', site: 'https://youtube.test/tect', folder: 'tech',
+      articles: [
+        { id: 'x-1', title: 'Same author as channel', link: 'https://example.test/x1', date: now - 3600e3, author: 'Tectone', summary: 's', content: '<p>b</p>', text: null, enclosures: [], fetchedAt: now },
+        { id: 'x-2', title: 'Guest author', link: 'https://example.test/x2', date: now - 2 * 3600e3, author: 'Someone Else', summary: 's', content: '<p>b</p>', text: null, enclosures: [], fetchedAt: now },
+      ],
+    },
+  };
+  const idxX = { generatedAt: now, folders: [], feeds: { 'fixture-tect': { title: 'Tectone', site: 'https://youtube.test/tect', folder: 'tech', folders: ['tech'], count: 2, newest: now, oldest: now - 2 * 3600e3 } } };
+  wX.fetch = async (url) => {
+    const p = String(url).split('?')[0];
+    if (p === 'config.json') return { ok: true, status: 200, json: async () => structuredClone(config) };
+    if (p === 'data/index.json') return { ok: true, status: 200, json: async () => structuredClone(idxX) };
+    if (p === 'data/all-feeds.json') return { ok: true, status: 200, json: async () => structuredClone({ articles: fixX['fixture-tect'].articles.map((a) => ({ ...a, _feed: 'fixture-tect' })) }) };
+    return { ok: false, status: 404, statusText: 'Not Found', json: async () => { throw new Error('404'); } };
+  };
+  wX.eval(appSrc);
+  await settle(1200);
+  const rowsX = [...wX.document.querySelectorAll('#list .row')];
+  const sameAuthorRow = rowsX.find((r) => r.dataset.id === 'x-1');
+  const guestRow = rowsX.find((r) => r.dataset.id === 'x-2');
+  ok(!sameAuthorRow.querySelector('.author'), 'no redundant "Tectone by Tectone" in the row meta');
+  ok(!!guestRow.querySelector('.author') && guestRow.querySelector('.author').textContent === 'Someone Else', 'a genuinely different author still renders');
+  guestRow.dispatchEvent(new wX.MouseEvent('click', { bubbles: true }));
+  await settle(80);
+  ok(wX.document.querySelector('.reader-sub').textContent.includes('Someone Else'), 'the reader keeps the distinct author');
+  wX.document.querySelector('#list .row[data-id="x-1"]').dispatchEvent(new wX.MouseEvent('click', { bubbles: true }));
+  await settle(80);
+  ok(!wX.document.querySelector('.reader-sub').textContent.includes('by Tectone'), 'the reader drops the duplicate author too');
+  domX.window.close();
 }
 console.log('');
 console.log(`${pass} passed, ${fail} failed`);
