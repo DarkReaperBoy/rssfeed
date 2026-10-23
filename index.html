@@ -127,7 +127,7 @@ try {
             </div>
 
             <div id="search-wrap">
-              <button id="search-open" class="icon-btn" title="Search in current section" aria-label="Search"><svg><use href="#i-search"/></svg></button>
+              <button id="search-open" class="icon-btn" title="Search all articles" aria-label="Search"><svg><use href="#i-search"/></svg></button>
               <div id="search-box" class="hidden">
                 <svg class="search-icon"><use href="#i-search"/></svg>
                 <input id="search-input" type="search" placeholder="Search — feed: title: before: unread:true" autocomplete="off" spellcheck="false" aria-label="Search articles">
@@ -199,6 +199,13 @@ try {
 </div>
 
 <div id="scrim" class="hidden"></div>
+
+<noscript>
+  <div style="position:fixed;inset:0;background:#fefefe;color:#1a2433;display:flex;align-items:center;justify-content:center;text-align:center;padding:24px;font:15px/1.6 system-ui,sans-serif;z-index:999">
+    <p><strong>This reader runs entirely in your browser and needs JavaScript.</strong><br>
+    Articles are fetched into <code>data/</code> by a GitHub Action — enable JavaScript to read them.</p>
+  </div>
+</noscript>
 
 <div id="toast" class="hidden" role="status" aria-live="polite"><span id="toast-text"></span><button id="toast-action"></button></div>
 

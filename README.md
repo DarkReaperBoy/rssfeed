@@ -36,7 +36,7 @@ There is no settings modal and no database: **you configure everything by editin
     "view": "list",                // default layout for new visitors: list | expanded | column | cards | magazine
     "retentionDays": 60,           // fetcher prunes everything older (read and unread alike) — 60 days so "older than a month" restore has real history to work with
     "markReadOnOpen": true,        // opening an article marks it read
-    "markReadAfterSeconds": 0,     // …after a delay instead (cancelled if you close it first)
+    "markReadAfterSeconds": 0,     // …after a delay instead (cancelled if you close it first; a delay > 0 works even with markReadOnOpen: false)
     "refreshMinutes": 5,           // UI polls for new data on this wall-clock grid (min 5) — aligned to the CI refresh
     "fullTextDefault": false,      // extract full article text for every feed (unless feed.fullText overrides)
     "dropShorts": true,            // YouTube: drop Shorts (per-feed "dropShorts": false opts a channel back in)
@@ -180,7 +180,7 @@ Don't want to hand-write feeds? Export OPML from Inoreader (or any reader), save
 - **Mark by age or exact date**: the ✓ ▾ menu offers **exactly one group** — *Mark as read* while unread articles exist, *Mark as unread* once everything here is read (the same rule as the ✓ button flip). The offered group carries *Older than a day / two days / a week / a month* presets and a **“Before… <date>”** picker. Clicks always respond: they wait for feeds that are still loading (capped, with a visible "still loading" notice) — never silently dead-end. Zero-result actions explain themselves — and when the cutoff is older than the data itself (past `retentionDays`), the toast says where the data starts: *"No read articles from before Aug 10, 2026 here — data goes back to Aug 24, 2026"*
 - **Caught-up flip**: when a feed/folder/newsfeed is fully read ("All caught up 🎉"), the SAME top ✓ button becomes *Mark all as unread* — one confirmed click un-marks everything. Marked a whole folder read by accident? It's recoverable
 - **Auto-sync aligned with CI**: the Action refreshes on a self-healing quarter-hourly schedule (gate-capped at ~hourly) and publishes ~1–3 min after it starts; open tabs poll on a 5-minute wall-clock grid (`refreshMinutes`), so new articles land within ~5 minutes — announced with a toast, your open article and reading position untouched. A backgrounded tab catches up the moment you focus it
-- **Unread is sacred**: nothing marks an article read except you (open, the tick button, bulk, or a `markRead` filter); `keepUnread` filters — and your explicit "keep unread" flags — beat all of it
+- **Unread is sacred**: nothing marks an article read except you (open, the tick button, bulk, or a `markRead` filter); `keepUnread` filters — and your explicit "keep unread" flags — beat all of it, and an article you deliberately un-read stays unread even when a `markRead` filter re-runs on the next load
 - **Single read-state indicator**: the tick button on each row shows the state (✓ = read, ○ = unread; its tooltip carries the action); the reader title links to the original article
 - **No vanishing rows**: an article you just read stays in the Unread view (ticked) until you open another article or change the view
 - **Deep links + Back/Forward**: opening an article sets `#article/<id>` in the URL as a history entry — Back returns you to the previous article (also works for the reader's prev/next buttons); a refresh reopens the article straight from the URL; closing the reader (Escape/collapse/re-click) replaces the hash instead of stacking history
@@ -193,7 +193,7 @@ Don't want to hand-write feeds? Export OPML from Inoreader (or any reader), save
 - Inline reading pane with prev/next, original site link, mark read/unread, "keep unread", attachments list
 - **Text view**: feeds with `fullText` get readability-extracted clean article text (vs. truncated feed content)
 - **Embeds**: YouTube/Vimeo click-to-play (privacy `youtube-nocookie`), SoundCloud, inline audio/video players
-- Search with operators: `feed:bbc title:ai before:2026-01-01 after:2025-12-01 unread:true is:read is:unread`, plus `OR` groups
+- Search (global — it spans every feed, use `feed:` to narrow) with operators: `feed:bbc title:ai before:2026-01-01 after:2025-12-01 unread:true is:read is:unread`, plus `OR` groups
 - Full-text search across titles, authors, summaries and article bodies
 - Multiple select (bulk mark read/unread with undo), badge-click mark-read with undo, mark-all with confirm
 - **Keyboard**: `j`/`k` = next/previous article, `m` = toggle read, `o`/`v` = open original, `s` = keep unread, `/` = search, `Escape` closes the topmost layer (menu first, then the reader) — typing in an input never triggers them
@@ -209,8 +209,8 @@ Don't want to hand-write feeds? Export OPML from Inoreader (or any reader), save
 npm ci          # fetch-script deps only (UI has zero deps)
 npm run fetch   # fetch feeds into ./data (also what CI runs)
 npm run serve   # http://localhost:8080
-npm run test:ui # jsdom smoke test of the UI against local data (227 assertions)
-npm run test:e2e # full fetcher pipeline against local fixtures (id stability, 304s)
+npm run test:ui # jsdom smoke test of the UI against local data (258 assertions)
+npm run test:e2e # full fetcher pipeline against local fixtures (id stability, 304s, retitle migration)
 ```
 
 `data/` and `node_modules/` are git-ignored; CI assembles `index.html + assets/ + config.json + data/` into the `gh-pages` branch. See `AGENTS.md` for architecture details.

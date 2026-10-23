@@ -35,9 +35,11 @@ const parser = new Parser({
 });
 
 const sanitizeOpts = {
-  allowedTags: sanitizeHtml.defaults.allowedTags.concat([
+  // Set-dedupe: sanitize-html's defaults already include span — the old concat
+  // listed it twice.
+  allowedTags: [...new Set(sanitizeHtml.defaults.allowedTags.concat([
     'img', 'h1', 'h2', 'figure', 'figcaption', 'picture', 'source', 'video', 'audio', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'hr', 'br', 'blockquote', 'pre', 'code', 'iframe', 'span',
-  ]),
+  ]))],
   allowedAttributes: {
     ...sanitizeHtml.defaults.allowedAttributes,
     a: ['href', 'title', 'rel', 'target'],
@@ -46,6 +48,10 @@ const sanitizeOpts = {
     video: ['src', 'controls', 'width', 'height', 'poster', 'preload'],
     audio: ['src', 'controls', 'preload'],
     iframe: ['src', 'width', 'height', 'frameborder', 'allow', 'allowfullscreen', 'loading', 'title'],
+    // The transformTags fallback marks blocked embeds so the CLIENT can remove
+    // them wholesale — without this allow entry the attribute was stripped and
+    // empty <div>s littered the stored markup.
+    div: ['data-blocked-embed'],
     // No '*' => ['class','style']: feed-supplied classes could collide with
     // the app's own (.hidden, .modal, .row…) and inline styles could overlay
     // fixed-position UI or fire tracking-pixel requests. The client strips
@@ -68,12 +74,17 @@ const sanitizeOpts = {
     }),
     iframe: (tag, attrs) => {
       const src = attrs.src || '';
-      const ok = /^https:\/\/(www\.)?(youtube-nocookie\.com\/embed\/|player\.vimeo\.com\/video\/|soundcloud\.com\/)/.test(src);
+      // NOTE: this allowlist is MIRRORED in app.js sanitizeReaderDom — keep the
+      // two identical. SoundCloud's real embed host is w.soundcloud.com/player
+      // (the old `soundcloud.com/` here allowed a form the client then stripped,
+      // and the client allowed a form the server had already converted to a div
+      // — feed-embedded SoundCloud players were silently lost both ways).
+      const ok = /^https:\/\/(www\.)?(youtube-nocookie\.com\/embed\/|player\.vimeo\.com\/video\/|w\.soundcloud\.com\/player\/)/.test(src);
       return ok ? { tagName: 'iframe', attribs: attrs } : { tagName: 'div', attribs: { 'data-blocked-embed': src } };
     },
   },
 };
-const sanitize = (html) => sanitizeHtml(html || '', sanitizeOpts);
+export const sanitize = (html) => sanitizeHtml(html || '', sanitizeOpts);
 
 // Decode entities for titles/summaries. Numeric references are DECODED (they
 // used to become " " — &#8217; left a stray ";" mid-word: "Don ;t"); &amp;
@@ -753,7 +764,13 @@ async function main() {
     let filterDropped = 0;
     for (const item of parsed.items || []) {
       const title = stripTags(item.title || '(untitled)') || '(untitled)';
-      const link = item.link || item.guid || '';
+      // A feed-supplied <link> is data, not a trusted URL: javascript:/data:
+      // hrefs used to flow into the stored article (and from there into the
+      // reader's anchors and window.open). Only http(s) survives; a GUID can
+      // stand in when it is itself a usable URL. Ids keep keying on guid/id
+      // first, so sanitizing a junk link never re-keys a legit article.
+      const isHttpUrl = (u) => typeof u === 'string' && /^https?:\/\//i.test(u.replace(/[\s\u0000-\u001f]+/g, ''));
+      const link = isHttpUrl(item.link) ? item.link : (isHttpUrl(item.guid) ? item.guid : '');
       const content = pickContent(item);
       if (ytShorts && isShortItem(link, title, content)) { shortsDropped++; continue; }
       const author = stripTags(item.creator || item.author || '').slice(0, 120) || null;

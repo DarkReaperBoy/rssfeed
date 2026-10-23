@@ -39,6 +39,18 @@ const FIX = {
     title: 'BBC News', site: 'https://www.bbc.com/news', folder: 'news',
     articles: mkArticles('fixture-bbc', ['Election update', 'Climate summit', 'Market swing', 'Sports final', 'Tech regulation']),
   },
+  // hostile-feed regression: junk-scheme links must never reach an href, and
+  // a feed-embedded SoundCloud player (w.soundcloud.com/player) must survive
+  // the client sanitizer now that the server allowlist matches it.
+  'fixture-junk': {
+    title: 'Junk Feed', site: 'https://junk.test', folder: 'junk',
+    articles: [{
+      id: 'fixture-junk-0', title: 'Hostile link article', link: 'javascript:alert(1)',
+      date: now - 60 * 60e3, author: null, summary: 'junk',
+      content: '<p>hello <iframe src="https://w.soundcloud.com/player/?url=https%3A%2F%2Fapi.soundcloud.com%2Ftracks%2F1"></iframe></p>',
+      text: null, enclosures: [], fetchedAt: now,
+    }],
+  },
 };
 // full-text fixture: the reader must prefer a.text over the shorter a.content
 FIX['fixture-verge'].articles[2].text = '<p>Extracted full text present</p>';
@@ -526,6 +538,76 @@ ok($('#scope-title').textContent === 'Technology', 'collapsing keeps the folder 
 click('.tree-item[data-scope="all"]'); // back to the Newsfeed
 await settle(50);
 
+console.log('hostile feed links never become URLs');
+{
+  const junkRow = $('#list .row[data-id="fixture-junk-0"]');
+  ok(!!junkRow, 'junk-feed article renders');
+  ok(junkRow.querySelector('[data-act="open-original"]').getAttribute('href') === '#', 'a javascript: "link" degrades to # (never an executable href)');
+  click(junkRow);
+  await settle(60);
+  ok(!$('#reader-slot .reader-title a'), 'the reader title is plain text when there is no usable http(s) link');
+  ok(!!$('#reader-slot .reader-body iframe') && $('#reader-slot .reader-body iframe').src.includes('w.soundcloud.com/player/'), 'feed-embedded SoundCloud players survive the client sanitizer (allowlist now matches the server)');
+  click($('#reader-slot [data-act="collapse"]'));
+  await settle(50);
+}
+
+console.log('search is global — it crosses the current feed/folder scope');
+{
+  click('.tree-item[data-scope="feed:fixture-bbc"]');
+  await settle(60);
+  ok($('#scope-title').textContent === 'BBC News', 'viewing a single feed');
+  click('#search-open');
+  await settle(20);
+  const gs = $('#search-input');
+  gs.value = 'Rust 2.0';
+  gs.dispatchEvent(new window.Event('input', { bubbles: true }));
+  await settle(400);
+  ok(rowCount() === 1 && /Rust 2\.0/.test($('#list .row .row-title').textContent), 'a search from inside one feed finds HN articles (the old scope clip hid them)');
+  click('#search-close');
+  await settle(60);
+  ok(rowCount() === 5, 'closing search restores the feed view');
+  click('.tree-item[data-scope="all"]');
+  await settle(60);
+}
+
+console.log('a read click patches the sidebar in place (no favicon churn)');
+{
+  const bbcItem = $('.tree-item[data-scope="feed:fixture-bbc"]');
+  const bbcBadge = bbcItem.querySelector('.badge');
+  const before = Number(bbcBadge.textContent);
+  click($('#list .row[data-id="fixture-bbc-0"]'));
+  await settle(80);
+  ok($('.tree-item[data-scope="feed:fixture-bbc"]') === bbcItem, 'the sidebar row ELEMENT survives a read click (no full tree rebuild — favicons/scroll stay put)');
+  ok(Number($('.tree-item[data-scope="feed:fixture-bbc"] .badge').textContent) === before - 1, 'the badge count still updates');
+  window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'm', bubbles: true }));
+  await settle(80);
+  ok(Number($('.tree-item[data-scope="feed:fixture-bbc"] .badge').textContent) === before, 'm toggles the open article back to unread (same path as the row tick)');
+  click($('#reader-slot [data-act="collapse"]'));
+  await settle(50);
+}
+
+console.log('Recently read: mark-all is the honest mass un-read, never a backlog nuke');
+{
+  click('#badge-all-items'); // everything read
+  await settle(150);
+  click('#btn-more');
+  await settle(20);
+  click('#status-items [data-status="recently-read"]');
+  await settle(80);
+  ok($('#scope-title').textContent === 'Recently read', 'recently-read view');
+  ok(rowCount() > 0, 'read articles are listed');
+  ok($('#btn-mark-all').title === 'Mark all as unread', 'the view is caught-up by definition → the SAME button flips to the honest mass un-read');
+  click('#btn-mark-all');
+  await settle(20);
+  ok($('#confirm-text').textContent.includes('as unread'), 'the confirm offers un-read (it used to say Recently read while marking the entire UNREAD backlog)');
+  click('#confirm-yes');
+  await settle(80);
+  ok(rowCount() === 0, 'nothing is read anymore → the read-only view empties');
+  click('.tree-item[data-scope="all"]');
+  await settle(80);
+  ok(rowCount() === TOTAL - HIDDEN, 'back in the Newsfeed with every article unread');
+}
+
 console.log('refresh/restore: boot with #article/<id> in the URL');
 {
   const dom2 = new JSDOM(html, { url: 'https://example.test/#article/fixture-hn-3', runScripts: 'outside-only', pretendToBeVisual: true });
@@ -571,6 +653,81 @@ console.log('feed-storage version reset');
   await settle(1200);
   ok(Number(w4.document.querySelector('#badge-all-items').textContent) === TOTAL - HIDDEN - 1, 'same-version storage is kept (no re-reset)');
   dom4.window.close();
+}
+
+console.log('markReadAfterSeconds opts in on its own (markReadOnOpen:false + delay used to be silently dead)');
+{
+  const dom5 = new JSDOM(html, { url: 'https://example.test/', runScripts: 'outside-only', pretendToBeVisual: true });
+  const w5 = dom5.window;
+  w5.fetch = async (url) => {
+    const p = String(url).split('?')[0];
+    if (p === 'config.json') return { ok: true, status: 200, json: async () => structuredClone({ ...config, settings: { ...config.settings, markReadOnOpen: false, markReadAfterSeconds: 0.3 } }) };
+    if (p === 'data/index.json') return { ok: true, status: 200, json: async () => structuredClone(index) };
+    if (p === 'data/all-feeds.json') return { ok: true, status: 200, json: async () => structuredClone(allFeeds) };
+    return { ok: false, status: 404, statusText: 'Not Found', json: async () => { throw new Error('404'); } };
+  };
+  w5.eval(appSrc);
+  w5.document.dispatchEvent(new w5.Event('DOMContentLoaded', { bubbles: true }));
+  await settle(1200);
+  const badge5 = () => Number(w5.document.querySelector('#badge-all-items').textContent);
+  const before5 = badge5();
+  w5.document.querySelector('#list .row').dispatchEvent(new w5.MouseEvent('click', { bubbles: true }));
+  await settle(80);
+  ok(badge5() === before5, 'not marked read instantly (markReadOnOpen:false)');
+  await settle(500);
+  ok(badge5() === before5 - 1, 'the configured delay marks it read — a delay > 0 opts in on its own');
+  const r2 = w5.document.querySelectorAll('#list .row')[1];
+  const id2 = r2.dataset.id;
+  r2.dispatchEvent(new w5.MouseEvent('click', { bubbles: true }));
+  await settle(60);
+  // re-query: opening rebuilds the list, the old element reference is detached
+  w5.document.querySelector(`#list .row[data-id="${id2}"]`).dispatchEvent(new w5.MouseEvent('click', { bubbles: true })); // collapse before the 300 ms delay
+  await settle(500);
+  ok(badge5() === before5 - 1, 'closing the article before the delay cancels the pending mark');
+  dom5.window.close();
+}
+
+console.log('an explicit un-read beats markRead filters — even after a reload (filters re-run at load)');
+{
+  const dom6 = new JSDOM(html, { url: 'https://example.test/', runScripts: 'outside-only', pretendToBeVisual: true });
+  const w6 = dom6.window;
+  const cfg6 = { ...config, filters: [...config.filters, { id: 'test-markread', name: 'mr', feeds: ['fixture-bbc'], include: { title: ['Election'] }, actions: { markRead: true } }] };
+  w6.fetch = async (url) => {
+    const p = String(url).split('?')[0];
+    if (p === 'config.json') return { ok: true, status: 200, json: async () => structuredClone(cfg6) };
+    if (p === 'data/index.json') return { ok: true, status: 200, json: async () => structuredClone(index) };
+    if (p === 'data/all-feeds.json') return { ok: true, status: 200, json: async () => structuredClone(allFeeds) };
+    return { ok: false, status: 404, statusText: 'Not Found', json: async () => { throw new Error('404'); } };
+  };
+  w6.eval(appSrc);
+  w6.document.dispatchEvent(new w6.Event('DOMContentLoaded', { bubbles: true }));
+  await settle(1200);
+  const badge6 = () => Number(w6.document.querySelector('#badge-all-items').textContent);
+  const rowByTitle = (re) => [...w6.document.querySelectorAll('#list .row')].find((r) => re.test(r.querySelector('.row-title').textContent));
+  ok(badge6() === TOTAL - HIDDEN - 1, 'the markRead filter auto-read its match at load (Election update)');
+  // switch to All articles so the read row is visible and clickable
+  w6.document.querySelector('#btn-more').dispatchEvent(new w6.MouseEvent('click', { bubbles: true }));
+  await settle(20);
+  w6.document.querySelector('#status-items [data-status="all"]').dispatchEvent(new w6.MouseEvent('click', { bubbles: true }));
+  await settle(80);
+  const electionRow = rowByTitle(/^Election update$/);
+  ok(!!electionRow && !electionRow.classList.contains('unread'), 'the filter-read article shows as read');
+  electionRow.querySelector('[data-act="toggle-read"]').dispatchEvent(new w6.MouseEvent('click', { bubbles: true }));
+  await settle(80);
+  ok(badge6() === TOTAL - HIDDEN, 'the user un-reads it');
+  // a refresh re-runs the consolidated load → applyFiltersToFeed → the old code re-marked it read here
+  w6.document.querySelector('#menu-refresh').dispatchEvent(new w6.MouseEvent('click', { bubbles: true }));
+  await settle(600);
+  ok(badge6() === TOTAL - HIDDEN, 'the explicit un-read SURVIVES the filter re-running (guard persisted, not session-scoped)');
+  const electionRow2 = rowByTitle(/^Election update$/);
+  ok(!!electionRow2 && electionRow2.classList.contains('unread'), 'the article is still unread after the reload');
+  electionRow2.querySelector('[data-act="toggle-read"]').dispatchEvent(new w6.MouseEvent('click', { bubbles: true }));
+  await settle(80);
+  ok(badge6() === TOTAL - HIDDEN - 1, 're-reading it clears the guard (the filter owns it again)');
+  w6.document.querySelector('#menu-refresh').dispatchEvent(new w6.MouseEvent('click', { bubbles: true }));
+  await settle(600);
+  ok(badge6() === TOTAL - HIDDEN - 1, 'and stays read — no seesaw');
+  dom6.window.close();
 }
 
 console.log('degraded network: hung feed fetches never wedge the UI');
@@ -788,6 +945,18 @@ console.log('fetch.mjs pure helpers (entity decode, linkify, ids, matchers)');
   ok(fetchMod.feedFilterDrop({ title: 't', content: '', author: 'bob', link: 'https://other.dev/' }, { include: bAliased }) === true, 'aliased-field miss drops');
 }
 
+console.log('server sanitizer: iframe allowlist mirrors the client (SoundCloud embeds)');
+{
+  const fetchMod = await import('./fetch.mjs');
+  const kept = fetchMod.sanitize('<p><iframe src="https://w.soundcloud.com/player/?url=https%3A%2F%2Fapi.soundcloud.com%2Ftracks%2F1"></iframe></p>');
+  ok(/<iframe[^>]+w\.soundcloud\.com\/player\//.test(kept), 'w.soundcloud.com/player iframes survive (the real embed URL — the old server regex allowed a form the client stripped)');
+  const blocked = fetchMod.sanitize('<p><iframe src="https://soundcloud.com/player/?url=x"></iframe></p>');
+  ok(!blocked.includes('<iframe'), 'non-player soundcloud.com iframes are converted, not passed through');
+  ok(blocked.includes('data-blocked-embed'), 'the blocked-embed marker survives sanitization (client removes those nodes wholesale — the marker attr used to be stripped, littering empty divs)');
+  const yt = fetchMod.sanitize('<p><iframe src="https://www.youtube-nocookie.com/embed/abc"></iframe></p>');
+  ok(/<iframe[^>]+youtube-nocookie\.com/.test(yt), 'youtube-nocookie embeds still pass');
+}
+
 console.log('Hacker News deep windows — Algolia\'s 1000-hit cap splits into date ranges');
 {
   const hn = await import('./hackernews.mjs');
@@ -836,6 +1005,8 @@ console.log('Hacker News deep windows — Algolia\'s 1000-hit cap splits into da
   let fpCalls = 0;
   const fp = await hn.hnFetchAllPages(async () => { fpCalls++; return { ok: true, status: 200, json: async () => ({ hits: mk(1, 30), nbHits: 30 }) }; }, {}, { retentionDays: 30, now: NOW });
   ok(fpCalls === 1 && fp.hits.length === 30 && !fp.truncated, 'no-caps front_page queries never split (the URL ignores ranges — splitting would refetch and duplicate)');
+  const dup = await hn.hnFetchAllPages(async () => ({ ok: true, status: 200, json: async () => ({ hits: [...mk(1, 10), ...mk(1, 10)], nbHits: 20 }) }), { minPoints: 150 }, { retentionDays: 30, now: NOW });
+  ok(dup.hits.length === 10, 'duplicate objectIDs across range halves collapse (defensive dedup — a boundary change upstream can no longer double stories)');
   ok(hn.hnApiUrl({ minPoints: 150 }, { retentionDays: 60, now: NOW }).includes(`created_at_i%3E${START}`), 'window bound derives from retentionDays');
   const sliced = hn.hnApiUrl({ minPoints: 150 }, { retentionDays: 60, now: NOW, fromSec: START, toSec: NOWS - 30 * 86400 });
   ok(sliced.includes('created_at_i%3C%3D'), 'range slicing encodes the closed upper bound');

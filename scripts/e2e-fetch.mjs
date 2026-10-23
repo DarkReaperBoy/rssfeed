@@ -17,8 +17,7 @@ let feed2Hits = 0;
 let retitle = false;
 
 const item = (i, t, extra = '') => `<item><title>${t}</title><link>https://example.test/a/${i}</link><guid>https://example.test/a/${i}</guid><pubDate>${new Date(now - i * 3600e3).toUTCString()}</pubDate><description>Body of ${t}${extra}</description></item>`;
-const rss1 = () => `<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel><title>Feed One</title>${item(1, 'First post')}${item(2, 'Second post')}${item(3, 'Undated post')}</item>`.replace('</item>$', '') + '</channel></rss>';
-// build feed1 with item 3 carrying no pubDate
+// feed1: items 1-2 dated, item 3 undated (first-seen date must stick across runs)
 const rss1Real = () => {
   const undated = '<item><title>Undated post</title><link>https://example.test/a/3</link><guid>https://example.test/a/3</guid><description>No date here</description></item>';
   return `<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel><title>Feed One</title>${item(1, retitle ? 'First post (EDITED TITLE)' : 'First post')}${item(2, 'Second post')}${undated}</channel></rss>`;

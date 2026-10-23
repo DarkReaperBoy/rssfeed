@@ -83,6 +83,10 @@ jobs:
         if: env.SKIP_FETCH != 'true'
         run: npm run test:ui
 
+      - name: Fetcher e2e (id stability, conditional GET)
+        if: env.SKIP_FETCH != 'true'
+        run: npm run test:e2e
+
       - name: Fetch feeds
         if: env.SKIP_FETCH != 'true'
         run: npm run fetch

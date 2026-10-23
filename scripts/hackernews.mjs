@@ -95,7 +95,18 @@ export async function hnFetchAllPages(doFetch, feed, { retentionDays = 30, now =
     hits.push(...pageHits);
   };
   await fetchRange(startSec, 0, true);
-  return { hits, requests, truncated };
+  // Defensive dedup by objectID: the half-ranges are disjoint by construction
+  // (created_at_i>X / <=X), but a boundary change upstream would otherwise
+  // silently double every boundary story.
+  const seen = new Set();
+  const unique = [];
+  for (const h of hits) {
+    if (!h?.objectID) continue;
+    if (seen.has(h.objectID)) continue;
+    seen.add(h.objectID);
+    unique.push(h);
+  }
+  return { hits: unique, requests, truncated };
 }
 
 const stripHnHtml = (html) =>
@@ -119,7 +130,10 @@ export function hnHitToArticle(hit, { now = Date.now() } = {}) {
   const itemUrl = `https://news.ycombinator.com/item?id=${oid}`;
   const points = Number(hit?.points) || 0;
   const comments = Number(hit?.num_comments) || 0;
-  const link = hit?.url || itemUrl; // Ask HN / polls have no external url
+  // hit.url is user-submitted data — a javascript:/data: "url" must never
+  // become the article's outbound link (same rule as RSS links in fetch.mjs).
+  const extUrl = typeof hit?.url === 'string' && /^https?:\/\//i.test(hit.url.replace(/[\s\u0000-\u001f]+/g, '')) ? hit.url : '';
+  const link = extUrl || itemUrl; // Ask HN / polls have no external url
   const title = (stripHnHtml(hit?.title) || '(untitled)').slice(0, 200);
   const storyText = typeof hit?.story_text === 'string' ? hit.story_text : '';
   const plainText = stripHnHtml(storyText);
