@@ -3,11 +3,20 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
 <title>My RSSFeed</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='6' cy='18' r='2.5' fill='%23e8710a'/%3E%3Cpath d='M4 10a10 10 0 0 1 10 10h3A13 13 0 0 0 4 7z' fill='%23f5a623'/%3E%3Cpath d='M4 4a16 16 0 0 1 16 16h3A19 19 0 0 0 4 1z' fill='%23e8710a'/%3E%3C/svg%3E">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+<script>
+/* Paint the right theme BEFORE the stylesheet: config.json's theme arrives
+   async, so returning dark-mode visitors used to get a white flash every load.
+   ghrss:theme is the last-applied theme (app.js keeps it fresh). */
+try {
+  var t = JSON.parse(localStorage.getItem('ghrss:theme') || '"auto"');
+  if (t === 'dark' || (t !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches)) {
+    document.documentElement.dataset.theme = 'dark';
+  }
+} catch (e) {}
+</script>
 <link rel="stylesheet" href="assets/styles.css?v=20261026">
 </head>
 <body>
@@ -53,13 +62,13 @@
           <div id="pdinner_today" class="parent_div hidden">
             <button class="tree-item" data-scope="today" title="Today">
               <i class="sys-icon"><svg><use href="#i-today"/></svg></i><span class="label">Today</span>
-              <span class="badge" id="badge-today" data-markread="today" title="Mark as read"></span>
+              <span class="badge" id="badge-today" role="button" tabindex="0" data-markread="today" title="Mark as read"></span>
             </button>
           </div>
           <div id="parent_all_articles" class="parent_div">
             <button class="tree-item" data-scope="all" title="Newsfeed">
               <i class="sys-icon"><svg><use href="#i-all"/></svg></i><span class="label">Newsfeed</span>
-              <span class="badge" id="badge-all-items" data-markread="all" title="Mark as read"></span>
+              <span class="badge" id="badge-all-items" role="button" tabindex="0" data-markread="all" title="Mark as read"></span>
             </button>
           </div>
           <div id="tree"></div>
@@ -77,7 +86,7 @@
   <div id="content-wrapper">
     <header id="header_pane">
       <div class="heading-wrapper">
-        <button id="menu-toggle" class="icon-btn" title="Menu"><svg><use href="#i-menu"/></svg></button>
+        <button id="menu-toggle" class="icon-btn" title="Menu" aria-label="Toggle sidebar"><svg><use href="#i-menu"/></svg></button>
         <div class="heading-title">
           <div class="title-block">
             <div class="title-row">
@@ -90,8 +99,8 @@
           <div id="header-right-controls">
             <div class="mark-wrap">
               <div class="btn-group-markread">
-                <button id="btn-mark-all" class="btn-heading" title="Mark all as read"><svg><use href="#i-read"/></svg></button>
-                <button id="btn-mark-all-split" class="btn-heading btn-split" title="Mark as read articles"><svg><use href="#i-chevron"/></svg></button>
+                <button id="btn-mark-all" class="btn-heading" title="Mark all as read" aria-label="Mark all as read"><svg><use href="#i-read"/></svg></button>
+                <button id="btn-mark-all-split" class="btn-heading btn-split" title="More mark actions" aria-label="More mark actions" aria-haspopup="menu" aria-expanded="false"><svg><use href="#i-chevron-down"/></svg></button>
               </div>
               <div id="mark-menu" class="dropdown dropdown-mark hidden">
                 <!-- Exactly ONE group is offered at a time — the same rule as the
@@ -118,16 +127,16 @@
             </div>
 
             <div id="search-wrap">
-              <button id="search-open" class="icon-btn" title="Search in current section"><svg><use href="#i-search"/></svg></button>
+              <button id="search-open" class="icon-btn" title="Search in current section" aria-label="Search"><svg><use href="#i-search"/></svg></button>
               <div id="search-box" class="hidden">
                 <svg class="search-icon"><use href="#i-search"/></svg>
-                <input id="search-input" type="search" placeholder="Search — feed: title: before: unread:true" autocomplete="off" spellcheck="false">
-                <button id="search-close" class="icon-btn" title="Close search"><svg><use href="#i-close"/></svg></button>
+                <input id="search-input" type="search" placeholder="Search — feed: title: before: unread:true" autocomplete="off" spellcheck="false" aria-label="Search articles">
+                <button id="search-close" class="icon-btn" title="Close search" aria-label="Close search"><svg><use href="#i-close"/></svg></button>
               </div>
             </div>
           </div>
           <div class="more-wrap">
-            <button id="btn-more" class="icon-btn" title="More"><svg><use href="#i-dots"/></svg></button>
+            <button id="btn-more" class="icon-btn" title="More" aria-label="More options" aria-haspopup="menu" aria-expanded="false"><svg><use href="#i-dots"/></svg></button>
             <div id="header-menu" class="dropdown dropdown-more hidden">
               <div class="menu-label">Article list</div>
               <div id="status-items">
@@ -182,8 +191,8 @@
         <div id="reader-slot" class="hidden"></div>
       </aside>
       <div id="scroll-nav">
-        <button id="scroll-up" class="scroll-btn" title="Previous articles"><svg><use href="#i-chevron-up"/></svg></button>
-        <button id="scroll-down" class="scroll-btn" title="Next articles"><svg><use href="#i-chevron-down"/></svg></button>
+        <button id="scroll-up" class="scroll-btn" title="Previous article (k)" aria-label="Previous article"><svg><use href="#i-chevron-up"/></svg></button>
+        <button id="scroll-down" class="scroll-btn" title="Next article (j)" aria-label="Next article"><svg><use href="#i-chevron-down"/></svg></button>
       </div>
     </div>
   </div>
@@ -200,7 +209,7 @@
   <button class="tool-btn" id="bulk-clear">Clear</button>
 </div>
 
-<div id="confirm-modal" class="modal hidden" role="dialog" aria-modal="true">
+<div id="confirm-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
   <div class="modal-card modal-small">
     <div class="modal-head"><h2 id="confirm-title">Confirm</h2></div>
     <div class="modal-body">
