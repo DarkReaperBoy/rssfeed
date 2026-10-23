@@ -2,7 +2,7 @@
 
 A self-hosted RSS reader with **no server and no database**:
 
-- **GitHub Actions** refreshes the data **at least hourly, self-healing** (RSS + Atom + YouTube channels + 4chan boards + Hacker News): GitHub's scheduler skips cron slots at random (multi-hour streaks observed), so the workflow is scheduled every 15 minutes and skips early when the published data is <45 min old — the real cadence stays ~hourly, but whichever slot lands first after the data goes stale does the fetch. It extracts clean full text and publishes the site to the **`gh-pages` branch**
+- **GitHub Actions** refreshes the data **at least hourly, self-healing** (RSS + Atom + YouTube channels + 4chan boards + Hacker News): GitHub's scheduler skips cron slots at random (multi-hour streaks observed), so the workflow is scheduled every 15 minutes (deliberately off the congested `:00` minute) and skips early when the published data is <45 min old — the real cadence stays ~hourly, but whichever slot lands first after the data goes stale does the fetch. It extracts clean full text and publishes the site to the **`gh-pages` branch**
 - **GitHub Pages** serves the Inoreader-style reader UI
 - **`config.json`** is the entire configuration: settings, folders, feeds, per-feed word filters and content filters — plus an optional **`feeds.opml`** export (e.g. Inoreader's) that can provide the feed list, imported server-side by the fetcher
 - **YouTube Shorts are banned by default** (`settings.dropShorts`) — shorts slop never enters your unread list, and previously stored Shorts are purged from the retained data on every run (turning the filter on later cleans old articles too)
