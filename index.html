@@ -46,6 +46,7 @@ try {
   <symbol id="i-prev" viewBox="0 0 24 24"><path d="M15.4 7.4 14 6l-6 6 6 6 1.4-1.4L10.8 12z"/></symbol>
   <symbol id="i-next" viewBox="0 0 24 24"><path d="M8.6 16.6 10 18l6-6-6-6-1.4 1.4L13.2 12z"/></symbol>
   <symbol id="i-chevron-up" viewBox="0 0 24 24"><path d="M12 8l6 6-1.4 1.4L12 10.8l-4.6 4.6L6 14z"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><path d="M19.4 13c.07-.33.1-.66.1-1s-.03-.67-.1-1l2.12-1.63a.5.5 0 0 0 .12-.64l-2-3.46a.5.5 0 0 0-.61-.22l-2.5 1a7.6 7.6 0 0 0-1.7-1l-.37-2.65A.5.5 0 0 0 14 2.5h-4a.5.5 0 0 0-.5.42L9.2 5.57a7.6 7.6 0 0 0-1.7 1l-2.5-1a.5.5 0 0 0-.6.22l-2 3.46a.5.5 0 0 0 .12.64L4.6 11c-.07.33-.1.66-.1 1s.03.67.1 1l-2.1 1.63a.5.5 0 0 0-.12.64l2 3.46c.13.22.4.31.61.22l2.5-1a7.6 7.6 0 0 0 1.7 1l.37 2.65a.5.5 0 0 0 .5.42h4a.5.5 0 0 0 .5-.42l.37-2.65a7.6 7.6 0 0 0 1.7-1l2.5 1c.22.09.48 0 .61-.22l2-3.46a.5.5 0 0 0-.12-.64L19.4 13zM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"/></symbol>
 </svg>
 
 <div id="wraper">
@@ -176,6 +177,8 @@ try {
                 <button class="dropdown-item" data-sort="newest"><span class="mi-icon"><svg><use href="#i-sort"/></svg></span><span class="check"></span>Newest first</button>
                 <button class="dropdown-item" data-sort="oldest"><span class="mi-icon"><svg><use href="#i-sort"/></svg></span><span class="check"></span>Oldest first</button>
               </div>
+              <div class="dropdown-line"></div>
+              <button class="dropdown-item" id="menu-settings"><span class="mi-icon"><svg><use href="#i-gear"/></svg></span><span class="check"></span>Settings</button>
             </div>
           </div>
         </div>
@@ -225,6 +228,28 @@ try {
         <button id="confirm-no" class="tool-btn">Cancel</button>
         <button id="confirm-yes" class="tool-btn tool-primary">Confirm</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<div id="settings-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+  <div class="modal-card modal-small">
+    <div class="modal-head">
+      <h2 id="settings-title">Reading settings</h2>
+      <button class="icon-btn" id="settings-close" title="Close settings" aria-label="Close settings"><svg><use href="#i-close"/></svg></button>
+    </div>
+    <div class="modal-body">
+      <div class="menu-label">Marking as read</div>
+      <label class="set-row"><span class="set-name">Mark articles as read when you open them</span><input type="checkbox" id="set-mark-on-open"></label>
+      <div class="set-row set-col">
+        <label class="set-name" for="set-mark-after">Mark as read after <input type="number" id="set-mark-after" min="0" max="3600" step="1"> seconds</label>
+        <span class="set-hint" id="set-mark-hint"></span>
+      </div>
+      <label class="set-row"><span class="set-name">Mark items read when scrolled past</span><input type="checkbox" id="set-scroll-track"></label>
+      <div class="menu-label">Opening &amp; list</div>
+      <label class="set-row"><span class="set-name">Open original webpage directly (no reader pane)</span><input type="checkbox" id="set-open-original"></label>
+      <label class="set-row"><span class="set-name">Show titles only in the list</span><input type="checkbox" id="set-titles-only"></label>
+      <div class="set-hint set-foot">Saved in this browser, applied immediately. <code>config.json</code> sets the defaults for every visitor.</div>
     </div>
   </div>
 </div>

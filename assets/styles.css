@@ -553,6 +553,17 @@ body.bulk-mode .row-check { display: block; }
 .modal-head h2 { margin: 0; font-size: 16px; }
 .modal-body { padding: 16px 18px; overflow-y: auto; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+
+/* ---- settings modal rows ---- */
+.set-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; cursor: pointer; }
+.set-row.set-col { flex-direction: column; align-items: flex-start; gap: 4px; cursor: default; }
+.set-row.set-col + .set-row { border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent); }
+.set-name { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--text); }
+.set-row input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); flex: none; margin: 0; cursor: pointer; }
+#set-mark-after { width: 6ch; text-align: center; border: 1px solid var(--border); background: var(--bg); color: var(--text); border-radius: 4px; padding: 3px 4px; font: inherit; font-size: 13px; }
+#set-mark-after:focus { outline: none; border-color: var(--accent); }
+.set-hint { display: block; font-size: 12.5px; line-height: 1.45; color: var(--text-dim); }
+.set-foot { margin-top: 12px; }
 select { border: 1px solid var(--border); border-radius: 6px; background: var(--bg); padding: 5px 8px; }
 code { background: var(--bg-hover); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
 

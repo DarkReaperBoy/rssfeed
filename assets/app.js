@@ -41,9 +41,12 @@ const state = {
   filterMarked: new Set(), // ids already auto-read by a markRead filter (never re-read one the user un-read)
 };
 
-/* Preferences come in two groups:
-   - CONFIG_KEYS have no in-UI toggle: config.json owns them and they are
-     re-applied on EVERY load (edit config.json, reload, done).
+/* Preferences come in groups:
+   - CONFIG_KEYS: config.json owns them and re-applies them on EVERY load —
+     they are the site-wide defaults for every visitor.
+   - SETTING_KEYS overlap CONFIG_KEYS but are editable in the Settings modal:
+     a saved local override (ghrss:ui.settings) is applied after config.json
+     and wins — the owner can still ship different defaults via config.json.
    - USER_KEYS are changed with the UI's own controls (layout, status, sort…)
      and persist per browser; config.json only seeds a brand-new visitor. */
 const CONFIG_KEYS = ['theme', 'density', 'markReadOnOpen', 'markReadAfterSeconds',
@@ -51,6 +54,11 @@ const CONFIG_KEYS = ['theme', 'density', 'markReadOnOpen', 'markReadAfterSeconds
   'absoluteDates', 'fontSize', 'sideFavicons', 'compactSidebar', 'countersClickable',
   'titleCounter', 'showToday', 'updatedOnly', 'dimRead', 'sortAZ', 'autoScroll'];
 const USER_KEYS = ['layout', 'status', 'dateRange', 'sortDir', 'showFiltered', 'openFolders', 'sidebarW'];
+/* Reading-behavior prefs the Settings modal owns. config.json seeds them
+   (CONFIG_KEYS above); a change made in the modal persists locally in
+   ghrss:ui.settings and wins over config.json on every later load —
+   "edit config.json" must not silently undo the user's own choice. */
+const SETTING_KEYS = ['markReadOnOpen', 'markReadAfterSeconds', 'openOriginal', 'titlesOnly', 'scrollTracking'];
 // bulkSelect is deliberately NOT persisted: a returning visitor must never
 // find article clicks silently hijacked into checkbox selection.
 const savedUi = loadObj(LS_UI); // older blobs may carry more keys — only USER_KEYS are honored
@@ -63,7 +71,11 @@ const ui = Object.assign({
   titlesOnly: false, openOriginal: false, showFavicons: true, columnThumbs: true,
   bulkSelect: false, autoScroll: true, absoluteDates: false, fontSize: '14.5px',
   sideFavicons: true, compactSidebar: false, countersClickable: true, titleCounter: true, showToday: false,
+  settings: {}, // local Settings-modal overrides — applied AFTER config.json in boot
 }, Object.fromEntries(USER_KEYS.filter((k) => k in savedUi).map((k) => [k, savedUi[k]])));
+if (savedUi.settings && typeof savedUi.settings === 'object') {
+  for (const k of SETTING_KEYS) if (k in savedUi.settings) ui.settings[k] = savedUi.settings[k];
+}
 // migrate pre-parity values
 if (ui.layout === 'compact') { ui.layout = 'list'; ui.density = 'compact'; }
 if (ui.status === 'read') ui.status = 'all'; // legacy saved value — no such view exists
@@ -82,7 +94,7 @@ function saveObj(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } cat
 function saveRead() { saveObj(LS_READ, state.read); }
 function saveKept() { saveObj(LS_KEPT, state.kept); }
 function saveUserUnread() { saveObj(LS_USERUNREAD, state.userUnread); }
-function saveUi() { saveObj(LS_UI, Object.fromEntries(USER_KEYS.map((k) => [k, ui[k]]))); }
+function saveUi() { saveObj(LS_UI, Object.assign(Object.fromEntries(USER_KEYS.map((k) => [k, ui[k]])), { settings: ui.settings })); }
 
 const isRead = (a) => !!state.read[a.id];
 const isKept = (a) => !!state.kept[a.id];
@@ -382,9 +394,15 @@ function searchGroupMatches(a, ops, terms) {
 }
 
 /* ---------------- list pipeline ---------------- */
+const RECENTLY_READ_WINDOW = 7 * 864e5; // "Recently read" = articles read in the last 7 days
 function scopeFilter(a) {
   if (state.scope === 'today') return a.date >= startOfToday();
-  if (state.scope === 'recently-read') return isRead(a);
+  // "Recently read" means READ RECENTLY: within the window above, by read
+  // timestamp — not "every read article in the last 60 days". Without the
+  // window the view (and its mark-all-as-unread flip) silently covered the
+  // ENTIRE read history: one confirmed click there nuked ~2000 articles back
+  // to unread while the dialog said only "Recently read".
+  if (state.scope === 'recently-read') { const ts = state.read[a.id] || 0; return ts > 0 && Date.now() - ts < RECENTLY_READ_WINDOW; }
   return true;
 }
 const startOfToday = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); };
@@ -670,22 +688,87 @@ function renderList() {
     if (!open || open._f?.hidden) { state.expandedId = null; clearHashArticle(); }
   }
   const keepScroll = list.scrollTop; // rebuilding the list must not yank it back to the top
-  list.innerHTML = visible.map((a) => {
-    let row = rowHtml(a);
-    if (ui.layout === 'expanded') row = row.replace('</article>', `<div class="row-body-inline">${articleBody(a)}</div></article>`);
-    return row;
-  }).join('');
+  renderListHead();
+  // A deep scroll position must survive the rebuild: keep growing the render
+  // until the old offset is covered again (jsdom has no geometry — skip there).
+  if (list.clientHeight > 0) {
+    while (renderedCount < visible.length && list.scrollHeight < keepScroll + list.clientHeight + 400) appendListChunk();
+  }
+  // The expanded row (deep link / j-k far down) must exist in the DOM too.
+  const xi = state.expandedId ? visible.findIndex((a) => a.id === state.expandedId) : -1;
+  if (xi >= renderedCount) renderUpTo(xi + 1);
   list.scrollTop = keepScroll;
-  list.querySelectorAll('.row-body-inline').forEach((el) => {
-    sanitizeReaderDom(el);
-    upgradeEmbeds(el, findArticle(el.closest('.row')?.dataset.id)?.link);
-  });
   renderReaderPane(visible);
   setupScrollTracking();
   updateScopeCount();
   updateTitleCounter();
   syncMarkButtons(); // the ✓ button flips to "mark as unread" when everything here is read
   renderEmpty(visible);
+}
+/* ---------------- progressive list rendering (virtualization) ----------------
+   A caught-up reader holds 2000+ rows; rebuilding ALL of them per open cost
+   600–800ms of innerHTML work (plus every favicon re-parsed). Rows now paint
+   in LIST_CHUNK chunks: the head renders immediately, the tail appends as the
+   user scrolls towards it. NOTHING is ever removed once rendered (no true
+   windowing), so scroll position, anchors, inline videos and in-page search
+   behave exactly as before — the tail simply does not exist until needed. */
+const LIST_CHUNK = 150;
+let renderedCount = 0; // rows of state.visible currently in the DOM
+let listAppendQueued = false;
+function buildRowHtml(a) {
+  let row = rowHtml(a);
+  if (ui.layout === 'expanded') row = row.replace('</article>', `<div class="row-body-inline">${articleBody(a)}</div></article>`);
+  return row;
+}
+function rowsHtml(from, toExclusive) {
+  let out = '';
+  const visible = state.visible;
+  for (let i = from; i < toExclusive && i < visible.length; i++) out += buildRowHtml(visible[i]);
+  return out;
+}
+function renderListHead() {
+  const list = $('#list');
+  renderedCount = Math.min(state.visible.length, LIST_CHUNK);
+  list.innerHTML = rowsHtml(0, renderedCount) + (renderedCount < state.visible.length ? '<div id="list-tail" aria-hidden="true"></div>' : '');
+  sanitizeListBodies(0);
+}
+function appendListChunk() {
+  const list = $('#list');
+  if (!list) return;
+  const from = renderedCount;
+  const to = Math.min(state.visible.length, from + LIST_CHUNK);
+  if (to <= from) return;
+  let tail = $('#list-tail');
+  if (!tail) {
+    list.insertAdjacentHTML('beforeend', '<div id="list-tail" aria-hidden="true"></div>');
+    tail = $('#list-tail');
+  }
+  tail.insertAdjacentHTML('beforebegin', rowsHtml(from, to));
+  renderedCount = to;
+  sanitizeListBodies(from);
+  if (renderedCount >= state.visible.length) tail.remove(); // everything is in — no sentinel needed
+  setupScrollTracking(); // the fresh rows join the observer too
+}
+function renderUpTo(indexInclusive) { while (renderedCount < indexInclusive && renderedCount < state.visible.length) appendListChunk(); }
+function maybeAppendListChunk() {
+  const list = $('#list');
+  if (!list) return;
+  // Pre-render ~4 screens ahead so fast flings never hit a hard bottom. The
+  // bounded loop lets ONE big jump (End key) materialize several chunks; the
+  // cap only guards pathological zero-geometry hosts.
+  let guard = 0;
+  while (renderedCount < state.visible.length && guard++ < 8
+    && list.scrollTop + list.clientHeight >= list.scrollHeight - 1600) appendListChunk();
+}
+/* Only the expanded layout puts article bodies inside rows — sanitize (and
+   embed-upgrade) exactly the NEW range, not the whole list again. */
+function sanitizeListBodies(fromRowIdx) {
+  if (ui.layout !== 'expanded') return;
+  const rows = $$('#list .row');
+  for (let i = fromRowIdx; i < rows.length; i++) {
+    const el = rows[i].querySelector('.row-body-inline');
+    if (el) { sanitizeReaderDom(el); upgradeEmbeds(el, findArticle(rows[i].dataset.id)?.link); }
+  }
 }
 let readerKey = ''; // article id:fetchedAt — rebuild the reader pane only when the open article changes
 function syncReaderControls(slot, a) {
@@ -890,7 +973,13 @@ function patchTreeCounts() {
   }
   if (structural) { renderTree(); return; }
   for (const [row, n] of plan) {
-    row.querySelector('.badge').textContent = String(n);
+    // A caught-up feed has NO badge element (n === 0, badge absent is the
+    // consistent steady state — it lands in the plan for the class flips).
+    // Writing .textContent on the absent badge threw a TypeError that killed
+    // the whole click handler: the row flipped, but the sidebar badge, the
+    // (N) title counter and the ✓-button flip all FROZE — "marking is broken".
+    const badge = row.querySelector('.badge');
+    if (badge) badge.textContent = String(n);
     row.classList.toggle('unread', n > 0);
     row.classList.toggle('dimmed', !!ui.dimRead && n === 0);
   }
@@ -1003,12 +1092,19 @@ function markScopeRead(scope, olderDays = 0, beforeTs = 0) {
     showToast(olderDays || beforeTs ? `No unread articles${what} here${boundaryHint(cutoff)}` : 'Nothing to mark — everything here is read');
     return;
   }
-  const snapshot = ids.map((id) => ({ id, ts: state.read[id] }));
-  for (const id of ids) state.read[id] = Date.now();
+  const snapshot = ids.map((id) => ({ id, ts: state.read[id], guard: state.userUnread[id] || 0 }));
+  for (const id of ids) {
+    state.read[id] = Date.now();
+    // A mass read is an explicit read: stale un-read guards on these ids must
+    // go, or the article the user just bulk-read keeps a ghost guard that a
+    // later un-read would silently "restore" from nowhere.
+    if (state.userUnread[id]) delete state.userUnread[id];
+  }
+  if (snapshot.some((s) => s.guard)) saveUserUnread();
   saveRead(); state.keepVisible.clear(); renderTree(); renderList();
   showToast(`Marked ${ids.length} article${ids.length === 1 ? '' : 's'}${what} as read`, 'Undo', () => {
-    for (const { id, ts } of snapshot) { if (ts) state.read[id] = ts; else delete state.read[id]; }
-    saveRead(); renderTree(); renderList();
+    for (const { id, ts, guard } of snapshot) { if (ts) state.read[id] = ts; else delete state.read[id]; if (guard) state.userUnread[id] = guard; else delete state.userUnread[id]; }
+    saveRead(); saveUserUnread(); renderTree(); renderList();
   });
 }
 function markAllAsReadInScope() {
@@ -1053,6 +1149,22 @@ function allReadInScope() {
 }
 function collectScopeReadIds(scope, cutoff = 0) {
   const ids = [];
+  // The recently-read view must restore exactly what it LISTS (read within
+  // the window, same filters) — scopeFeedIds() falls through to every feed
+  // there, so the old loop un-read the entire reader instead of the view.
+  if (scope === 'recently-read') {
+    for (const feedId of scopeFeedIds(scope)) {
+      for (const a of state.feeds.get(feedId) || []) {
+        if (!isRead(a) || a._f?.hidden) continue;
+        const ts = state.read[a.id] || 0;
+        if (ts <= 0 || Date.now() - ts >= RECENTLY_READ_WINDOW) continue;
+        if (!dateRangeFilter(a)) continue;
+        if (cutoff && a.date >= cutoff) continue;
+        ids.push(a.id);
+      }
+    }
+    return ids;
+  }
   for (const feedId of scopeFeedIds(scope)) {
     for (const a of state.feeds.get(feedId) || []) {
       if (!isRead(a) || a._f?.hidden) continue; // hidden articles re-read themselves via markRead filters anyway
@@ -1071,13 +1183,21 @@ function markScopeUnread(scope, olderDays = 0, beforeTs = 0) {
     showToast(olderDays || beforeTs ? `No read articles${what} here${boundaryHint(cutoff)}` : 'Nothing to restore — no read articles here');
     return;
   }
-  const snapshot = ids.map((id) => ({ id, ts: state.read[id] }));
-  for (const id of ids) delete state.read[id];
+  const snapshot = ids.map((id) => ({ id, ts: state.read[id], guard: state.userUnread[id] || 0 }));
+  for (const id of ids) {
+    delete state.read[id];
+    // Mass un-read is explicit too: a markRead FILTER would re-read its
+    // article on the next refresh (guards only lived for single toggles
+    // before) — the list then seesawed read↔unread behind the user's back.
+    const a = findArticle(id);
+    if (a?._f?.markRead && !state.userUnread[id]) state.userUnread[id] = Date.now();
+  }
+  saveUserUnread();
   state.keepVisible.clear();
   saveRead(); renderTree(); renderList();
   showToast(`Marked ${ids.length} article${ids.length === 1 ? '' : 's'}${what} as unread`, 'Undo', () => {
-    for (const { id, ts } of snapshot) { if (ts) state.read[id] = ts; else delete state.read[id]; }
-    saveRead(); renderTree(); renderList();
+    for (const { id, ts, guard } of snapshot) { if (ts) state.read[id] = ts; else delete state.read[id]; if (guard) state.userUnread[id] = guard; else delete state.userUnread[id]; }
+    saveRead(); saveUserUnread(); renderTree(); renderList();
   });
 }
 function syncMarkButtons() {
@@ -1107,20 +1227,27 @@ function updateBulkBar() {
 function bulkMark(on) {
   if (!state.bulkSel.size) return;
   const ids = [...state.bulkSel];
-  const snapshot = ids.map((id) => ({ id, ts: state.read[id] }));
-  let n = 0;
+  const snapshot = ids.map((id) => ({ id, ts: state.read[id], guard: state.userUnread[id] || 0 }));
+  let n = 0, guardsChanged = false;
   for (const id of ids) {
     const a = findArticle(id); // may be null: a refresh can prune a selected article
     if (on && a && (isKept(a) || a._f?.keepUnread)) continue;
-    if (on) state.read[id] = Date.now(); else delete state.read[id];
+    if (on) {
+      state.read[id] = Date.now();
+      if (state.userUnread[id]) { delete state.userUnread[id]; guardsChanged = true; } // explicit bulk read clears guards
+    } else {
+      delete state.read[id];
+      if (a?._f?.markRead && !state.userUnread[id]) { state.userUnread[id] = Date.now(); guardsChanged = true; } // explicit bulk un-read beats filters
+    }
     n++;
   }
   state.bulkSel.clear();
   state.keepVisible.clear();
+  if (guardsChanged) saveUserUnread();
   saveRead(); renderTree(); renderList();
   showToast(`${on ? 'Marked' : 'Unmarked'} ${n} article${n === 1 ? '' : 's'}${on ? ' as read' : ' as unread'}`, 'Undo', () => {
-    for (const { id, ts } of snapshot) { if (ts) state.read[id] = ts; else delete state.read[id]; }
-    saveRead(); renderTree(); renderList();
+    for (const { id, ts, guard } of snapshot) { if (ts) state.read[id] = ts; else delete state.read[id]; if (guard) state.userUnread[id] = guard; else delete state.userUnread[id]; }
+    saveRead(); saveUserUnread(); renderTree(); renderList();
   });
 }
 
@@ -1181,7 +1308,14 @@ function openArticle(id) {
   // The article being left LINGERS (read, ticked) — rows re-filter on
   // scope/view changes, not on every open. Clearing here broke Back/prev/k:
   // the row you just read vanished, and "Previous" had nothing to return to.
-  if (state.expandedId) state.keepVisible.add(state.expandedId);
+  if (state.expandedId && state.expandedId !== id) {
+    // Moving on cancels the pending delayed mark — the timer's own guard
+    // already no-ops it, but the entry must not sit in markTimers until it
+    // fires (a reopened article would reset its delay, a stale one leaked).
+    clearTimeout(state.markTimers.get(state.expandedId));
+    state.markTimers.delete(state.expandedId);
+    state.keepVisible.add(state.expandedId);
+  } else if (state.expandedId) state.keepVisible.add(state.expandedId);
   state.expandedId = id;
   renderList();
   listScrollTo(id);
@@ -1293,7 +1427,11 @@ function onListClick(e) {
 }
 function listScrollTo(id) {
   const safe = (window.CSS && CSS.escape) ? CSS.escape(id) : String(id).replace(/"/g, '\\"');
-  const el = $(`.row[data-id="${safe}"]`);
+  let el = $(`.row[data-id="${safe}"]`);
+  if (!el) { // the row is in the unrendered tail — materialize it, then scroll
+    const i = state.visible.findIndex((a) => a.id === id);
+    if (i >= 0) { renderUpTo(i + 1); el = $(`.row[data-id="${safe}"]`); }
+  }
   if (el) el.scrollIntoView?.({ block: 'nearest' });
 }
 
@@ -1301,6 +1439,13 @@ function renderAll() { renderTree(); renderList(); }
 
 function bindEvents() {
   $('#list').addEventListener('click', onListClick);
+  // Progressive tail rendering: near the bottom → grow the list by a chunk
+  // (rAF-throttled — a fling fires dozens of scroll events per second).
+  $('#list').addEventListener('scroll', () => {
+    if (listAppendQueued) return;
+    listAppendQueued = true;
+    requestAnimationFrame(() => { listAppendQueued = false; maybeAppendListChunk(); });
+  }, { passive: true });
   $('#reader-slot').addEventListener('click', (e) => {
     if (!state.expandedId) return;
     const actBtn = e.target.closest('[data-act]');
@@ -1497,6 +1642,23 @@ function bindEvents() {
     if (!item) return;
     ui.sortDir = item.dataset.sort; saveUi(); syncControls(); renderList();
   });
+  $('#menu-settings').addEventListener('click', () => {
+    $('#header-menu').classList.add('hidden');
+    syncMenuAria();
+    openSettingsModal();
+  });
+  $('#settings-close').addEventListener('click', closeSettingsModal);
+  $('#settings-modal').addEventListener('click', (e) => {
+    if (e.target === $('#settings-modal')) closeSettingsModal(); // backdrop click
+  });
+  $('#set-mark-on-open').addEventListener('change', (e) => applySetting('markReadOnOpen', e.target.checked));
+  $('#set-scroll-track').addEventListener('change', (e) => applySetting('scrollTracking', e.target.checked));
+  $('#set-open-original').addEventListener('change', (e) => applySetting('openOriginal', e.target.checked));
+  $('#set-titles-only').addEventListener('change', (e) => applySetting('titlesOnly', e.target.checked));
+  $('#set-mark-after').addEventListener('change', (e) => {
+    const n = Math.min(3600, Math.max(0, Math.round(Number(e.target.value) || 0)));
+    applySetting('markReadAfterSeconds', n);
+  });
 
   // header: expanding search (their search-input-wrapper behavior)
   $('#search-open').addEventListener('click', openSearchFn);
@@ -1551,6 +1713,8 @@ function bindEvents() {
     // them at once, article included, out from under the user.
     const modal = $('#confirm-modal');
     if (modal && !modal.classList.contains('hidden')) { $('#confirm-no')?.click(); return; }
+    const settings = $('#settings-modal');
+    if (settings && !settings.classList.contains('hidden')) { closeSettingsModal(); return; }
     const menuOpen = !$('#header-menu')?.classList.contains('hidden') || !$('#mark-menu')?.classList.contains('hidden');
     const sidebarOpen = document.body.classList.contains('sidebar-open');
     $('#header-menu')?.classList.add('hidden');
@@ -1657,6 +1821,42 @@ function syncMenuAria() {
   // announce a stale "collapsed" otherwise.
   $('#btn-more')?.setAttribute('aria-expanded', String(!$('#header-menu')?.classList.contains('hidden')));
   $('#btn-mark-all-split')?.setAttribute('aria-expanded', String(!$('#mark-menu')?.classList.contains('hidden')));
+}
+/* ---------------- settings modal ----------------
+   The mark-read behavior (instant / delayed / manual) finally has a UI:
+   config.json ships the defaults, the modal persists local overrides. */
+function markHintText() {
+  const delay = Math.max(0, Number(ui.markReadAfterSeconds) || 0);
+  if (delay > 0) return `Articles are marked read ${delay} second${delay === 1 ? '' : 's'} after you open them — closing one before then keeps it unread.`;
+  if (ui.markReadOnOpen) return 'Articles are marked read the moment you open them.';
+  return 'Articles are only marked read when you mark them yourself.';
+}
+function syncSettingsModal() {
+  const on = $('#set-mark-on-open'), after = $('#set-mark-after');
+  const track = $('#set-scroll-track'), openOrig = $('#set-open-original'), titles = $('#set-titles-only');
+  if (on) on.checked = ui.markReadOnOpen !== false;
+  if (after) after.value = String(Math.max(0, Number(ui.markReadAfterSeconds) || 0));
+  if (track) track.checked = !!ui.scrollTracking;
+  if (openOrig) openOrig.checked = !!ui.openOriginal;
+  if (titles) titles.checked = !!ui.titlesOnly;
+  const hint = $('#set-mark-hint');
+  if (hint) hint.textContent = markHintText();
+}
+function applySetting(key, value) {
+  ui[key] = value;
+  ui.settings[key] = value;
+  saveUi();
+  if (key === 'scrollTracking') setupScrollTracking();
+  else if (key === 'titlesOnly') renderList();
+  syncSettingsModal();
+}
+function openSettingsModal() {
+  syncSettingsModal();
+  $('#settings-modal').classList.remove('hidden');
+  $('#set-mark-on-open')?.focus();
+}
+function closeSettingsModal() {
+  $('#settings-modal').classList.add('hidden');
 }
 function confirmDialog(title, text, onYes) {
   $('#confirm-title').textContent = title;
@@ -1836,6 +2036,9 @@ async function boot() {
     // config.json owns every pref without an in-UI toggle — re-applied on EVERY
     // load, so editing settings + pushing is all it takes to change behavior.
     for (const k of CONFIG_KEYS) if (k in s) ui[k] = s[k];
+    // …but the visitor's own Settings-modal choices (saved locally) win over
+    // the site defaults for exactly the SETTING_KEYS the modal exposes.
+    for (const k of SETTING_KEYS) if (k in ui.settings) ui[k] = ui.settings[k];
     if (s.view && !localStorage.getItem(LS_UI)) ui.layout = s.view; // default layout for new visitors
     baseTitle = s.siteName || 'My RSSFeed';
     document.title = baseTitle;

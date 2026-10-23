@@ -26,7 +26,7 @@ That's it. The Action re-fetches feeds on a self-healing every-15-minutes schedu
 
 ## config.json
 
-There is no settings modal and no database: **you configure everything by editing files and pushing**. Preferences without an in-UI toggle are re-read from `config.json` on **every** page load — edit, push, reload. Only your own UI toggles (layout, article-list status, date filter, sort direction, show-filtered, multi-select, folder collapse, sidebar width) are remembered per browser in `localStorage`.
+There is no database: **you configure the site-wide defaults by editing files and pushing**. Those defaults are re-read from `config.json` on **every** page load — edit, push, reload. Your own reading behavior (mark-on-open, the mark delay, open-original, titles-only, scroll tracking — the **⋯ → Settings** panel) is chosen in the UI and saved per browser in `localStorage`, where it **wins over** the config defaults. Layout, article-list status, date filter, sort direction and the other UI toggles are remembered per browser too.
 
 ```jsonc
 {
@@ -35,7 +35,7 @@ There is no settings modal and no database: **you configure everything by editin
     "theme": "auto",               // auto | light | dark
     "view": "list",                // default layout for new visitors: list | expanded | column | cards | magazine
     "retentionDays": 60,           // fetcher prunes everything older (read and unread alike) — 60 days so "older than a month" restore has real history to work with
-    "markReadOnOpen": true,        // opening an article marks it read
+    "markReadOnOpen": true,        // default for new visitors: opening an article marks it read (⋯ → Settings can override per browser)
     "markReadAfterSeconds": 0,     // …after a delay instead (cancelled if you close it first; a delay > 0 works even with markReadOnOpen: false)
     "refreshMinutes": 5,           // UI polls for new data on this wall-clock grid (min 5) — aligned to the CI refresh
     "fullTextDefault": false,      // extract full article text for every feed (unless feed.fullText overrides)
@@ -188,7 +188,9 @@ Don't want to hand-write feeds? Export OPML from Inoreader (or any reader), save
 - **Tab title**: `(N) My RSSFeed - <open article title>` while reading; `(N) My RSSFeed` otherwise
 - **YouTube Shorts filter** (`dropShorts`, default on): Shorts arrive in channel feeds with `/shorts/` links — the fetcher drops them (plus `#shorts`-tagged titles); opt a channel back in with `"dropShorts": false`
 - **Reset read state** (⋯ menu): forgets all read + keep-unread state in one confirmed click — everything goes back to unread
-- All/Unread status views + Today and Recently read, date filters (today / 3 days / week / month), newest/oldest sort (newest is the default)
+- All/Unread status views + Today and Recently read (articles read in the last 7 days), date filters (today / 3 days / week / month), newest/oldest sort (newest is the default)
+- **Settings panel** (⋯ → Settings): mark as read when opened, mark as read after N seconds (the delayed marking), scroll tracking, open-original and titles-only — saved per browser, overriding the config.json defaults
+- **Fast on huge lists** (progressive rendering): the first 150 rows paint instantly and the rest stream in as you scroll — nothing you've seen is ever removed, so scroll position, anchors, inline videos and in-page find all behave normally
 - **All five layouts**: List (Comfort/Compact/Ultra density), Expanded, Column, Cards, Magazine — light/dark/auto theme
 - Inline reading pane with prev/next, original site link, mark read/unread, "keep unread", attachments list
 - **Text view**: feeds with `fullText` get readability-extracted clean article text (vs. truncated feed content)

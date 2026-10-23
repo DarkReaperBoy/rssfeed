@@ -91,6 +91,13 @@ const HIDDEN = 2;
 
 const html = (await fs.readFile(path.join(ROOT, 'index.html'), 'utf8'))
   .replace(/<script src="assets\/app\.js\?v=[^"]*"><\/script>/, ''); // any ?v= shape — CI substitutes a content hash
+// Read app.js BEFORE any JSDOM is constructed: an await between construction
+// and eval lets jsdom's natural DOMContentLoaded fire before the app's
+// listener exists (boot never runs). The natural event — not a manual
+// dispatch — drives every boot below: a manual one ON TOP of it ran boot
+// twice, double-binding every listener (toggles like bulk-select then
+// flipped twice per click and silently landed back off).
+const appSrc = await fs.readFile(path.join(ROOT, 'assets/app.js'), 'utf8');
 const dom = new JSDOM(html, { url: 'https://example.test/', runScripts: 'outside-only', pretendToBeVisual: true });
 const { window } = dom;
 
@@ -110,9 +117,7 @@ window.fetch = async (url) => {
   return { ok: false, status: 404, statusText: 'Not Found', json: async () => { throw new Error('404'); } };
 };
 
-const appSrc = await fs.readFile(path.join(ROOT, 'assets/app.js'), 'utf8');
 window.eval(appSrc);
-window.document.dispatchEvent(new window.Event('DOMContentLoaded', { bubbles: true }));
 await settle(1200);
 
 const $ = (s) => window.document.querySelector(s);
@@ -614,7 +619,6 @@ console.log('refresh/restore: boot with #article/<id> in the URL');
   const w2 = dom2.window;
   w2.fetch = window.fetch; // same deterministic fixture backend
   w2.eval(appSrc);
-  w2.document.dispatchEvent(new w2.Event('DOMContentLoaded', { bubbles: true }));
   await settle(1200);
   const reader2 = w2.document.querySelector('#reader-slot .reader');
   ok(!!reader2 && reader2.dataset.id === 'fixture-hn-3', 'refresh reopens the article from the URL hash');
@@ -634,7 +638,6 @@ console.log('feed-storage version reset');
   w3.localStorage.setItem('ghrss:kept', JSON.stringify({ 'fixture-hn-1': true }));
   w3.localStorage.setItem('ghrss:ui', JSON.stringify({ layout: 'cards', sortDir: 'newest' }));
   w3.eval(appSrc);
-  w3.document.dispatchEvent(new w3.Event('DOMContentLoaded', { bubbles: true }));
   await settle(1200);
   ok(!Object.keys(JSON.parse(w3.localStorage.getItem('ghrss:read') || '{}')).length, 'old-version feed storage is wiped on upgrade');
   ok(w3.localStorage.getItem('ghrss:ver') === '3', 'the storage version is recorded');
@@ -649,7 +652,6 @@ console.log('feed-storage version reset');
   w4.localStorage.setItem('ghrss:ver', '3'); // already on this version
   w4.localStorage.setItem('ghrss:read', JSON.stringify({ 'fixture-hn-3': 123 }));
   w4.eval(appSrc);
-  w4.document.dispatchEvent(new w4.Event('DOMContentLoaded', { bubbles: true }));
   await settle(1200);
   ok(Number(w4.document.querySelector('#badge-all-items').textContent) === TOTAL - HIDDEN - 1, 'same-version storage is kept (no re-reset)');
   dom4.window.close();
@@ -667,7 +669,6 @@ console.log('markReadAfterSeconds opts in on its own (markReadOnOpen:false + del
     return { ok: false, status: 404, statusText: 'Not Found', json: async () => { throw new Error('404'); } };
   };
   w5.eval(appSrc);
-  w5.document.dispatchEvent(new w5.Event('DOMContentLoaded', { bubbles: true }));
   await settle(1200);
   const badge5 = () => Number(w5.document.querySelector('#badge-all-items').textContent);
   const before5 = badge5();
@@ -700,7 +701,6 @@ console.log('an explicit un-read beats markRead filters — even after a reload 
     return { ok: false, status: 404, statusText: 'Not Found', json: async () => { throw new Error('404'); } };
   };
   w6.eval(appSrc);
-  w6.document.dispatchEvent(new w6.Event('DOMContentLoaded', { bubbles: true }));
   await settle(1200);
   const badge6 = () => Number(w6.document.querySelector('#badge-all-items').textContent);
   const rowByTitle = (re) => [...w6.document.querySelectorAll('#list .row')].find((r) => re.test(r.querySelector('.row-title').textContent));
@@ -750,7 +750,6 @@ console.log('degraded network: hung feed fetches never wedge the UI');
   };
   wH.RSS_FETCH_TIMEOUT_MS = 120; // test-scale cap (real visitors get 10 s)
   wH.eval(appSrc);
-  wH.document.dispatchEvent(new wH.Event('DOMContentLoaded', { bubbles: true }));
   await settle(700);
   const $$H = (s) => [...wH.document.querySelectorAll(s)];
   ok($$H('#tree .tree-item').length >= 4, 'sidebar renders from index.json even while feed fetches stall');
@@ -781,7 +780,6 @@ console.log('degraded network: a click during a slow load is visible, then lands
     return { ok: false, status: 404, statusText: 'Not Found', json: async () => { throw new Error('404'); } };
   };
   wS.eval(appSrc);
-  wS.document.dispatchEvent(new wS.Event('DOMContentLoaded', { bubbles: true }));
   await settle(300); // boot is still mid-load (each feed takes 2.6 s)
   wS.document.querySelector('#btn-mark-all-split').dispatchEvent(new wS.MouseEvent('click', { bubbles: true }));
   await settle(30);
@@ -811,7 +809,6 @@ console.log('refresh fallback: a failed reload keeps the articles on screen');
     return { ok: false, status: 404, statusText: 'Not Found', json: async () => { throw new Error('404'); } };
   };
   wR.eval(appSrc);
-  wR.document.dispatchEvent(new wR.Event('DOMContentLoaded', { bubbles: true }));
   await settle(1200);
   const rowsR = () => [...wR.document.querySelectorAll('#list .row')].length;
   ok(rowsR() === TOTAL - HIDDEN, 'boot loads rows via per-feed files (consolidated 404)');
@@ -1010,6 +1007,275 @@ console.log('Hacker News deep windows — Algolia\'s 1000-hit cap splits into da
   ok(hn.hnApiUrl({ minPoints: 150 }, { retentionDays: 60, now: NOW }).includes(`created_at_i%3E${START}`), 'window bound derives from retentionDays');
   const sliced = hn.hnApiUrl({ minPoints: 150 }, { retentionDays: 60, now: NOW, fromSec: START, toSec: NOWS - 30 * 86400 });
   ok(sliced.includes('created_at_i%3C%3D'), 'range slicing encodes the closed upper bound');
+}
+
+console.log('recently-read: the view (and its mark-all) cover the 7-day window — not the whole read history');
+{
+  // The reported nuke: the ✓ flip in "Recently read" unmarked EVERY read
+  // article in every feed (scopeFeedIds falls through to all feeds there),
+  // while the confirm said only "Recently read".
+  const domR2 = new JSDOM(html, { url: 'https://example.test/', runScripts: 'outside-only', pretendToBeVisual: true });
+  const wR2 = domR2.window;
+  wR2.fetch = window.fetch;
+  wR2.localStorage.setItem('ghrss:ver', '3');
+  // one article read 10 days ago (outside the window), one read just now
+  wR2.localStorage.setItem('ghrss:read', JSON.stringify({ 'fixture-bbc-1': now - 10 * 864e5, 'fixture-bbc-2': now - 60e3 }));
+  wR2.eval(appSrc);
+  await settle(1200);
+  wR2.document.querySelector('#btn-more').dispatchEvent(new wR2.MouseEvent('click', { bubbles: true }));
+  wR2.document.querySelector('#status-items [data-status="recently-read"]').dispatchEvent(new wR2.MouseEvent('click', { bubbles: true }));
+  await settle(80);
+  const rowsR2 = [...wR2.document.querySelectorAll('#list .row')];
+  ok(rowsR2.length === 1 && /Market swing/.test(rowsR2[0].textContent), 'the view lists only articles read within the last 7 days (the 10-day-old read is gone)');
+  ok(wR2.document.querySelector('#scope-count').textContent === '1 recently read', 'the count chip matches the windowed view');
+  // mark-all-as-unread from here must restore ONLY what the view shows
+  wR2.document.querySelector('#btn-mark-all').dispatchEvent(new wR2.MouseEvent('click', { bubbles: true }));
+  await settle(30);
+  wR2.document.querySelector('#confirm-yes').dispatchEvent(new wR2.MouseEvent('click', { bubbles: true }));
+  await settle(80);
+  const lsR2 = JSON.parse(wR2.localStorage.getItem('ghrss:read') || '{}');
+  ok(lsR2['fixture-bbc-2'] === undefined, 'the recent read was restored to unread');
+  ok(typeof lsR2['fixture-bbc-1'] === 'number', 'the 10-day-old read STAYS read — no more whole-history nuke');
+  domR2.window.close();
+}
+
+console.log('regression: marking with caught-up (badgeless) feeds in the tree must not freeze the counters');
+{
+  // The live-site TypeError: patchTreeCounts planned [row, 0] for every
+  // caught-up feed and unconditionally wrote badge.textContent — null for a
+  // badgeless row. The click handler died there: the row flipped, but the
+  // sidebar badge, the (N) title counter and the ✓ flip all froze.
+  const dom10 = new JSDOM(html, { url: 'https://example.test/', runScripts: 'outside-only', pretendToBeVisual: true });
+  const w10 = dom10.window;
+  w10.fetch = window.fetch;
+  w10.localStorage.setItem('ghrss:ver', '3');
+  // verge + bbc fully read (badgeless, n=0); hn keeps its unread badge
+  const readSeed = {};
+  for (const a of FIX['fixture-verge'].articles) readSeed[a.id] = now - 3600e3;
+  for (const a of FIX['fixture-bbc'].articles) readSeed[a.id] = now - 3600e3;
+  for (const a of FIX['fixture-junk'].articles) readSeed[a.id] = now - 3600e3; // every feed but hn caught up
+  w10.localStorage.setItem('ghrss:read', JSON.stringify(readSeed));
+  w10.eval(appSrc);
+  await settle(1200);
+  const hnBadge = () => w10.document.querySelector('#tree .tree-item[data-scope="feed:fixture-hn"] .badge');
+  const titleCount10 = () => Number((w10.document.title.match(/^\((\d+)\)/) || [])[1] || 0);
+  const unreadN = 12 - HIDDEN; // hn articles minus the two hidden 'show hn'
+  ok(Number(hnBadge()?.textContent) === unreadN, 'the HN badge starts at its unread count');
+  ok(!w10.document.querySelector('#tree .tree-item[data-scope="feed:fixture-verge"] .badge'), 'the caught-up feed is badgeless (the trap is set)');
+  // open an HN article — markRead → patchTreeCounts with badgeless rows in the plan
+  const row10 = [...w10.document.querySelectorAll('#list .row')].find((r) => /AI model beats benchmark/.test(r.querySelector('.row-title').textContent));
+  row10.dispatchEvent(new w10.MouseEvent('click', { bubbles: true }));
+  await settle(150);
+  ok(Number(w10.document.querySelector('#tree .tree-item[data-scope="feed:fixture-hn"] .badge').textContent) === unreadN - 1, 'the sidebar badge still updates with badgeless caught-up feeds in the tree');
+  ok(titleCount10() === unreadN - 1, 'the (N) title counter updates too — the handler no longer dies mid-click');
+  // and a toggle-read round trip in the same trapped state (re-query: renders replace rows)
+  [...w10.document.querySelectorAll('#list .row')].find((r) => /AI model beats benchmark/.test(r.querySelector('.row-title').textContent)).dispatchEvent(new w10.MouseEvent('click', { bubbles: true })); // collapse
+  await settle(60);
+  const row10b = [...w10.document.querySelectorAll('#list .row')].find((r) => /AI model beats benchmark/.test(r.querySelector('.row-title').textContent));
+  row10b.querySelector('[data-act="toggle-read"]').dispatchEvent(new w10.MouseEvent('click', { bubbles: true }));
+  await settle(80);
+  ok(titleCount10() === unreadN, 'toggling back to unread also updates the counters');
+  dom10.window.close();
+}
+
+console.log('mark-all round trip: mass read clears un-read guards, mass unread re-arms them (no read↔unread seesaw)');
+{
+  const dom7 = new JSDOM(html, { url: 'https://example.test/', runScripts: 'outside-only', pretendToBeVisual: true });
+  const w7 = dom7.window;
+  const cfg7 = { ...config, filters: [...config.filters, { id: 'test-markread', name: 'mr', feeds: ['fixture-bbc'], include: { title: ['Election'] }, actions: { markRead: true } }] };
+  w7.fetch = async (url) => {
+    const p = String(url).split('?')[0];
+    if (p === 'config.json') return { ok: true, status: 200, json: async () => structuredClone(cfg7) };
+    if (p === 'data/index.json') return { ok: true, status: 200, json: async () => structuredClone(index) };
+    if (p === 'data/all-feeds.json') return { ok: true, status: 200, json: async () => structuredClone(allFeeds) };
+    return { ok: false, status: 404, statusText: 'Not Found', json: async () => { throw new Error('404'); } };
+  };
+  w7.eval(appSrc);
+  await settle(1200);
+  const badge7 = () => Number(w7.document.querySelector('#badge-all-items').textContent);
+  const rowByTitle7 = (re) => [...w7.document.querySelectorAll('#list .row')].find((r) => re.test(r.querySelector('.row-title').textContent));
+  const refresh7 = async () => {
+    w7.document.querySelector('#menu-refresh').dispatchEvent(new w7.MouseEvent('click', { bubbles: true }));
+    await settle(600);
+  };
+  // switch to All articles so every row is visible/clickable
+  w7.document.querySelector('#btn-more').dispatchEvent(new w7.MouseEvent('click', { bubbles: true }));
+  await settle(20);
+  w7.document.querySelector('#status-items [data-status="all"]').dispatchEvent(new w7.MouseEvent('click', { bubbles: true }));
+  await settle(80);
+  ok(badge7() === TOTAL - HIDDEN - 1, 'the markRead filter auto-read its match at load (Election update)');
+  // 1. un-read it by hand → guard set (covered by dom6, restated for the trip)
+  rowByTitle7(/^Election update$/).querySelector('[data-act="toggle-read"]').dispatchEvent(new w7.MouseEvent('click', { bubbles: true }));
+  await settle(80);
+  ok(badge7() === TOTAL - HIDDEN, 'explicit un-read wins for now');
+  // 2. mark ALL read — must clear the guard
+  w7.document.querySelector('#btn-mark-all').dispatchEvent(new w7.MouseEvent('click', { bubbles: true }));
+  await settle(30);
+  w7.document.querySelector('#confirm-yes').dispatchEvent(new w7.MouseEvent('click', { bubbles: true }));
+  await settle(200);
+  ok(badge7() !== TOTAL - HIDDEN, 'mark-all-as-read landed');
+  const guardAfterRead = JSON.parse(w7.localStorage.getItem('ghrss:userUnread') || '{}');
+  ok(!guardAfterRead['fixture-bbc-0'], 'mass read CLEARED the stale un-read guard (no ghost guard survives)');
+  // 3. mark ALL unread — must ARM a guard for the filter's article
+  w7.document.querySelector('#btn-mark-all').dispatchEvent(new w7.MouseEvent('click', { bubbles: true }));
+  await settle(30);
+  w7.document.querySelector('#confirm-yes').dispatchEvent(new w7.MouseEvent('click', { bubbles: true }));
+  await settle(200);
+  const guardAfterUnread = JSON.parse(w7.localStorage.getItem('ghrss:userUnread') || '{}');
+  ok(guardAfterUnread['fixture-bbc-0'], 'mass unread ARMS a guard for the filter-owned article');
+  await refresh7();
+  ok(badge7() === TOTAL - HIDDEN, 'after the refresh the filter article is STILL unread — the guard beats the filter re-run (no seesaw)');
+  ok(rowByTitle7(/^Election update$/).classList.contains('unread'), '…and the row shows unread');
+  dom7.window.close();
+}
+
+console.log('bulk mark: the same guard rules as mark-all (explicit, filter-proof, undo-able)');
+{
+  const dom8 = new JSDOM(html, { url: 'https://example.test/', runScripts: 'outside-only', pretendToBeVisual: true });
+  const w8 = dom8.window;
+  const cfg8 = { ...config, filters: [...config.filters, { id: 'test-markread', name: 'mr', feeds: ['fixture-bbc'], include: { title: ['Election'] }, actions: { markRead: true } }] };
+  w8.fetch = async (url) => {
+    const p = String(url).split('?')[0];
+    if (p === 'config.json') return { ok: true, status: 200, json: async () => structuredClone(cfg8) };
+    if (p === 'data/index.json') return { ok: true, status: 200, json: async () => structuredClone(index) };
+    if (p === 'data/all-feeds.json') return { ok: true, status: 200, json: async () => structuredClone(allFeeds) };
+    return { ok: false, status: 404, statusText: 'Not Found', json: async () => { throw new Error('404'); } };
+  };
+  w8.eval(appSrc);
+  await settle(1200);
+  const badge8 = () => Number(w8.document.querySelector('#badge-all-items').textContent);
+  // All articles view + bulk mode on
+  w8.document.querySelector('#btn-more').dispatchEvent(new w8.MouseEvent('click', { bubbles: true }));
+  await settle(20);
+  w8.document.querySelector('#status-items [data-status="all"]').dispatchEvent(new w8.MouseEvent('click', { bubbles: true }));
+  await settle(20);
+  w8.document.querySelector('#btn-more').dispatchEvent(new w8.MouseEvent('click', { bubbles: true }));
+  await settle(20);
+  w8.document.querySelector('#menu-select-mode').dispatchEvent(new w8.MouseEvent('click', { bubbles: true }));
+  await settle(80);
+  const election8 = [...w8.document.querySelectorAll('#list .row')].find((r) => /Election update/.test(r.querySelector('.row-title').textContent));
+  election8.querySelector('.row-check').dispatchEvent(new w8.MouseEvent('click', { bubbles: true }));
+  await settle(30);
+  // bulk UNREAD the filter-read article
+  w8.document.querySelector('#bulk-unread').dispatchEvent(new w8.MouseEvent('click', { bubbles: true }));
+  await settle(120);
+  const guard8 = JSON.parse(w8.localStorage.getItem('ghrss:userUnread') || '{}');
+  ok(guard8['fixture-bbc-0'], 'bulk un-read arms the guard for a filter-owned article');
+  w8.document.querySelector('#menu-refresh').dispatchEvent(new w8.MouseEvent('click', { bubbles: true }));
+  await settle(600);
+  ok(badge8() === TOTAL - HIDDEN, 'the bulk un-read survives the filter re-running');
+  dom8.window.close();
+}
+
+console.log('settings modal: the mark-read duration is finally user-settable, persists, and beats config.json');
+{
+  const dom9 = new JSDOM(html, { url: 'https://example.test/', runScripts: 'outside-only', pretendToBeVisual: true });
+  const w9 = dom9.window;
+  w9.fetch = window.fetch; // default config: markReadOnOpen true, delay 0
+  w9.eval(appSrc);
+  await settle(1200);
+  // open ⋯ → Settings
+  w9.document.querySelector('#btn-more').dispatchEvent(new w9.MouseEvent('click', { bubbles: true }));
+  await settle(20);
+  w9.document.querySelector('#menu-settings').dispatchEvent(new w9.MouseEvent('click', { bubbles: true }));
+  await settle(20);
+  ok(!w9.document.querySelector('#settings-modal').classList.contains('hidden'), 'the settings modal opens');
+  ok(w9.document.querySelector('#set-mark-on-open').checked === true, 'the checkbox shows the config default (mark on open)');
+  ok(w9.document.querySelector('#set-mark-after').value === '0', 'the delay input shows the config default (0)');
+  ok(/the moment you open/.test(w9.document.querySelector('#set-mark-hint').textContent), 'the hint explains instant marking');
+  // set a 1-second delay
+  const after = w9.document.querySelector('#set-mark-after');
+  after.value = '1';
+  after.dispatchEvent(new w9.Event('change', { bubbles: true }));
+  await settle(20);
+  ok(/1 second after you open/.test(w9.document.querySelector('#set-mark-hint').textContent), 'the hint reflects the new delay');
+  const ui9 = JSON.parse(w9.localStorage.getItem('ghrss:ui') || '{}');
+  ok(ui9.settings?.markReadAfterSeconds === 1, 'the override persists to ghrss:ui.settings');
+  // close with Escape, then the delay must govern real opens
+  w9.document.dispatchEvent(new w9.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  await settle(20);
+  ok(w9.document.querySelector('#settings-modal').classList.contains('hidden'), 'Escape closes the settings modal');
+  const badge9 = () => Number(w9.document.querySelector('#badge-all-items').textContent);
+  const before9 = badge9();
+  w9.document.querySelector('#list .row').dispatchEvent(new w9.MouseEvent('click', { bubbles: true }));
+  await settle(80);
+  ok(badge9() === before9, 'with a 1s delay the open does NOT mark instantly');
+  await settle(1100);
+  ok(badge9() === before9 - 1, 'the configured delay marks it read a second later');
+  dom9.window.close();
+
+  // precedence: a saved local override wins over config.json on the next load
+  const dom9b = new JSDOM(html, { url: 'https://example.test/', runScripts: 'outside-only', pretendToBeVisual: true });
+  const w9b = dom9b.window;
+  w9b.fetch = async (url) => {
+    const p = String(url).split('?')[0];
+    if (p === 'config.json') return { ok: true, status: 200, json: async () => structuredClone({ ...config, settings: { ...config.settings, markReadOnOpen: true, markReadAfterSeconds: 99 } }) };
+    if (p === 'data/index.json') return { ok: true, status: 200, json: async () => structuredClone(index) };
+    if (p === 'data/all-feeds.json') return { ok: true, status: 200, json: async () => structuredClone(allFeeds) };
+    return { ok: false, status: 404, statusText: 'Not Found', json: async () => { throw new Error('404'); } };
+  };
+  w9b.localStorage.setItem('ghrss:ver', '3');
+  w9b.localStorage.setItem('ghrss:ui', JSON.stringify({ settings: { markReadOnOpen: false, markReadAfterSeconds: 0 } }));
+  w9b.eval(appSrc);
+  await settle(1200);
+  const badge9b = () => Number(w9b.document.querySelector('#badge-all-items').textContent);
+  const before9b = badge9b();
+  w9b.document.querySelector('#list .row').dispatchEvent(new w9b.MouseEvent('click', { bubbles: true }));
+  await settle(900);
+  ok(badge9b() === before9b, 'the saved local override (manual marking) beats config.json\'s mark-on-open');
+  dom9b.window.close();
+}
+
+console.log('progressive rendering: 400 rows chunk in, scroll grows the list, deep links materialize their row');
+{
+  const mkBig = (n) => Array.from({ length: n }, (_, i) => ({
+    id: `big-${i}`, title: `Big story ${i}`, link: `https://example.com/big/${i}`,
+    date: now - i * 60e3, author: null, summary: `s${i}`, content: `<p>body ${i}</p>`,
+    text: null, enclosures: [], fetchedAt: now,
+  }));
+  const bigFix = { 'fixture-big': { title: 'Big Feed', site: 'https://big.test', folder: 'tech', articles: mkBig(400) } };
+  const bigIndex = { generatedAt: now, folders: [], feeds: { 'fixture-big': { title: 'Big Feed', site: 'https://big.test', folder: 'tech', folders: ['tech'], count: 400, newest: now, oldest: now - 400 * 60e3 } } };
+  const bigAll = { articles: bigFix['fixture-big'].articles.map((a) => ({ ...a, _feed: 'fixture-big' })) };
+  const bootBig = async (w, url) => {
+    w.fetch = async (reqUrl) => {
+      const p = String(reqUrl).split('?')[0];
+      if (p === 'config.json') return { ok: true, status: 200, json: async () => structuredClone(config) };
+      if (p === 'data/index.json') return { ok: true, status: 200, json: async () => structuredClone(bigIndex) };
+      if (p === 'data/all-feeds.json') return { ok: true, status: 200, json: async () => structuredClone(bigAll) };
+      return { ok: false, status: 404, statusText: 'Not Found', json: async () => { throw new Error('404'); } };
+    };
+    w.eval(appSrc);
+    await settle(1200);
+  };
+  const domB = new JSDOM(html, { url: 'https://example.test/', runScripts: 'outside-only', pretendToBeVisual: true });
+  const wB = domB.window;
+  await bootBig(wB);
+  ok(wB.document.querySelectorAll('#list .row').length === 150, 'only the first chunk (150 rows) renders at boot');
+  ok(!!wB.document.querySelector('#list-tail'), 'the tail sentinel marks the unrendered remainder');
+  ok(Number(wB.document.querySelector('#badge-all-items').textContent) === 400, 'the badge still counts all 400 unread');
+  ok(wB.document.querySelector('#scope-count').textContent === '400 unread', 'the count chip is NOT clipped to the rendered chunk');
+  // scroll event → the tail grows (bounded loop, zero geometry in jsdom)
+  wB.document.querySelector('#list').dispatchEvent(new wB.Event('scroll', { bubbles: false }));
+  await settle(120); // rAF tick
+  ok(wB.document.querySelectorAll('#list .row').length === 400, 'a scroll event materializes the rest of the list');
+  ok(!wB.document.querySelector('#list-tail'), 'the sentinel retires once everything is rendered');
+  // mark-all still covers the whole list (ids come from state, not the DOM)
+  wB.document.querySelector('#btn-mark-all').dispatchEvent(new wB.MouseEvent('click', { bubbles: true }));
+  await settle(30);
+  wB.document.querySelector('#confirm-yes').dispatchEvent(new wB.MouseEvent('click', { bubbles: true }));
+  await settle(200);
+  ok(wB.document.querySelector('#badge-all-items').textContent === '', 'mark-all-as-read covered every article — rendered or not');
+  const lsB = JSON.parse(wB.localStorage.getItem('ghrss:read') || '{}');
+  ok(Object.keys(lsB).length === 400, 'all 400 ids landed in the read state');
+  domB.window.close();
+
+  // deep link into the unrendered tail: the row must materialize
+  const domD = new JSDOM(html, { url: 'https://example.test/#article/big-350', runScripts: 'outside-only', pretendToBeVisual: true });
+  const wD = domD.window;
+  await bootBig(wD, '#article/big-350');
+  ok(!!wD.document.querySelector('#reader-slot .reader') && wD.document.querySelector('#reader-slot .reader').dataset.id === 'big-350', 'a deep link into the tail opens the article');
+  ok(!!wD.document.querySelector('.row[data-id="big-350"]'), 'the deep-linked row is materialized in the DOM (renderUpTo)');
+  domD.window.close();
 }
 
 console.log('');
