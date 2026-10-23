@@ -250,18 +250,26 @@ ok($('#mark-group-unread').classList.contains('hidden') && $('#mark-alt-toggle')
 ok($('#mark-alt-label').textContent === 'Mark as unread by age', 'the expander label survives the reset');
 click('#mark-alt-toggle'); 
 await settle(20);
+click('#mark-menu [data-mark="unread"][data-read-age="1"]');
+await settle(80);
+ok($('#toast-text').textContent.includes('No articles you read more than a day ago here'), 'reading-time restore answers honestly while NOT caught up — reads from seconds ago are not "more than a day ago"');
+ok(rowCount() === TOTAL - HIDDEN - 4 && $('#badge-all-items').textContent === String(TOTAL - HIDDEN - 4), 'the reading-time cutoff held');
+click('#btn-mark-all-split');
+await settle(20);
+click('#mark-alt-toggle');
+await settle(20);
 click('#mark-menu [data-mark="unread"][data-older="1"]');
 await settle(80);
-ok($('#toast-text').textContent.includes('No articles you read more than a day ago here'), 'restore-by-age answers honestly while NOT caught up — reads from seconds ago are not "more than a day ago"');
-ok(rowCount() === TOTAL - HIDDEN - 4 && $('#badge-all-items').textContent === String(TOTAL - HIDDEN - 4), 'the day-old batch stays read: READING age, not publication age, is the restore cutoff');
+ok($('#toast-text').textContent.includes('Marked 4 articles older than a day as unread'), 'publication restore: the day-old batch comes back by PUBLICATION age even though it was read seconds ago');
+ok(rowCount() === TOTAL - HIDDEN && $('#badge-all-items').textContent === String(TOTAL - HIDDEN), 'the day-old batch is unread again');
 console.log('Today scope: structurally dead presets are hidden');
 click('#status-items [data-status="today"]');
 await settle(80);
 ok($('#scope-title').textContent === 'Today', 'Today view entered');
 click('#btn-mark-all-split');
 await settle(20);
-ok($$('#mark-menu .dropdown-item[data-older]').length === 8, 'eight older-than rows exist across both groups');
-ok($$('#mark-menu .dropdown-item[data-older]').every((b) => b.classList.contains('hidden')), 'every older-than preset is hidden in the Today view');
+ok($$('#mark-menu .dropdown-item[data-older]').length === 8 && $$('#mark-menu .dropdown-item[data-read-age]').length === 4, 'twelve age rows exist across both groups (8 published-age + 4 reading-time)');
+ok($$('#mark-menu .dropdown-item[data-older], #mark-menu .dropdown-item[data-read-age]').every((b) => b.classList.contains('hidden')), 'every age preset (either clock) is hidden in the Today view');
 ok($$('#mark-menu .mark-custom').length === 2 && $$('#mark-menu .mark-custom.hidden').length === 0, 'the "Before…" pickers stay (a future date still works)');
 click('#btn-mark-all-split'); 
 await settle(20);
@@ -269,7 +277,7 @@ click('.tree-item[data-scope="all"]');
 await settle(80);
 click('#btn-mark-all-split');
 await settle(20);
-ok($$('#mark-menu .dropdown-item[data-older]').every((b) => !b.classList.contains('hidden')), 'presets return outside the Today view');
+ok($$('#mark-menu .dropdown-item[data-older], #mark-menu .dropdown-item[data-read-age]').every((b) => !b.classList.contains('hidden')), 'presets return outside the Today view');
 click('#btn-mark-all-split'); 
 await settle(20);
 console.log('filter-invisible restores explain themselves');
@@ -287,14 +295,24 @@ await settle(20);
 ok(!$('#mark-group-unread').classList.contains('hidden'), 'caught up → the unread group is the offered one');
 click('#mark-menu [data-mark="unread"][data-older="1"]');
 await settle(120);
-ok($('#toast-text').textContent.includes('No articles you read more than a day ago here'), 'freshly-read rows are not "read more than a day ago" — honest zero under the filter too');
-ok(rowCount() === 0, 'nothing restored — the reading-age cutoff held');
+ok($('#toast-text').textContent.includes('Marked 4 articles older than a day as unread'), 'publication restore works right after a bulk mark-all-read — the user\u2019s case');
+ok($('#toast-text').textContent.includes('— hidden by the date filter'), 'the toast names the filter that hides every restored row');
+ok(rowCount() === 0, 'the restored rows stay hidden behind the Today filter');
 ok($('#empty h3').textContent === 'Nothing in this time range', 'empty state stays on the honest header');
-ok($('#empty p').textContent.includes('No unread articles'), 'no hidden unread to name — the empty state says so');
-dr.value = 'all';
-dr.dispatchEvent(new window.Event('change', { bubbles: true }));
+ok($('#empty p').textContent.includes('4 unread articles') && $('#empty p').textContent.includes('older than Today'), 'the empty state counts the restored-but-filtered unread');
+click($('#toast-action-2'));
 await settle(80);
-ok(rowCount() === 0, 'filter reset: still caught up, still empty');
+ok($('#date-range').value === 'all', 'Show all resets the Date filter');
+ok(rowCount() === 4, 'Show all reveals the restored day-old rows');
+click('#badge-all-items');
+await settle(80);
+ok(rowCount() === 0, 're-marked everything read for the reading-time no-op check');
+click('#btn-mark-all-split');
+await settle(20);
+click('#mark-menu [data-mark="unread"][data-read-age="1"]');
+await settle(120);
+ok($('#toast-text').textContent.includes('No articles you read more than a day ago here'), 'freshly-read rows are not "read more than a day ago" — honest zero under the filter too');
+ok(rowCount() === 0, 'nothing restored — the reading-time cutoff held');
 click('#btn-mark-all-split');
 await settle(20);
 click('#mark-alt-toggle');
@@ -402,8 +420,19 @@ click('#btn-mark-all-split');
 await settle(20);
 click('#mark-menu [data-mark="unread"][data-older="1"]');
 await settle(80);
+ok($('#toast-text').textContent.includes('Marked 4 articles older than a day as unread'), 'bulk mark-all-read, then unread-older-than-a-day: the day-old news returns');
+ok(rowCount() === 4, 'exactly the four day-old articles came back');
+click('#btn-mark-all-split');
+await settle(20);
+click('#mark-alt-toggle');
+await settle(20);
+click('#mark-menu [data-mark="unread"][data-read-age="1"]');
+await settle(80);
 ok($('#toast-text').textContent.includes('No articles you read more than a day ago here'), 'freshly-read articles are not "read more than a day ago" — no phantom restore');
-ok(rowCount() === 0, 'nothing came back — the reading-age cutoff held');
+ok(rowCount() === 4, 'nothing else came back — the reading-time cutoff held');
+click('#badge-all-items');
+await settle(50);
+ok(rowCount() === 0, 'badge tick re-marks everything read for the caught-up restore');
 click('#btn-mark-all'); 
 await settle(20);
 click('#confirm-yes');
@@ -444,7 +473,7 @@ click('#btn-mark-all-split');
 await settle(20);
 click('#mark-menu [data-mark="unread"][data-older="31"]');
 await settle(120);
-ok($('#toast-text').textContent.includes('No articles you read more than a month ago here — data goes back to'), 'unread-side month cutoff also names the boundary');
+ok($('#toast-text').textContent.includes('No read articles older than a month here — data goes back to'), 'unread-side month cutoff also names the boundary');
 click('.tree-item[data-scope="all"]'); 
 await settle(60);
 click('#badge-all-items'); 
@@ -753,7 +782,7 @@ console.log('degraded network: hung feed fetches never wedge the UI');
   const item = wH.document.querySelector('#mark-menu [data-mark="unread"][data-older="1"]');
   item.dispatchEvent(new wH.MouseEvent('click', { bubbles: true }));
   await settle(400);
-  ok(wH.document.querySelector('#toast-text').textContent.includes('No articles you read more than a day ago here'), 'mark clicks always respond — stalled fetches cannot dead-end them');
+  ok(wH.document.querySelector('#toast-text').textContent.includes('No read articles older than a day here'), 'mark clicks always respond — stalled fetches cannot dead-end them');
   domH.window.close();
 }
 console.log('degraded network: a click during a slow load is visible, then lands');
@@ -1226,7 +1255,7 @@ console.log('progressive rendering: 400 rows chunk in, scroll grows the list, de
   ok(!!wD.document.querySelector('.row[data-id="big-350"]'), 'the deep-linked row is materialized in the DOM (renderUpTo)');
   domD.window.close();
 }
-console.log('mark-as-unread by age: the cutoff is WHEN YOU READ IT, not when it was published');
+console.log('mark-as-unread by age: TWO clocks — publication age AND reading age');
 {
   const D = 864e5;
   const nowU = Date.now();
@@ -1236,7 +1265,7 @@ console.log('mark-as-unread by age: the cutoff is WHEN YOU READ IT, not when it 
   });
   const articles = [
     art('u-fresh', 0.02, 'Published half an hour ago'),
-    art('u-1d', 1, 'Published a day ago'),
+    art('u-1d', 0.98, 'Published a day ago'),
     art('u-3d', 3, 'Published three days ago'),
     art('u-10d', 10, 'Published ten days ago'),
     art('u-40d', 40, 'Published forty days ago'),
@@ -1283,10 +1312,10 @@ console.log('mark-as-unread by age: the cutoff is WHEN YOU READ IT, not when it 
   await settle(20);
   wU.document.querySelector('#mark-alt-toggle').dispatchEvent(new wU.MouseEvent('click', { bubbles: true }));
   await settle(20);
-  wU.document.querySelector('#mark-menu [data-mark="unread"][data-older="2"]').dispatchEvent(new wU.MouseEvent('click', { bubbles: true }));
+  wU.document.querySelector('#mark-menu [data-mark="unread"][data-read-age="2"]').dispatchEvent(new wU.MouseEvent('click', { bubbles: true }));
   await settle(400);
   const toastU = wU.document.querySelector('#toast-text').textContent;
-  ok(toastU.includes('Marked 3 articles you read more than two days ago as unread'), 'the toast counts by READING age (three old reads, not four)');
+  ok(toastU.includes('Marked 3 articles you read more than two days ago as unread'), 'reading clock: the toast counts READING age (three old reads, not four)');
   ok(toastU.includes('— hidden by the date filter'), 'the toast names the filter that hides every restored row');
   ok(wU.document.querySelector('#toast-action-2').textContent === 'Show all', 'the one-click Show-all companion rides along');
   const lsU = JSON.parse(wU.localStorage.getItem('ghrss:read') || '{}');
@@ -1318,9 +1347,43 @@ console.log('mark-as-unread by age: the cutoff is WHEN YOU READ IT, not when it 
   ok(wU.document.querySelector('#toast-text').textContent.includes('Marked 3 articles older than two days as read'), 'mark-as-read still counts by PUBLICATION age');
   ok(unreadRow('u-1d') === true, 'the day-old unread article survives mark-read-older-than-two-days (published < 2 days ago)');
   ok(unreadRow('u-10d') === false && unreadRow('u-40d') === false && unreadRow('u-55d') === false, 'the three old-published unread ones were cleared');
+  console.log('publication clock: bulk mark-all-read, then unread-older-than-a-day, then a week');
+  wU.document.querySelector('#btn-mark-all').dispatchEvent(new wU.MouseEvent('click', { bubbles: true }));
+  await settle(30);
+  wU.document.querySelector('#confirm-yes').dispatchEvent(new wU.MouseEvent('click', { bubbles: true }));
+  await settle(200);
+  ok(Number(wU.document.querySelector('#badge-all-items').textContent) === 0, 'mark-all-read lands (fresh timestamps, seconds old)');
+  wU.document.querySelector('#btn-mark-all-split').dispatchEvent(new wU.MouseEvent('click', { bubbles: true }));
+  await settle(20);
+  ok(!wU.document.querySelector('#mark-group-unread').classList.contains('hidden'), 'caught up → the unread group is offered');
+  wU.document.querySelector('#mark-menu [data-mark="unread"][data-older="1"]').dispatchEvent(new wU.MouseEvent('click', { bubbles: true }));
+  await settle(300);
+  ok(wU.document.querySelector('#toast-text').textContent.includes('Marked 4 articles older than a day as unread'), 'THE USER\u2019S CASE: freshly bulk-read, older-than-a-day news still restores by PUBLICATION age');
+  ok(unreadRow('u-3d') === true && unreadRow('u-10d') === true && unreadRow('u-40d') === true && unreadRow('u-55d') === true, 'everything published more than a day ago is unread again');
+  ok(unreadRow('u-1d') === false && unreadRow('u-fresh') === false, 'the sub-day (0.98 d) and fresh articles stay read');
+  ok(Number(wU.document.querySelector('#badge-all-items').textContent) === 4, 'badge: 4 restored');
+  const lsP = JSON.parse(wU.localStorage.getItem('ghrss:read') || '{}');
+  ok(JSON.stringify(Object.keys(lsP).sort()) === JSON.stringify(['u-1d', 'u-fresh']), 'persisted: only the sub-day articles keep their read entries');
+  wU.document.querySelector('#btn-mark-all-split').dispatchEvent(new wU.MouseEvent('click', { bubbles: true }));
+  await settle(20);
+  wU.document.querySelector('#mark-menu [data-mark="unread"][data-older="7"]').dispatchEvent(new wU.MouseEvent('click', { bubbles: true }));
+  await settle(300);
+  ok(wU.document.querySelector('#toast-text').textContent.includes('No read articles older than a week here'), 'straight "then one week" with no re-mark: honest no-op, nothing read is older than a week');
+  ok(Number(wU.document.querySelector('#badge-all-items').textContent) === 4, 'badge unchanged by the honest no-op');
+  wU.document.querySelector('#btn-mark-all').dispatchEvent(new wU.MouseEvent('click', { bubbles: true }));
+  await settle(30);
+  wU.document.querySelector('#confirm-yes').dispatchEvent(new wU.MouseEvent('click', { bubbles: true }));
+  await settle(200);
+  wU.document.querySelector('#btn-mark-all-split').dispatchEvent(new wU.MouseEvent('click', { bubbles: true }));
+  await settle(20);
+  wU.document.querySelector('#mark-menu [data-mark="unread"][data-older="7"]').dispatchEvent(new wU.MouseEvent('click', { bubbles: true }));
+  await settle(300);
+  ok(wU.document.querySelector('#toast-text').textContent.includes('Marked 3 articles older than a week as unread'), 're-marked, then older-than-a-week: exactly the three week-plus articles restore');
+  ok(unreadRow('u-3d') === false, 'the three-day-old article stays read (inside the week)');
+  ok(Number(wU.document.querySelector('#badge-all-items').textContent) === 3, 'badge: 3 restored');
   domU.window.close();
 }
-console.log('recently-read scope: restore-by-reading-age inside the 7-day view');
+console.log('recently-read scope: both clocks inside the 7-day view');
 {
   const D = 864e5;
   const nowV = Date.now();
@@ -1330,7 +1393,7 @@ console.log('recently-read scope: restore-by-reading-age inside the 7-day view')
   });
   const articles = [
     art('v-a', 2, 'Read twelve hours ago'),
-    art('v-b', 1, 'Read three days ago'),
+    art('v-b', 0.98, 'Read three days ago'),
     art('v-c', 20, 'Read six and a half days ago'),
     art('v-d', 30, 'Read twelve days ago'),
     art('v-e', 0.5, 'Never read'),
@@ -1362,20 +1425,28 @@ console.log('recently-read scope: restore-by-reading-age inside the 7-day view')
   ok(wV.document.querySelectorAll('#list .row').length === 3, 'the view lists exactly the reads from the last 7 days');
   wV.document.querySelector('#btn-mark-all-split').dispatchEvent(new wV.MouseEvent('click', { bubbles: true }));
   await settle(20);
-  const hidden7 = wV.document.querySelector('#mark-menu [data-mark="unread"][data-older="7"]').classList.contains('hidden');
-  const hidden31 = wV.document.querySelector('#mark-menu [data-mark="unread"][data-older="31"]').classList.contains('hidden');
-  const shown1 = !wV.document.querySelector('#mark-menu [data-mark="unread"][data-older="1"]').classList.contains('hidden');
-  const shown2 = !wV.document.querySelector('#mark-menu [data-mark="unread"][data-older="2"]').classList.contains('hidden');
+  const hiddenRA7 = wV.document.querySelector('#mark-menu [data-mark="unread"][data-read-age="7"]').classList.contains('hidden');
+  const hiddenRA31 = wV.document.querySelector('#mark-menu [data-mark="unread"][data-read-age="31"]').classList.contains('hidden');
+  const shownRA1 = !wV.document.querySelector('#mark-menu [data-mark="unread"][data-read-age="1"]').classList.contains('hidden');
+  const shownRA2 = !wV.document.querySelector('#mark-menu [data-mark="unread"][data-read-age="2"]').classList.contains('hidden');
+  const pubPresetsLive = [...wV.document.querySelectorAll('#mark-menu [data-mark="unread"][data-older]')].every((b) => !b.classList.contains('hidden'));
   const readPresetsLive = [...wV.document.querySelectorAll('#mark-menu [data-mark="read"][data-older]')].every((b) => !b.classList.contains('hidden'));
-  ok(hidden7 && hidden31, 'unread week/month presets hide in the Recently read view (dead: the view caps at 7 days of reads)');
-  ok(shown1 && shown2, 'unread day/two-day presets stay (reads 1–7 days old exist here)');
+  ok(hiddenRA7 && hiddenRA31, 'reading-time week/month presets hide in the Recently read view (dead: the view caps at 7 days of reads)');
+  ok(shownRA1 && shownRA2, 'reading-time day/two-day presets stay (reads 1–7 days old exist here)');
+  ok(pubPresetsLive, 'publication presets stay live in the Recently read view (a listed read can be any published age)');
   ok(readPresetsLive, 'the read group keeps its presets (publication age, unbounded by the view)');
   wV.document.querySelector('#mark-menu [data-mark="unread"][data-older="1"]').dispatchEvent(new wV.MouseEvent('click', { bubbles: true }));
   await settle(300);
-  ok(wV.document.querySelector('#toast-text').textContent.includes('Marked 2 articles you read more than a day ago as unread'), 'restore counts reads older than a day inside the view (v-b, v-c — not v-a, not v-d)');
-  ok(wV.document.querySelectorAll('#list .row').length === 1, 'the un-read articles left the Recently read view (only the 12-hour read remains)');
-  const rowA = wV.document.querySelector('#list .row[data-id="v-a"]');
-  ok(!!rowA && !rowA.classList.contains('unread'), 'the twelve-hour-old read stays read');
+  ok(wV.document.querySelector('#toast-text').textContent.includes('Marked 2 articles older than a day as unread'), 'publication clock inside the view: v-a (2 d) and v-c (20 d) restore, v-b (0.98 d) does not');
+  ok(wV.document.querySelectorAll('#list .row').length === 1, 'the un-read articles left the Recently read view');
+  const rowB = wV.document.querySelector('#list .row[data-id="v-b"]');
+  ok(!!rowB && !rowB.classList.contains('unread'), 'the day-old-published read stays read');
+  wV.document.querySelector('#btn-mark-all-split').dispatchEvent(new wV.MouseEvent('click', { bubbles: true }));
+  await settle(20);
+  wV.document.querySelector('#mark-menu [data-mark="unread"][data-read-age="1"]').dispatchEvent(new wV.MouseEvent('click', { bubbles: true }));
+  await settle(300);
+  ok(wV.document.querySelector('#toast-text').textContent.includes('Marked 1 article you read more than a day ago as unread'), 'reading clock inside the view: v-b (read three days ago) restores');
+  ok(wV.document.querySelectorAll('#list .row').length === 0, 'the view is now empty');
   domV.window.close();
 }
 console.log('an explicit mark-as-unread is never reverted by the pending delayed mark-read timer');

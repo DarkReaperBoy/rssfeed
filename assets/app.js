@@ -970,12 +970,12 @@ function collectScopeIds(scope, cutoff = 0) {
 
 const OLDER_LABELS = { 1: 'a day', 2: 'two days', 7: 'a week', 31: 'a month' };
 const cutoffFrom = (olderDays = 0, beforeTs = 0) => (beforeTs > 0 ? beforeTs : olderDays > 0 ? Date.now() - olderDays * 864e5 : 0);
-function describeCutoff(olderDays = 0, beforeTs = 0, unread = false) {
+function describeCutoff(olderDays = 0, beforeTs = 0, clock = 'pub') {
   const when = beforeTs > 0
     ? ` before ${new Date(beforeTs).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`
     : olderDays > 0 ? ` more than ${OLDER_LABELS[olderDays] || olderDays + ' days'} ago` : '';
   if (!when) return '';
-  return unread ? ` you read${when}` : (beforeTs > 0 ? ` from${when}` : ` older than ${OLDER_LABELS[olderDays] || olderDays + ' days'}`);
+  return clock === 'read' ? ` you read${when}` : (beforeTs > 0 ? ` from${when}` : ` older than ${OLDER_LABELS[olderDays] || olderDays + ' days'}`);
 }
 
 function dataStartsAt() {
@@ -1071,7 +1071,7 @@ function allReadInScope() {
   if (ids.some((id) => state.failed.has(id))) return false;
   return scopeUnreadCount(state.scope) === 0;
 }
-function collectScopeReadIds(scope, cutoff = 0) {
+function collectScopeReadIds(scope, cutoff = 0, clock = 'pub') {
   const ids = [];
 
   if (scope === 'recently-read') {
@@ -1081,7 +1081,7 @@ function collectScopeReadIds(scope, cutoff = 0) {
         const ts = state.read[a.id] || 0;
         if (ts <= 0 || Date.now() - ts >= RECENTLY_READ_WINDOW) continue;
         if (!dateRangeFilter(a)) continue;
-        if (cutoff && ts >= cutoff) continue; 
+        if (cutoff && (clock === 'read' ? ts : a.date) >= cutoff) continue;
         ids.push(a.id);
       }
     }
@@ -1091,18 +1091,18 @@ function collectScopeReadIds(scope, cutoff = 0) {
     for (const a of state.feeds.get(feedId) || []) {
       if (!isRead(a) || a._f?.hidden) continue; 
       if (scope === 'today' && a.date < startOfToday()) continue;
-      if (cutoff && (state.read[a.id] || 0) >= cutoff) continue; 
+      if (cutoff && (clock === 'read' ? (state.read[a.id] || 0) : a.date) >= cutoff) continue;
       ids.push(a.id);
     }
   }
   return ids;
 }
-function markScopeUnread(scope, olderDays = 0, beforeTs = 0) {
-  const what = describeCutoff(olderDays, beforeTs, true);
+function markScopeUnread(scope, olderDays = 0, beforeTs = 0, clock = 'pub') {
+  const what = describeCutoff(olderDays, beforeTs, clock);
   const cutoff = cutoffFrom(olderDays, beforeTs);
-  const ids = collectScopeReadIds(scope, cutoff);
+  const ids = collectScopeReadIds(scope, cutoff, clock);
   if (!ids.length) {
-    showToast(olderDays || beforeTs ? `No articles${what} here${boundaryHint(cutoff)}` : 'Nothing to restore — no read articles here');
+    showToast(olderDays || beforeTs ? `${clock === 'read' ? 'No articles' : 'No read articles'}${what} here${boundaryHint(cutoff)}` : 'Nothing to restore — no read articles here');
     return;
   }
   const snapshot = ids.map((id) => ({ id, ts: state.read[id], guard: state.userUnread[id] || 0 }));
@@ -1149,9 +1149,10 @@ function syncMarkButtons(forceReset = false) {
   }
 
   const scopeId = state.scope;
-  $$('#mark-menu .dropdown-item[data-older]').forEach((b) => {
+  $$('#mark-menu .dropdown-item[data-older], #mark-menu .dropdown-item[data-read-age]').forEach((b) => {
+    const days = Number(b.dataset.older || b.dataset.readAge) || 0;
     const dead = scopeId === 'today'
-      || (scopeId === 'recently-read' && b.dataset.mark === 'unread' && Number(b.dataset.older) >= 7);
+      || (scopeId === 'recently-read' && !!b.dataset.readAge && days >= 7);
     b.classList.toggle('hidden', dead);
   });
 }
@@ -1532,7 +1533,7 @@ function bindEvents() {
     if (g) g.classList.toggle('hidden', !open);
   });
 
-  const applyMark = async (fn, olderDays, beforeTs) => {
+  const applyMark = async (fn, olderDays, beforeTs, clock) => {
     const load = ensureLoadedForScope(state.scope);
     const slow = setTimeout(() => showToast('Still loading this view — marking what has arrived so far', undefined, undefined, true), 1500);
     try {
@@ -1540,7 +1541,7 @@ function bindEvents() {
     } finally {
       clearTimeout(slow);
     }
-    fn(state.scope, olderDays, beforeTs);
+    fn(state.scope, olderDays, beforeTs, clock);
   };
   $('#mark-menu').addEventListener('click', (e) => {
     if (e.target.tagName === 'INPUT') return; 
@@ -1550,10 +1551,10 @@ function bindEvents() {
       if (inp) { inp.focus(); try { inp.showPicker?.(); } catch {} }
       return;
     }
-    const item = e.target.closest('[data-older]');
+    const item = e.target.closest('[data-older], [data-read-age]');
     if (!item) return;
     $('#mark-menu').classList.add('hidden');
-    applyMark(item.dataset.mark === 'unread' ? markScopeUnread : markScopeRead, Number(item.dataset.older) || 0, 0);
+    applyMark(item.dataset.mark === 'unread' ? markScopeUnread : markScopeRead, Number(item.dataset.older || item.dataset.readAge) || 0, 0, item.dataset.readAge ? 'read' : 'pub');
   });
   let datePickTimer = null; 
 
