@@ -2,7 +2,7 @@
 
 A self-hosted RSS reader with **no server and no database**:
 
-- **GitHub Actions** refreshes the data **at least hourly, self-healing** (RSS + Atom + YouTube channels + 4chan boards + Hacker News): GitHub's scheduler skips cron slots at random (multi-hour streaks observed), so the workflow is scheduled every 15 minutes (deliberately off the congested `:00` minute) and skips early when the published data is <45 min old — the real cadence stays ~hourly, but whichever slot lands first after the data goes stale does the fetch. It extracts clean full text and publishes the site to the **`gh-pages` branch**
+- **GitHub Actions** refreshes the data **at least hourly, self-healing** (RSS + Atom + YouTube channels + 4chan boards + Hacker News): GitHub's scheduler skips cron slots at random (multi-hour streaks observed), so the workflow is scheduled every 15 minutes (deliberately off the congested `:00` minute) and skips early when the published data is <40 min old — the real cadence stays ~hourly, but whichever slot lands first after the data goes stale does the fetch. It extracts clean full text and publishes the site to the **`gh-pages` branch** (note: GitHub auto-disables scheduled workflows in repos with no activity for 60 days — this repo's own gh-pages pushes keep it active; if a fork's schedule ever shows disabled, re-enable it from the Actions tab)
 - **GitHub Pages** serves the Inoreader-style reader UI
 - **`config.json`** is the entire configuration: settings, folders, feeds, per-feed word filters and content filters — plus an optional **`feeds.opml`** export (e.g. Inoreader's) that can provide the feed list, imported server-side by the fetcher
 - **YouTube Shorts are banned by default** (`settings.dropShorts`) — shorts slop never enters your unread list, and previously stored Shorts are purged from the retained data on every run (turning the filter on later cleans old articles too)
@@ -22,7 +22,7 @@ A self-hosted RSS reader with **no server and no database**:
 3. **Run the workflow once**: *Actions → "Fetch feeds & publish" → Run workflow*. After it finishes, the site is live at `https://<you>.github.io/<repo>/`.
 4. **Edit `config.json`** on GitHub (web editor is fine) to add your feeds/folders/filters, or drop an Inoreader OPML export as `feeds.opml`, then run the workflow again (or wait for the next scheduled run).
 
-That's it. The Action re-fetches feeds on a self-healing every-15-minutes schedule with a freshness gate (fresh data <45 min old → the run skips early in ~20 s) and force-updates `gh-pages` (which Pages auto-deploys).
+That's it. The Action re-fetches feeds on a self-healing every-15-minutes schedule with a freshness gate (fresh data <40 min old → the run skips early in ~20 s) and force-updates `gh-pages` (which Pages auto-deploys).
 
 ## config.json
 
@@ -109,7 +109,7 @@ How it behaves:
 
 ### Hacker News as a feed
 
-Add HN via the official search API the site itself uses ([hn.algolia.com/api](https://hn.algolia.com/api) — no key, one request per fetch):
+Add HN via the official search API the site itself uses ([hn.algolia.com/api](https://hn.algolia.com/api) — no key; one request per fetch, up to 6 when Algolia's 1000-hit response cap forces the window to split into date ranges):
 
 ```jsonc
 {
@@ -128,7 +128,7 @@ Add HN via the official search API the site itself uses ([hn.algolia.com/api](ht
 
 How the caps work:
 
-- **both set** → a story must meet **both** (the default config ships `100` + `100`)
+- **both set** → a story must meet **both** (the default config ships `150` + `100`)
 - **only one set** → the unset cap is ignored, only the set one applies
 - **neither set** → no filter: the live HN front page (~30 stories), like visiting the site
 - stories within the last `retentionDays` are queried newest-first; a story that later falls off the front page (or below the caps) lingers for `retentionDays` from its publish date — and its points/comments line stays current because fresh hits replace stored ones by id
@@ -158,7 +158,7 @@ Don't want to hand-write feeds? Export OPML from Inoreader (or any reader), save
   "include": { "title": ["rust"] },        // optional whitelist: article must match ≥1 entry per given field
   "exclude": { "title": ["crypto", "/\\bbtc\\b/i"], "links": ["coindesk.com"] },
   "actions": {
-    "hide": true,        // remove from lists (default true)
+    "hide": true,        // remove from lists (default true ONLY when no other action is set — an explicit highlight/markRead/keepUnread means you want to SEE the rows)
     "markRead": false,   // auto-mark matching articles as read (ingest-style)
     "keepUnread": false, // never auto-mark-read, even "open = read"
     "highlight": false   // tint matching rows
@@ -166,12 +166,13 @@ Don't want to hand-write feeds? Export OPML from Inoreader (or any reader), save
 }
 ```
 
-- Plain strings are **case-insensitive substrings**; `/pattern/flags` strings are **regexes**
+- Plain strings are **case-insensitive substrings**; `/pattern/flags` strings are **regexes** (the default `i` survives even when you pass other flags)
 - Fields: `title`, `content` (body + summary text), `authors`, `links`
 - Within a field entries are OR'ed, across fields AND'ed
+- **Two match shapes share one filter**: `hide` treats `include` as a whitelist (hides everything *outside* it — classic kill-file semantics), while `highlight`/`markRead`/`keepUnread` treat `include` as the *selection* (act on what's inside it), with `exclude` vetoing both
 - No `include`/`exclude` at all → the filter matches **everything in scope** (e.g. `keepUnread` for a newsletter feed)
 - Filters are read by the UI on every load — edits apply immediately, no refetch needed
-- Need something dropped **server-side** (never in the data files at all)? Use the per-feed `filter` above — same matcher semantics, applied by the fetcher. It works for 4chan boards and regular feeds alike.
+- Need something dropped **server-side** (never in the data files at all)? Use the per-feed `filter` above — same matcher semantics (both `author`/`authors` and `link`/`links` spellings accepted), applied by the fetcher. It works for 4chan boards and regular feeds alike, purges previously-stored matches, and runs before the full-text extraction budget is spent.
 
 ## Features
 
@@ -180,14 +181,14 @@ Don't want to hand-write feeds? Export OPML from Inoreader (or any reader), save
 - **Caught-up flip**: when a feed/folder/newsfeed is fully read ("All caught up 🎉"), the SAME top ✓ button becomes *Mark all as unread* — one confirmed click un-marks everything. Marked a whole folder read by accident? It's recoverable
 - **Auto-sync aligned with CI**: the Action refreshes on a self-healing quarter-hourly schedule (gate-capped at ~hourly) and publishes ~1–3 min after it starts; open tabs poll on a 5-minute wall-clock grid (`refreshMinutes`), so new articles land within ~5 minutes — announced with a toast, your open article and reading position untouched. A backgrounded tab catches up the moment you focus it
 - **Unread is sacred**: nothing marks an article read except you (open, the tick button, bulk, or a `markRead` filter); `keepUnread` filters — and your explicit "keep unread" flags — beat all of it
-- **Single read-state indicator**: the tick button on each row (✓ = read, ○ = unread); the reader title links to the original article
+- **Single read-state indicator**: the tick button on each row shows the state (✓ = read, ○ = unread; its tooltip carries the action); the reader title links to the original article
 - **No vanishing rows**: an article you just read stays in the Unread view (ticked) until you open another article or change the view
 - **Deep links + Back/Forward**: opening an article sets `#article/<id>` in the URL as a history entry — Back returns you to the previous article (also works for the reader's prev/next buttons); a refresh reopens the article straight from the URL; closing the reader (Escape/collapse/re-click) replaces the hash instead of stacking history
 - **Folders select, chevrons expand**: clicking a folder row shows its articles (selecting ≠ expanding) — the ▸ chevron is the one true expand/collapse control
 - **Tab title**: `(N) My RSSFeed - <open article title>` while reading; `(N) My RSSFeed` otherwise
 - **YouTube Shorts filter** (`dropShorts`, default on): Shorts arrive in channel feeds with `/shorts/` links — the fetcher drops them (plus `#shorts`-tagged titles); opt a channel back in with `"dropShorts": false`
 - **Reset read state** (⋯ menu): forgets all read + keep-unread state in one confirmed click — everything goes back to unread
-- All/Unread/Read chips, date filters (today / 3 days / week / month), All·Unread·Today·Recently read views, newest/oldest sort
+- All/Unread status views + Today and Recently read, date filters (today / 3 days / week / month), newest/oldest sort (newest is the default)
 - **All five layouts**: List (Comfort/Compact/Ultra density), Expanded, Column, Cards, Magazine — light/dark/auto theme
 - Inline reading pane with prev/next, original site link, mark read/unread, "keep unread", attachments list
 - **Text view**: feeds with `fullText` get readability-extracted clean article text (vs. truncated feed content)
@@ -195,11 +196,11 @@ Don't want to hand-write feeds? Export OPML from Inoreader (or any reader), save
 - Search with operators: `feed:bbc title:ai before:2026-01-01 after:2025-12-01 unread:true is:read is:unread`, plus `OR` groups
 - Full-text search across titles, authors, summaries and article bodies
 - Multiple select (bulk mark read/unread with undo), badge-click mark-read with undo, mark-all with confirm
-- **Keyboard**: `j`/`k` = next/previous article, `Escape` closes the reader/menus — typing in an input never triggers them
+- **Keyboard**: `j`/`k` = next/previous article, `m` = toggle read, `o`/`v` = open original, `s` = keep unread, `/` = search, `Escape` closes the topmost layer (menu first, then the reader) — typing in an input never triggers them
 - **Every preference lives in config.json** (see the settings block above) — re-read on every load; your own UI toggles (layout, status, date, sort, show-filtered, multi-select) persist in localStorage
 - **4chan boards**: any board as a feed, reply-count windows, sticky/closed skipping, per-board word filters, live thread lists, thumbnails — no API key, just `type: "4chan"`
 - **Hacker News**: point + comment caps (AND when both set, either one alone, live front page when neither), word filters, retention-merged stories with current points/comments — `type: "hackernews"`
-- Assets are served with a **`?v=` cache-buster** that changes whenever `index.html`/`assets/` change — a normal reload always picks up fresh code, no hard refresh needed after deploys
+- Assets are served with a **`?v=` cache-buster derived from the content of `index.html` + `assets/` at deploy time** (CI substitutes the hash) — a normal reload always picks up fresh code, no hard refresh needed after deploys
 - Powered by [rssfeed](https://github.com/DarkReaperBoy/rssfeed) — credit lives in the sidebar footer next to the "Updated X ago" line
 
 ## Local development
@@ -208,7 +209,8 @@ Don't want to hand-write feeds? Export OPML from Inoreader (or any reader), save
 npm ci          # fetch-script deps only (UI has zero deps)
 npm run fetch   # fetch feeds into ./data (also what CI runs)
 npm run serve   # http://localhost:8080
-npm run test:ui # jsdom smoke test of the UI against local data
+npm run test:ui # jsdom smoke test of the UI against local data (227 assertions)
+npm run test:e2e # full fetcher pipeline against local fixtures (id stability, 304s)
 ```
 
 `data/` and `node_modules/` are git-ignored; CI assembles `index.html + assets/ + config.json + data/` into the `gh-pages` branch. See `AGENTS.md` for architecture details.
