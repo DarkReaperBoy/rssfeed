@@ -496,12 +496,13 @@ async function main() {
   if (configRules.length) console.log(`config filters: ${configRules.length} rule(s) applied at fetch time (server-side)`);
   const currentFeedIds = new Set();
   const written = new Map(); 
+  const inWindow = (a) => now - a.date < retainMs;
   const purgePrev = (prev, { ytShorts = false, feedBlocks = null, cf = null } = {}) => {
     let list = prev.articles || [];
     if (ytShorts) list = list.filter((a) => !isShortItem(a.link, a.title, a.content));
     if (feedBlocks) list = list.filter((a) => !feedFilterDrop(a, feedBlocks));
     if (cf) list = cf(list);
-    return list.filter((a) => now - a.date < retainMs);
+    return list.filter(inWindow);
   };
   const processFeed = async (feed) => {
     currentFeedIds.add(feed.id);
@@ -565,7 +566,7 @@ async function main() {
       const meta = boards?.find((b) => b.board === board) || null;
       if (!board) {
         failures++;
-        const keptErr = cList((prev.articles || []).filter((a) => !feedFilterDrop(a, feedBlocks))).filter((a) => now - a.date < retainMs);
+        const keptErr = cList((prev.articles || []).filter((a) => !feedFilterDrop(a, feedBlocks))).filter(inWindow);
         await fs.writeFile(file, JSON.stringify({ articles: keptErr }));
         index.feeds[feed.id] = { ...summarizeFeed({ ...feed, site: feed.site || 'https://boards.4channel.org' }, keptErr), status: { ...status, ok: false, error: '4chan feed needs a "board"' } };
         written.set(feed.id, keptErr);
@@ -574,7 +575,7 @@ async function main() {
       }
       if (boards && !meta) {
         failures++;
-        const keptErr = cList((prev.articles || []).filter((a) => !feedFilterDrop(a, feedBlocks))).filter((a) => now - a.date < retainMs);
+        const keptErr = cList((prev.articles || []).filter((a) => !feedFilterDrop(a, feedBlocks))).filter(inWindow);
         await fs.writeFile(file, JSON.stringify({ articles: keptErr }));
         index.feeds[feed.id] = { ...summarizeFeed({ ...feed, site: feed.site || 'https://boards.4channel.org' }, keptErr), status: { ...status, ok: false, error: `unknown board /${board}/` } };
         written.set(feed.id, keptErr);
@@ -592,7 +593,7 @@ async function main() {
         status.ok = false;
         status.error = err.message;
         status.consecutiveFailures = (prevStatus.consecutiveFailures || 0) + 1;
-        const keptFail = cList((prev.articles || []).filter((a) => !feedFilterDrop(a, feedBlocks))).filter((a) => now - a.date < retainMs);
+        const keptFail = cList((prev.articles || []).filter((a) => !feedFilterDrop(a, feedBlocks))).filter(inWindow);
         await fs.writeFile(file, JSON.stringify({ articles: keptFail }));
         index.feeds[feed.id] = { ...summarizeFeed({ ...effFeed, ...feedMetaFor(effFeed, prevMeta) }, keptFail), status };
         written.set(feed.id, keptFail);
@@ -605,7 +606,7 @@ async function main() {
       status.error = null;
       status.lastModified = res.lastModified || prevStatus.lastModified || null;
       if (res.notModified) {
-        const keptAll = cList((prev.articles || []).filter((a) => !feedFilterDrop(a, feedBlocks))).filter((a) => now - a.date < retainMs);
+        const keptAll = cList((prev.articles || []).filter((a) => !feedFilterDrop(a, feedBlocks))).filter(inWindow);
         const kept = cap ? keptAll.slice(0, cap) : keptAll;
         await fs.writeFile(file, JSON.stringify({ articles: kept }));
         index.feeds[feed.id] = { ...summarizeFeed({ ...effFeed, ...feedMetaFor(effFeed, prevMeta) }, kept), status };
@@ -632,7 +633,7 @@ async function main() {
         a.content = sanitize(a.content);
         articles.push(a);
       }
-      const live = articles.filter((a) => now - a.date < retainMs);
+      const live = articles.filter(inWindow);
       const kept = cap ? live.slice(0, cap) : live;
       await fs.writeFile(file, JSON.stringify({ articles: kept }));
       index.feeds[feed.id] = { ...summarizeFeed({ ...effFeed, ...feedMetaFor(effFeed, prevMeta) }, kept), status };
@@ -660,7 +661,7 @@ async function main() {
         status.ok = false;
         status.error = err.message;
         status.consecutiveFailures = (prevStatus.consecutiveFailures || 0) + 1;
-        const keptFail = cList([...(prev.articles || [])].filter((a) => !feedFilterDrop(a, feedBlocks))).filter((a) => now - a.date < retainMs);
+        const keptFail = cList([...(prev.articles || [])].filter((a) => !feedFilterDrop(a, feedBlocks))).filter(inWindow);
         await fs.writeFile(file, JSON.stringify({ articles: keptFail }));
         index.feeds[feed.id] = { ...summarizeFeed({ ...effFeed, ...feedMetaFor(effFeed, prevMeta) }, keptFail), status };
         written.set(feed.id, keptFail);
@@ -687,7 +688,7 @@ async function main() {
       const byId = new Map();
       const prevList = cList((prev.articles || []).filter((a) => !feedFilterDrop(a, feedBlocks)));
       for (const a of [...prevList, ...articles]) byId.set(a.id, a);
-      const merged = [...byId.values()].sort((a, b) => b.date - a.date).filter((a) => now - a.date < retainMs);
+      const merged = [...byId.values()].sort((a, b) => b.date - a.date).filter(inWindow);
       await fs.writeFile(file, JSON.stringify({ articles: merged }));
       index.feeds[feed.id] = { ...summarizeFeed({ ...effFeed, ...fmeta }, merged), status };
       written.set(feed.id, merged);
@@ -730,7 +731,7 @@ async function main() {
       status.ok = false;
       status.error = err.message;
       status.consecutiveFailures = (prevStatus.consecutiveFailures || 0) + 1;
-      const kept = cList([...(prev.articles || [])].filter((a) => !feedFilterDrop(a, feedBlocks))).filter((a) => now - a.date < retainMs);
+      const kept = cList([...(prev.articles || [])].filter((a) => !feedFilterDrop(a, feedBlocks))).filter(inWindow);
       await fs.writeFile(file, JSON.stringify({ articles: kept }));
       index.feeds[feed.id] = {
         ...summarizeFeed({ ...feed, ...feedMetaFor(feed, prevMeta) }, kept),
@@ -748,7 +749,7 @@ async function main() {
       status.ok = false;
       status.error = `Parse error: ${err.message}`;
       status.consecutiveFailures = (prevStatus.consecutiveFailures || 0) + 1;
-      let kept = cList([...(prev.articles || [])].filter((a) => !feedFilterDrop(a, feedBlocks))).filter((a) => now - a.date < retainMs);
+      let kept = cList([...(prev.articles || [])].filter((a) => !feedFilterDrop(a, feedBlocks))).filter(inWindow);
       await fs.writeFile(file, JSON.stringify({ articles: kept }));
       index.feeds[feed.id] = {
         ...summarizeFeed({ ...feed, ...feedMetaFor(feed, prevMeta) }, kept),
@@ -817,7 +818,7 @@ async function main() {
     const prevList = purgePrev(prev, { ytShorts, feedBlocks, cf: cList });
     for (const a of [...prevList, ...articles]) byId.set(a.id, a);
     let merged = [...byId.values()].sort((a, b) => b.date - a.date);
-    merged = merged.filter((a) => now - a.date < retainMs);
+    merged = merged.filter(inWindow);
     await fs.writeFile(file, JSON.stringify({ articles: merged }));
     index.feeds[feed.id] = {
       ...summarizeFeed({ ...feed, ...fmeta }, merged),
