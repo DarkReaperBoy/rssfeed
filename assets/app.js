@@ -483,10 +483,12 @@ function scopeTitle() {
 }
 
 function thumbFor(a) {
-  const enc = (a.enclosures || []).find((e) => /^image\//.test(e.type || '') || /\.(jpe?g|png|webp|gif)(\?|$)/i.test(e.url));
+  const isImgUrl = (u) => typeof u === 'string' && /^https?:\/\//i.test(stripCtrl(u));
+  const enc = (a.enclosures || []).find((e) => isImgUrl(e.url) && (/^image\//.test(e.type || '') || /\.(jpe?g|png|webp|gif)(\?|$)/i.test(e.url)));
   if (enc) return enc.url;
   const m = String(a.content || '').match(/<img[^>]+src=["']([^"']+)/i);
-  return m ? m[1] : null;
+  const url = m ? m[1] : null;
+  return isImgUrl(url) ? url : null;
 }
 function rowHtml(a) {
   const feed = feedMeta(a._feed);
@@ -565,6 +567,7 @@ function attachmentsHtml(a) {
   const enc = (a.enclosures || []).filter((e) => e.url && !/^image\//i.test(e.type || ''));
   const imgs = (a.enclosures || []).filter((e) => e.url && /^image\//i.test(e.type || '') && e.type !== 'image/thumbnail');
   if (!enc.length && !imgs.length) return '';
+  const href = (u) => esc(safeHref(u));
   const label = (e) => {
     const kind = (e.type || '').split('/')[0];
     const raw = (e.url.split('/').pop() || '').split('?')[0] || '';
@@ -574,8 +577,8 @@ function attachmentsHtml(a) {
     return kind && kind !== 'image' ? `${kind.toUpperCase()} · ${name}` : name;
   };
   return `<div class="reader-attachments">
-    ${enc.map((e) => `<a href="${esc(e.url)}" target="_blank" rel="noopener noreferrer"><svg style="width:16px;height:16px"><use href="#i-external"/></svg>${esc(label(e))}</a>`).join('')}
-    ${imgs.map((e) => `<a href="${esc(e.url)}" target="_blank" rel="noopener noreferrer"><img src="${esc(e.url)}" alt="">${esc(label(e))}</a>`).join('')}
+    ${enc.map((e) => `<a href="${href(e.url)}" target="_blank" rel="noopener noreferrer"><svg style="width:16px;height:16px"><use href="#i-external"/></svg>${esc(label(e))}</a>`).join('')}
+    ${imgs.map((e) => `<a href="${href(e.url)}" target="_blank" rel="noopener noreferrer">${safeHref(e.url) === '#' ? '' : `<img src="${href(e.url)}" alt="">`}${esc(label(e))}</a>`).join('')}
   </div>`;
 }
 function readingTime(a) {
