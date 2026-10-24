@@ -11,7 +11,6 @@ const now = Date.now();
 const H = 3600e3;
 const mk = (id, title, h) => ({ id, title, link: `https://example.com/${id}`, date: now - h * H, author: null, summary: title, content: `<p>${title}</p>`, text: null, enclosures: [], fetchedAt: now });
 const arts = [mk('c-old', 'Oldest read one', 30), mk('c-a', 'Unread alpha', 9), mk('c-b', 'Unread beta', 8), mk('c-c', 'Unread gamma', 7), mk('c-new', 'Newest read one', 2)];
-const markReadFilterCfg = (cfg) => cfg;
 const config = { settings: { siteName: 'My RSSFeed', theme: 'auto' }, folders: [], feeds: [{ id: 'cf', title: 'Char Feed', url: 'https://cf.test/rss' }], filters: [] };
 const index = { generatedAt: now, folders: [], feeds: { cf: { title: 'Char Feed', site: '', folder: null, folders: [], count: arts.length, newest: arts[0].date, oldest: arts.at(-1).date } } };
 
@@ -115,7 +114,7 @@ console.log('characterization: a click with an active text selection does not op
 }
 console.log('characterization: cross-tab storage sync re-renders, filter guards stay session-scoped');
 {
-  const cfg = markReadFilterCfg({ ...config, filters: [{ id: 'mr', name: 'mr', feeds: ['cf'], include: { title: ['alpha'] }, actions: { markRead: true } }] });
+  const cfg = ({ ...config, filters: [{ id: 'mr', name: 'mr', feeds: ['cf'], include: { title: ['alpha'] }, actions: { markRead: true } }] });
   const { dom, w } = await bootDom({ cfg });
   ok(Number(w.document.querySelector('#badge-all-items').textContent) === 4, 'the markRead filter auto-read "alpha" at load (4 unread left of 5)');
   w.localStorage.setItem('ghrss:read', JSON.stringify({ 'c-b': now - H }));

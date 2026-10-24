@@ -1331,7 +1331,6 @@ function onListClick(e) {
     return;
   }
 
-  if (e.target.closest('.row-body-inline') && !e.target.closest('[data-act]')) return;
   const sel = window.getSelection?.();
   if (sel && String(sel).trim()) return;
   const actBtn = e.target.closest('[data-act]');
