@@ -54,6 +54,9 @@ jobs:
       - name: Smoke test (UI + fetcher units)
         if: env.SKIP_FETCH != 'true'
         run: npm run test:ui
+      - name: Characterization suite (known-behavior pins)
+        if: env.SKIP_FETCH != 'true'
+        run: npm run test:char
       - name: Fetcher e2e (id stability, conditional GET)
         if: env.SKIP_FETCH != 'true'
         run: npm run test:e2e

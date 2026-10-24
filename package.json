@@ -7,7 +7,9 @@
     "fetch": "node scripts/fetch.mjs",
     "serve": "python3 -m http.server 8080",
     "test:ui": "node scripts/smoke.mjs",
-    "test:e2e": "node scripts/e2e-fetch.mjs"
+    "test:char": "node scripts/characterization.mjs",
+    "test:e2e": "node scripts/e2e-fetch.mjs",
+    "test": "npm run test:ui && npm run test:char && npm run test:e2e"
   },
   "dependencies": {
     "@mozilla/readability": "^0.5.0",
