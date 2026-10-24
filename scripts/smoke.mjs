@@ -19,7 +19,7 @@ const FIX = {
   'fixture-hn': {
     title: 'Hacker News', site: 'https://news.ycombinator.com', folder: 'tech',
     articles: mkArticles('fixture-hn', [
-      'Show HN: spammy thing', 'AI model beats benchmark', 'Show HN: another spam',
+      'AI model beats benchmark',
       'Rust 2.0 released', 'Postgres 18 ships', 'New JS runtime',
       'Linux 7.0 out', 'Compiler optimizations', 'Open source drama',
       'WebGPU everywhere', 'Containers explained', 'Vim vs Emacs again',
@@ -45,6 +45,8 @@ const FIX = {
 };
 FIX['fixture-verge'].articles[2].text = '<p>Extracted full text present</p>';
 FIX['fixture-verge'].articles[2].content = '<p>Short teaser only</p>';
+// Backend filter flags ride on the article data (filters run in the fetcher, never in the browser)
+FIX['fixture-verge'].articles[1].highlight = true;
 const config = {
   settings: { siteName: 'My RSSFeed', theme: 'dark', refreshMinutes: 60 },
   folders: [], 
@@ -52,12 +54,6 @@ const config = {
     { id: 'fixture-hn', title: 'Hacker News', url: 'https://hnrss.test/frontpage', site: 'https://news.ycombinator.com', folder: 'tech' },
     { id: 'fixture-verge', title: 'The Verge', url: 'https://theverge.test/rss', site: 'https://www.theverge.com', folder: 'tech' },
     { id: 'fixture-bbc', title: 'BBC News', url: 'https://bbc.test/rss', site: 'https://www.bbc.com/news', folder: 'news' },
-  ],
-  filters: [
-    { id: 'test-filter', name: 'test', feeds: ['fixture-hn'],
-      exclude: { title: ['show hn'] }, actions: { hide: true } },
-    { id: 'test-highlight', name: 'hl', feeds: ['fixture-verge'],
-      include: { title: ['laptop'] }, actions: { highlight: true } },
   ],
 };
 const urlOf = Object.fromEntries(config.feeds.map((f) => [f.id, f.url]));
@@ -79,7 +75,6 @@ const allFeeds = {
   articles: Object.entries(FIX).flatMap(([id, f]) => f.articles.map((a) => ({ ...a, _feed: id }))),
 };
 const TOTAL = Object.values(FIX).reduce((n, f) => n + f.articles.length, 0);
-const HIDDEN = 2;
 const html = (await fs.readFile(path.join(ROOT, 'index.html'), 'utf8'))
   .replace(/<script src="assets\/app\.js\?v=[^"]*"><\/script>/, ''); 
 const appSrc = await fs.readFile(path.join(ROOT, 'assets/app.js'), 'utf8');
@@ -120,28 +115,28 @@ ok($('#tree').textContent.includes('Technology'), 'folder renders (from generate
 ok($('#tree').textContent.includes('Hacker News'), 'feeds render');
 ok(!$('#reader-placeholder'), 'reader placeholder removed');
 ok(window.document.documentElement.dataset.theme === 'dark', 'config settings apply on every load (theme)');
-ok(Number($('#badge-all-items').textContent) === TOTAL - HIDDEN, 'unread badge counts all feeds');
+ok(Number($('#badge-all-items').textContent) === TOTAL, 'unread badge counts all feeds');
 console.log('list + filter');
 let rows = $$('#list .row');
-ok(rows.length === TOTAL - HIDDEN, `rows rendered (${rows.length})`);
+ok(rows.length === TOTAL, `rows rendered (${rows.length})`);
 ok(!$$('#list .row .dot').length, 'blue unread dot removed');
 ok(!$$('#list .row .star-btn').length, 'star buttons removed');
 ok($$('#list .row [data-act="toggle-read"]').length === rows.length, 'every row has the read/unread tick');
 ok($$('#list .row [data-act="keep"]').length === rows.length, 'every row has keep-unread');
-ok($$('#list .row').filter((r) => r.querySelector('.feed-name')?.textContent === 'Hacker News' && /show hn/i.test(r.querySelector('.row-title').textContent)).length === 0, 'exclude filter hides matching articles');
-ok($$('#list .row.highlight').length === 1 && /laptop/i.test($$('#list .row.highlight .row-title')[0].textContent), 'include+highlight tints ONLY the matching row (nothing hidden)');
+ok($$('#list .row').filter((r) => r.querySelector('.feed-name')?.textContent === 'Hacker News' && /show hn/i.test(r.querySelector('.row-title').textContent)).length === 0, 'backend-hidden articles are simply absent (the two Show HN threads never shipped in the data)');
+ok($$('#list .row.highlight').length === 1 && /laptop/i.test($$('#list .row.highlight .row-title')[0].textContent), 'a backend highlight flag tints ONLY the flagged row');
 console.log('default sort: oldest → newest');
-ok($$('#list .row')[0].dataset.id === 'fixture-hn-11', 'the list opens oldest-first by default (the oldest article leads)');
+ok($$('#list .row')[0].dataset.id === 'fixture-hn-9', 'the list opens oldest-first by default (the oldest article leads)');
 ok($('#sort-items [data-sort="oldest"]').classList.contains('on'), 'the sort menu marks "Oldest first" as the active default');
 click('#btn-more');
 await settle(20);
 click('#sort-items [data-sort="newest"]');
 await settle(80);
-ok($$('#list .row').at(-1).dataset.id === 'fixture-hn-11', 'toggling "Newest first" flips the order (the oldest article is now last)');
+ok($$('#list .row').at(-1).dataset.id === 'fixture-hn-9', 'toggling "Newest first" flips the order (the oldest article is now last)');
 ok(JSON.parse(window.localStorage.getItem('ghrss:ui') || '{}').sortDir === 'newest', 'the sort choice persists');
 click('#sort-items [data-sort="oldest"]');
 await settle(80);
-ok($$('#list .row')[0].dataset.id === 'fixture-hn-11', 'back to oldest-first for the rest of the flow');
+ok($$('#list .row')[0].dataset.id === 'fixture-hn-9', 'back to oldest-first for the rest of the flow');
 click('#btn-more');
 await settle(20);
 console.log('reading');
@@ -154,7 +149,7 @@ await settle(50);
 ok(!!$('#reader-slot .reader-body'), 'article opens');
 ok($('#reader-slot .reader-title a')?.href === firstLink, 'reader title links to the original article');
 ok($('#list .row').classList.contains('expanded'), 'open row is highlighted in the list');
-ok(Number($('#badge-all-items').textContent) === TOTAL - HIDDEN - 1, 'opening marks read');
+ok(Number($('#badge-all-items').textContent) === TOTAL - 1, 'opening marks read');
 ok(window.location.hash === `#article/${firstId}`, 'opening an article puts its id in the URL (#article/<id>)');
 console.log('reader prefers extracted full text over the feed teaser');
 {
@@ -177,7 +172,7 @@ console.log('reader prefers extracted full text over the feed teaser');
   ok(window.document.body.classList.contains('article-open'), 'clearing the search keeps the open article (search no longer closes it)');
   click($(`#list .row[data-id="${ftId}"] [data-act="toggle-read"]`)); 
   await settle(50);
-  ok(Number($('#badge-all-items').textContent) === TOTAL - HIDDEN - 1, 'state restored to one read article');
+  ok(Number($('#badge-all-items').textContent) === TOTAL - 1, 'state restored to one read article');
   click($('#reader-slot [data-act="collapse"]'));
   await settle(50);
   ok(!window.document.body.classList.contains('article-open'), 'reader collapsed');
@@ -188,16 +183,16 @@ await settle(30);
 click($('#list .row')); 
 await settle(50);
 ok(!window.document.body.classList.contains('article-open'), 'reader closed');
-ok(rowCount() === TOTAL - HIDDEN, 'double-clicked article stays in the list (marked read, not removed)');
+ok(rowCount() === TOTAL, 'double-clicked article stays in the list (marked read, not removed)');
 ok(!$('#list .row').classList.contains('unread'), 'the row now shows as read');
-ok(Number($('#badge-all-items').textContent) === TOTAL - HIDDEN - 1, 'badge unchanged by the collapse');
+ok(Number($('#badge-all-items').textContent) === TOTAL - 1, 'badge unchanged by the collapse');
 ok(!window.location.hash, 'collapsing the reader clears the hash (no history spam)');
 console.log('moving on keeps the read row (Back/prev/k can still return to it)');
 const secondRow = $$('#list .row')[1];
 const secondId = secondRow.dataset.id;
 click(secondRow);
 await settle(50);
-ok(rowCount() === TOTAL - HIDDEN, 'the previously read row lingers (tick flips in place, no vanish)');
+ok(rowCount() === TOTAL, 'the previously read row lingers (tick flips in place, no vanish)');
 ok(!!$(`#list .row[data-id="${firstId}"]`), 'the old row is still in the list for Back/Previous to return to');
 ok(window.document.body.classList.contains('article-open'), 'new article is selected');
 console.log('browser Back/Forward (deep-link history)');
@@ -222,12 +217,12 @@ ok($('#reader-slot .reader')?.dataset.id === secondId, 'popstate-driven Forward 
 console.log('mark unread');
 click(`#list .row[data-id="${secondId}"] [data-act="toggle-read"]`);
 await settle(50);
-ok(Number($('#badge-all-items').textContent) === TOTAL - HIDDEN - 1, 'mark unread restores count (the first article stays read)');
+ok(Number($('#badge-all-items').textContent) === TOTAL - 1, 'mark unread restores count (the first article stays read)');
 console.log('keep unread actually un-reads');
 ok(!!$(`#list .row[data-id="${firstId}"]`), 'the read row lingers in place');
 click(`#list .row[data-id="${firstId}"] [data-act="keep"]`);
 await settle(50);
-ok(Number($('#badge-all-items').textContent) === TOTAL - HIDDEN, 'keep-unread deletes the read entry too (the badge counts it again)');
+ok(Number($('#badge-all-items').textContent) === TOTAL, 'keep-unread deletes the read entry too (the badge counts it again)');
 ok($(`#list .row[data-id="${firstId}"] [data-act="keep"]`)?.getAttribute('aria-pressed') === 'true', 'the keep button reports its pressed state');
 ok($(`#list .row[data-id="${firstId}"] [data-act="keep"] use`)?.getAttribute('href') === '#i-bookmark-on', 'a kept article shows the FILLED bookmark glyph');
 ok($$('#list .row')[1].querySelector('[data-act="keep"] use')?.getAttribute('href') === '#i-bookmark', 'an un-kept article shows the outline bookmark glyph (the old eye-off path rendered broken)');
@@ -258,26 +253,26 @@ ok($('#mark-age-title').textContent === 'Mark as read', 'unread articles exist �
 ok($('#mark-age-desc').textContent === 'Articles older than', 'the sentence names the cutoff');
 ok($('#mark-age-value').textContent === '7 days', 'the live value reads as a sentence');
 ok($('#mark-age-apply').textContent === 'Mark as read', 'the apply button names the direction');
-ok($('#mark-age-count').textContent === 'Nothing to mark here', '7 days: nothing that old is unread (fixtures span ~33 h)');
+ok($('#mark-age-count').textContent === 'Nothing to mark here', '7 days: nothing that old is unread (fixtures span ~27 h)');
 ok(slider().getAttribute('aria-valuetext') === '7 days', 'the slider announces its value to screen readers');
 setAge(window, 1);
 await settle(20);
 ok($('#mark-age-value').textContent === '1 day', 'dragging updates the value live (singular grammar)');
-ok($('#mark-age-count').textContent === 'Will mark 4 articles', 'the count preview names the day-old HN batch');
+ok($('#mark-age-count').textContent === 'Will mark 2 articles', 'the count preview names the day-old HN pair');
 ok(slider().getAttribute('aria-valuetext') === '1 day', 'the announced value tracks the drag');
 click('#mark-age-apply');
 await settle(80);
-ok($('#toast-text').textContent.includes('Marked 4 articles older than a day as read'), 'apply marks exactly the previewed set');
-ok(rowCount() === TOTAL - HIDDEN - 4, 'marked articles re-filter out');
+ok($('#toast-text').textContent.includes('Marked 2 articles older than a day as read'), 'apply marks exactly the previewed set');
+ok(rowCount() === TOTAL - 2, 'marked articles re-filter out');
 ok($('#mark-menu').classList.contains('hidden'), 'apply closes the menu');
 click($('#toast-action'));
 await settle(50);
-ok(rowCount() === TOTAL - HIDDEN, 'undo restores the rows');
+ok(rowCount() === TOTAL, 'undo restores the rows');
 console.log('the dragged value persists across opens');
 click('#btn-mark-all-split');
 await settle(20);
 ok(Number(slider().value) === 1, 'the menu reopens at the last-used value');
-ok($('#mark-age-count').textContent === 'Will mark 4 articles', 'the preview rebuilds on open');
+ok($('#mark-age-count').textContent === 'Will mark 2 articles', 'the preview rebuilds on open');
 setAge(window, 7);
 click('#btn-mark-all-split');
 await settle(20);
@@ -301,16 +296,16 @@ ok($('#mark-age-desc').textContent === 'Read articles from the last', 'the resto
 ok($('#mark-age-apply').textContent === 'Mark as unread', 'the apply button flips with the direction');
 setAge(window, 1);
 await settle(20);
-ok($('#mark-age-count').textContent === 'Will mark 17 articles', 'the preview names the seventeen sub-day reads');
+ok($('#mark-age-count').textContent === 'Will mark 19 articles', 'the preview names the nineteen sub-day reads');
 click('#mark-age-apply');
 await settle(120);
-ok($('#toast-text').textContent.includes('Marked 17 articles from a day ago as unread'), 'from-a-day-ago restores exactly the seventeen sub-day reads');
+ok($('#toast-text').textContent.includes('Marked 19 articles from a day ago as unread'), 'from-a-day-ago restores exactly the nineteen sub-day reads');
 ok($('#toast-text').textContent.includes('— hidden by the search'), 'the toast names the search that hides every restored row');
 ok($('#toast-action-2').textContent === 'Clear search', 'the one-click Clear-search companion rides along');
 ok(rowCount() === 0, 'the restored rows stay hidden behind the search');
 click($('#toast-action-2'));
 await settle(200);
-ok(rowCount() === 17, 'Clear search reveals the restored sub-day rows');
+ok(rowCount() === 19, 'Clear search reveals the restored sub-day rows');
 click('#badge-all-items');
 await settle(80);
 ok(rowCount() === 0, 're-marked everything read for the wide-window restore');
@@ -322,7 +317,7 @@ ok($('#mark-age-count').textContent === 'Will mark 21 articles', 'a 30-day windo
 click('#mark-age-apply');
 await settle(120);
 ok($('#toast-text').textContent.includes('Marked 21 articles from 30 days ago as unread'), 'the widest restore window un-reads everything');
-ok(rowCount() === TOTAL - HIDDEN, 'every fixture row is back');
+ok(rowCount() === TOTAL, 'every fixture row is back');
 console.log('search');
 click('#search-open');
 await settle(20);
@@ -334,7 +329,7 @@ await settle(400);
 ok(rowCount() === 1, 'search narrows rows');
 click('#search-close');
 await settle(50);
-ok(rowCount() === TOTAL - HIDDEN, 'closing search clears the active filter');
+ok(rowCount() === TOTAL, 'closing search clears the active filter');
 ok($('#search-input').value === '', 'search input cleared');
 console.log('views and date filter are gone — list is the only view');
 ok(!$('#layouts'), 'the ⋯ menu View section (layouts) is gone');
@@ -354,7 +349,10 @@ ok(!$('#menu-select-mode'), 'no Multiple select entry');
 ok(!$('#bulk-bar'), 'the bulk action bar is gone');
 ok(!$('#i-bulk') && !$('#i-today') && !$('#i-eyeoff'), 'dead SVG symbols removed (bulk, today, eye-off)');
 const menuOrder = $$('#header-menu .dropdown-item').map((b) => b.id || b.dataset.status || b.dataset.sort);
-ok(JSON.stringify(menuOrder) === JSON.stringify(['all', 'unread', 'btn-show-filtered', 'menu-refresh', 'newest', 'oldest', 'menu-reset-read']), `menu order: statuses → show-filtered → refresh → sort → reset (${menuOrder.join(', ')})`);
+ok(JSON.stringify(menuOrder) === JSON.stringify(['all', 'unread', 'menu-refresh', 'newest', 'oldest', 'menu-reset-read']), `menu order: statuses → refresh → sort → reset (${menuOrder.join(', ')})`);
+ok(!$('#btn-show-filtered'), 'the "Show filtered-out articles" button is gone (hidden articles never reach the browser)');
+ok(!html.includes('id="i-eye"'), 'the now-unused eye icon symbol is pruned with it');
+ok(!$('.row [title="Filtered"]'), 'no [filtered] tags: filtering is server-side only');
 click('#btn-more');
 await settle(20);
 console.log('reset read state (menu)');
@@ -365,7 +363,7 @@ await settle(20);
 ok(!$('#confirm-modal').classList.contains('hidden'), 'reset read state asks for confirmation');
 click('#confirm-yes');
 await settle(50);
-ok(Number($('#badge-all-items').textContent) === TOTAL - HIDDEN, 'reset makes every article unread');
+ok(Number($('#badge-all-items').textContent) === TOTAL, 'reset makes every article unread');
 ok(window.localStorage.getItem('ghrss:read') === '{}', 'stored read state is emptied');
 ok(window.localStorage.getItem('ghrss:kept') === '{}', 'stored keep-unread state is emptied');
 console.log('tab title format');
@@ -417,8 +415,8 @@ setAge(window, 1);
 await settle(20);
 click('#mark-age-apply');
 await settle(80);
-ok($('#toast-text').textContent.includes('Marked 17 articles from a day ago as unread'), 'bulk mark-all-read, then from-a-day-ago: exactly the sub-day news returns');
-ok(rowCount() === 17, 'exactly the seventeen sub-day articles came back');
+ok($('#toast-text').textContent.includes('Marked 19 articles from a day ago as unread'), 'bulk mark-all-read, then from-a-day-ago: exactly the sub-day news returns');
+ok(rowCount() === 19, 'exactly the nineteen sub-day articles came back');
 ok($('#btn-mark-all').title === 'Mark all as read', 'with unread articles back, the button offers read again');
 click('#badge-all-items');
 await settle(50);
@@ -445,7 +443,7 @@ click('#btn-mark-all-split');
 await settle(20);
 setAge(window, 30);
 await settle(20);
-ok($('#mark-age-count').textContent === 'Nothing to mark here', 'nothing is older than 30 days (fixtures span ~33 h)');
+ok($('#mark-age-count').textContent === 'Nothing to mark here', 'nothing is older than 30 days (fixtures span ~27 h)');
 click('#mark-age-apply');
 await settle(120);
 ok($('#toast-text').textContent.includes('No unread articles older than 30 days here'), 'read-side zero toast explains itself');
@@ -460,16 +458,16 @@ await settle(20);
 ok($('#mark-age-title').textContent === 'Mark as unread', 'the caught-up feed view offers the restore direction');
 setAge(window, 1);
 await settle(20);
-ok($('#mark-age-count').textContent === 'Will mark 6 articles', 'the preview names the six sub-day reads in this feed');
+ok($('#mark-age-count').textContent === 'Will mark 8 articles', 'the preview names the eight sub-day reads in this feed');
 click('#mark-age-apply');
 await settle(120);
-ok($('#toast-text').textContent.includes('Marked 6 articles from a day ago as unread'), 'from-a-day-ago un-reads exactly the six sub-day reads in this feed');
+ok($('#toast-text').textContent.includes('Marked 8 articles from a day ago as unread'), 'from-a-day-ago un-reads exactly the eight sub-day reads in this feed');
 click('#btn-mark-all-split');
 await settle(20);
-ok($('#mark-age-title').textContent === 'Mark as read', 'with the six back, the read direction returns');
+ok($('#mark-age-title').textContent === 'Mark as read', 'with the eight back, the read direction returns');
 setAge(window, 1);
 await settle(20);
-ok($('#mark-age-count').textContent === 'Nothing to mark here', 'the six unread articles are all sub-day');
+ok($('#mark-age-count').textContent === 'Nothing to mark here', 'the eight unread articles are all sub-day');
 click('#mark-age-apply');
 await settle(120);
 ok($('#toast-text').textContent === 'No unread articles older than a day here', 'cutoff within the data window: plain zero-result toast, no boundary clause');
@@ -496,7 +494,7 @@ await settle(60);
 ok($('#scope-title').textContent === 'The Verge', 'viewing a single feed');
 click('#badge-all-items'); 
 await settle(150);
-ok($('#toast-text').textContent.includes(`Marked ${TOTAL - HIDDEN} articles as read`), `the Newsfeed badge covered every feed (${TOTAL - HIDDEN}, not just the one in view)`);
+ok($('#toast-text').textContent.includes(`Marked ${TOTAL} articles as read`), `the Newsfeed badge covered every feed (${TOTAL}, not just the one in view)`);
 click($('#toast-action'));
 await settle(60);
 click('.tree-item[data-scope="all"]'); 
@@ -643,7 +641,7 @@ click('#btn-mark-all');
 await settle(20);
 click('#confirm-yes');
 await settle(80);
-ok(rowCount() === TOTAL - HIDDEN, 'back in the Newsfeed with every article unread');
+ok(rowCount() === TOTAL, 'back in the Newsfeed with every article unread');
 console.log('shareable folder/feed links (#folder/…, #feed/…)');
 click('.tree-item[data-scope="folder:tech"]');
 await settle(60);
@@ -674,7 +672,7 @@ ok(rowCount() === 15, 'lowercase folder name still resolves');
 click('.tree-item[data-scope="all"]');
 await settle(60);
 ok(!window.location.hash, 'returning to the Newsfeed clears the hash');
-ok(rowCount() === TOTAL - HIDDEN, 'the Newsfeed lists everything again');
+ok(rowCount() === TOTAL, 'the Newsfeed lists everything again');
 console.log('boot with #folder/… and #feed/… in the URL');
 {
   const domF = new JSDOM(html, { url: 'https://example.test/#folder/Technology', runScripts: 'outside-only', pretendToBeVisual: true });
@@ -715,21 +713,21 @@ console.log('boot with #folder/… and #feed/… in the URL');
   await settle(1200);
   ok(!wI.location.hash, 'booting on an unknown folder link clears the hash');
   ok(!wI.document.querySelector('#toast').classList.contains('hidden'), 'booting on an unknown folder link explains itself');
-  ok(wI.document.querySelectorAll('#list .row').length === TOTAL - HIDDEN, 'the reader falls back to the Newsfeed');
+  ok(wI.document.querySelectorAll('#list .row').length === TOTAL, 'the reader falls back to the Newsfeed');
   domI.window.close();
 }
 console.log('refresh/restore: boot with #article/<id> in the URL');
 {
-  const dom2 = new JSDOM(html, { url: 'https://example.test/#article/fixture-hn-3', runScripts: 'outside-only', pretendToBeVisual: true });
+  const dom2 = new JSDOM(html, { url: 'https://example.test/#article/fixture-hn-1', runScripts: 'outside-only', pretendToBeVisual: true });
   const w2 = dom2.window;
   w2.fetch = window.fetch; 
   w2.eval(appSrc);
   await settle(1200);
   const reader2 = w2.document.querySelector('#reader-slot .reader');
-  ok(!!reader2 && reader2.dataset.id === 'fixture-hn-3', 'refresh reopens the article from the URL hash');
-  ok(w2.document.querySelector('#reader-slot .reader-title a')?.href === 'https://example.com/fixture-hn/3', 'the restored article is the right one');
-  ok(Number(w2.document.querySelector('#badge-all-items').textContent) === TOTAL - HIDDEN - 1, 'hash-restore marks it read exactly like a click');
-  ok(w2.location.hash === '#article/fixture-hn-3', 'the hash survives boot');
+  ok(!!reader2 && reader2.dataset.id === 'fixture-hn-1', 'refresh reopens the article from the URL hash');
+  ok(w2.document.querySelector('#reader-slot .reader-title a')?.href === 'https://example.com/fixture-hn/1', 'the restored article is the right one');
+  ok(Number(w2.document.querySelector('#badge-all-items').textContent) === TOTAL - 1, 'hash-restore marks it read exactly like a click');
+  ok(w2.location.hash === '#article/fixture-hn-1', 'the hash survives boot');
   dom2.window.close();
 }
 console.log('feed-storage version reset');
@@ -744,9 +742,9 @@ console.log('feed-storage version reset');
   await settle(1200);
   ok(!Object.keys(JSON.parse(w3.localStorage.getItem('ghrss:read') || '{}')).length, 'old-version feed storage is wiped on upgrade');
   ok(w3.localStorage.getItem('ghrss:ver') === '3', 'the storage version is recorded');
-  ok(Number(w3.document.querySelector('#badge-all-items').textContent) === TOTAL - HIDDEN, 'all articles unread after the one-time reset');
+  ok(Number(w3.document.querySelector('#badge-all-items').textContent) === TOTAL, 'all articles unread after the one-time reset');
   ok(w3.document.querySelector('#list').classList.contains('view-list'), 'the list view is forced (a stale saved layout is ignored)');
-  ok([...w3.document.querySelectorAll('#list .row')].at(-1)?.dataset.id === 'fixture-hn-11', 'an explicit newest-first pref survives the one-time sort migration');
+  ok([...w3.document.querySelectorAll('#list .row')].at(-1)?.dataset.id === 'fixture-hn-9', 'an explicit newest-first pref survives the one-time sort migration');
   dom3.window.close();
 }
 {
@@ -757,7 +755,7 @@ console.log('feed-storage version reset');
   w4.localStorage.setItem('ghrss:read', JSON.stringify({ 'fixture-hn-3': 123 }));
   w4.eval(appSrc);
   await settle(1200);
-  ok(Number(w4.document.querySelector('#badge-all-items').textContent) === TOTAL - HIDDEN - 1, 'same-version storage is kept (no re-reset)');
+  ok(Number(w4.document.querySelector('#badge-all-items').textContent) === TOTAL - 1, 'same-version storage is kept (no re-reset)');
   dom4.window.close();
 }
 console.log('mark-on-open is unconditional now — old markReadOnOpen/delay config keys are inert');
@@ -789,23 +787,23 @@ console.log('mark-on-open is unconditional now — old markReadOnOpen/delay conf
   ok(badge5() === before5 - 1, 'no delayed timer ever reverts the explicit un-read (the machinery is gone)');
   dom5.window.close();
 }
-console.log('an explicit un-read beats markRead filters — even after a reload (filters re-run at load)');
+console.log('an explicit un-read beats a backend markRead flag — even after a reload (flags re-materialize at load)');
 {
   const dom6 = new JSDOM(html, { url: 'https://example.test/', runScripts: 'outside-only', pretendToBeVisual: true });
   const w6 = dom6.window;
-  const cfg6 = { ...config, filters: [...config.filters, { id: 'test-markread', name: 'mr', feeds: ['fixture-bbc'], include: { title: ['Election'] }, actions: { markRead: true } }] };
+  const flagged6 = { articles: allFeeds.articles.map((a) => (a.title === 'Election update' ? { ...a, autoRead: true } : a)) };
   w6.fetch = async (url) => {
     const p = String(url).split('?')[0];
-    if (p === 'config.json') return { ok: true, status: 200, json: async () => structuredClone(cfg6) };
+    if (p === 'config.json') return { ok: true, status: 200, json: async () => structuredClone(config) };
     if (p === 'data/index.json') return { ok: true, status: 200, json: async () => structuredClone(index) };
-    if (p === 'data/all-feeds.json') return { ok: true, status: 200, json: async () => structuredClone(allFeeds) };
+    if (p === 'data/all-feeds.json') return { ok: true, status: 200, json: async () => structuredClone(flagged6) };
     return { ok: false, status: 404, statusText: 'Not Found', json: async () => { throw new Error('404'); } };
   };
   w6.eval(appSrc);
   await settle(1200);
   const badge6 = () => Number(w6.document.querySelector('#badge-all-items').textContent);
   const rowByTitle = (re) => [...w6.document.querySelectorAll('#list .row')].find((r) => re.test(r.querySelector('.row-title').textContent));
-  ok(badge6() === TOTAL - HIDDEN - 1, 'the markRead filter auto-read its match at load (Election update)');
+  ok(badge6() === TOTAL - 1, 'the backend markRead flag auto-reads its match at load (Election update)');
   w6.document.querySelector('#btn-more').dispatchEvent(new w6.MouseEvent('click', { bubbles: true }));
   await settle(20);
   w6.document.querySelector('#status-items [data-status="all"]').dispatchEvent(new w6.MouseEvent('click', { bubbles: true }));
@@ -814,18 +812,18 @@ console.log('an explicit un-read beats markRead filters — even after a reload 
   ok(!!electionRow && !electionRow.classList.contains('unread'), 'the filter-read article shows as read');
   electionRow.querySelector('[data-act="toggle-read"]').dispatchEvent(new w6.MouseEvent('click', { bubbles: true }));
   await settle(80);
-  ok(badge6() === TOTAL - HIDDEN, 'the user un-reads it');
+  ok(badge6() === TOTAL, 'the user un-reads it');
   w6.document.querySelector('#menu-refresh').dispatchEvent(new w6.MouseEvent('click', { bubbles: true }));
   await settle(600);
-  ok(badge6() === TOTAL - HIDDEN, 'the explicit un-read SURVIVES the filter re-running (guard persisted, not session-scoped)');
+  ok(badge6() === TOTAL, 'the explicit un-read SURVIVES the flag re-materializing (guard persisted, not session-scoped)');
   const electionRow2 = rowByTitle(/^Election update$/);
   ok(!!electionRow2 && electionRow2.classList.contains('unread'), 'the article is still unread after the reload');
   electionRow2.querySelector('[data-act="toggle-read"]').dispatchEvent(new w6.MouseEvent('click', { bubbles: true }));
   await settle(80);
-  ok(badge6() === TOTAL - HIDDEN - 1, 're-reading it clears the guard (the filter owns it again)');
+  ok(badge6() === TOTAL - 1, 're-reading it clears the guard (the flag owns it again)');
   w6.document.querySelector('#menu-refresh').dispatchEvent(new w6.MouseEvent('click', { bubbles: true }));
   await settle(600);
-  ok(badge6() === TOTAL - HIDDEN - 1, 'and stays read — no seesaw');
+  ok(badge6() === TOTAL - 1, 'and stays read — no seesaw');
   dom6.window.close();
 }
 console.log('degraded network: hung feed fetches never wedge the UI');
@@ -897,17 +895,17 @@ console.log('refresh fallback: a failed reload keeps the articles on screen');
   wR.eval(appSrc);
   await settle(1200);
   const rowsR = () => [...wR.document.querySelectorAll('#list .row')].length;
-  ok(rowsR() === TOTAL - HIDDEN, 'boot loads rows via per-feed files (consolidated 404)');
+  ok(rowsR() === TOTAL, 'boot loads rows via per-feed files (consolidated 404)');
   indexGen = now + 45 * 60000; 
   feedsFail = true; 
   wR.document.querySelector('#menu-refresh').dispatchEvent(new wR.MouseEvent('click', { bubbles: true }));
   await settle(600);
-  ok(rowsR() === TOTAL - HIDDEN, 'a failed reload keeps the previous articles (no blank feed)');
+  ok(rowsR() === TOTAL, 'a failed reload keeps the previous articles (no blank feed)');
   ok(!wR.document.querySelector('#toast-text').textContent.includes('new article'), 'nothing is announced as synced when the reload fails');
   feedsFail = false;
   wR.document.querySelector('#menu-refresh').dispatchEvent(new wR.MouseEvent('click', { bubbles: true }));
   await settle(600);
-  ok(rowsR() === TOTAL - HIDDEN, 'the next successful refresh restores the normal flow');
+  ok(rowsR() === TOTAL, 'the next successful refresh restores the normal flow');
   domR.window.close();
 }
 console.log('YouTube shorts detection (fetch.mjs)');
@@ -936,6 +934,48 @@ console.log('per-feed ingest word filters (fetch.mjs)');
   ok(fetchMod.feedFilterDrop(art('thinkpad but generic mousepad'), blocks) === true, 'exclude match is dropped');
   ok(fetchMod.feedFilterDrop(art('Thinkpad deals'), { include: fetchMod.compileBlockSrv({ title: ['thinkpad'], content: ['/deal/'] }), exclude: null }) === true, 'AND across fields: content miss drops');
   ok(fetchMod.feedFilterDrop(art('Thinkpad deals', 'big deal content'), { include: fetchMod.compileBlockSrv({ title: ['thinkpad'], content: ['/deal/'] }), exclude: null }) === false, 'AND across fields: both match passes');
+  // array-of-blocks: OR across blocks (the 4chan X "type:subject,comment" pattern)
+  const tpRe = '/(\\/tpg\\/|\\btpg\\b|thinkpad general)/i';
+  const arrBlocks = { include: null, exclude: [fetchMod.compileBlockSrv({ subject: [tpRe] }), fetchMod.compileBlockSrv({ content: [tpRe] })] };
+  ok(fetchMod.feedFilterDrop({ title: 'x', content: 'nothing here', subject: '/tpg/ - ThinkPad General' }, arrBlocks) === true, 'array-of-blocks exclude: a subject-only hit drops (OR across blocks)');
+  ok(fetchMod.feedFilterDrop({ title: 'x', content: 'welcome to the thinkpad general thread', subject: '' }, arrBlocks) === true, 'array-of-blocks exclude: a comment-only hit drops');
+  ok(fetchMod.feedFilterDrop({ title: 'x', content: 'unrelated', subject: 'desktop thread' }, arrBlocks) === false, 'array-of-blocks exclude: neither hit → kept');
+  // capcode field (the 4chan X "type:capcode" pattern)
+  const capBlock = fetchMod.compileBlockSrv({ capcode: ['/^Mod$/'] });
+  ok(fetchMod.feedFilterDrop({ title: 't', content: '', capcode: 'Mod' }, { include: null, exclude: capBlock }) === true, 'the capcode field matches staff posts');
+  ok(fetchMod.feedFilterDrop({ title: 't', content: '', capcode: 'Admin' }, { include: null, exclude: capBlock }) === false, 'the anchored ^Mod$ capcode never matches Admin');
+  ok(fetchMod.feedFilterDrop({ title: 't', content: '' }, { include: null, exclude: capBlock }) === false, 'a missing capcode never matches');
+  // the λ regex from the real ban list
+  const lambdaRe = fetchMod.compileMatcherSrv('/(\\(λ\\)|lisp general)/i');
+  ok(lambdaRe('(λ) - Lisp General') === true && lambdaRe('Lisp General 9000') === true && lambdaRe('desktop thread') === false, 'the λ ban matcher matches lisp generals and nothing else');
+  // subject rules see ONLY real subjects (strict 4chan X semantics)
+  const subjOnly = fetchMod.compileBlockSrv({ subject: ['/\\?/'] });
+  ok(fetchMod.feedFilterDrop({ title: 'is this good?', content: 'x', subject: 'is this good?' }, { include: null, exclude: subjOnly }) === true, 'subject rules match real subjects');
+  ok(fetchMod.feedFilterDrop({ title: 'is this good?', content: 'x' }, { include: null, exclude: subjOnly }) === false, 'a subjectless thread (title from the comment) is NOT matched by subject-only rules');
+}
+console.log('global filter rules compile server-side (scope + actions, the browser never sees them)');
+{
+  const fetchMod = await import('./fetch.mjs');
+  const rules = fetchMod.compileConfigFilters([
+    { id: 'bare', feeds: ['feed-x'], exclude: { title: ['spam'] } },
+    { id: 'scoped-folder', feeds: ['folder-y'], include: { title: ['lisp'] }, actions: { markRead: true } },
+    { id: 'multi', feeds: ['*'], actions: { highlight: true } },
+    { id: 'off', enabled: false, include: { title: ['everything'] }, actions: { hide: true } },
+  ]);
+  ok(rules.length === 3, 'disabled rules are dropped at compile time');
+  const art2 = (title) => ({ title, content: '', link: 'https://e.test/x' });
+  ok(fetchMod.configFilterActions(art2('spam here'), 'feed-x', [], rules).hidden === true, 'a bare filter (no actions key) defaults to hide');
+  ok(fetchMod.configFilterActions(art2('spam here'), 'feed-other', [], rules).hidden === false, 'feed scoping contains the bare rule');
+  ok(fetchMod.configFilterActions(art2('lisp thread'), 'feed-z', ['folder-y'], rules).markRead === true, 'folder scoping matches a feed folder');
+  ok(fetchMod.configFilterActions(art2('lisp thread'), 'feed-z', ['folder-other'], rules).markRead === false, 'a non-matching folder leaves the rule out');
+  const res3 = fetchMod.configFilterActions(art2('anything at all'), 'any-feed', [], rules);
+  ok(res3.highlight === true && res3.hidden === false, 'a bare star-scoped actions:{highlight} rule tints every feed (actions fire on bare matches)');
+  ok(fetchMod.configFilterActions(art2('everything'), 'feed-x', [], rules).hidden === false, 'the disabled rule never matches');
+  const resInc = fetchMod.configFilterActions(art2('off-topic'), 'feed-z', ['folder-y'], rules);
+  ok(resInc.hidden === false && resInc.markRead === false, 'an include miss with no hide action leaves the article alone');
+  const rules2 = fetchMod.compileConfigFilters([{ id: 'keep-only', feeds: ['feed-x'], include: { title: ['lisp'] }, actions: { hide: true } }]);
+  ok(fetchMod.configFilterActions(art2('lisp thread'), 'feed-x', [], rules2).hidden === false, 'include-match survives a hide action');
+  ok(fetchMod.configFilterActions(art2('off-topic'), 'feed-x', [], rules2).hidden === true, 'include-miss IS hidden when actions.hide is set (include = keep-only)');
 }
 console.log('4chan catalog → articles (4chan.mjs)');
 {
@@ -972,6 +1012,11 @@ console.log('4chan catalog → articles (4chan.mjs)');
   ok(xq.content.includes('href="https://boards.4chan.org/v/thread/99#p1"'), 'cross-board quotelinks go absolute too');
   const noSub = chan.chanThreadToArticle(threads[5], { board: 'g', worksafe: true });
   ok(noSub.title === 'pc building thread edition', 'no subject → first comment line is the title');
+  ok(noSub.subject === undefined, 'subjectless threads carry NO subject field (subject rules cannot false-positive on them)');
+  ok(a.subject === 'Thinkpad thread', 'a real subject is carried for subject-scoped filters');
+  const modA = chan.chanThreadToArticle(t({ no: 109, replies: 400, sub: 'mod post', capcode: 'Mod' }), { board: 'g', worksafe: true });
+  ok(modA.capcode === 'Mod', 'staff capcodes are carried for capcode filters');
+  ok(noSub.capcode === undefined, 'regular posts carry no capcode field');
   const fetchMod = await import('./fetch.mjs');
   ok(fetchMod.feedFilterDrop(noSub, { include: fetchMod.compileBlockSrv({ title: ['building'] }), exclude: fetchMod.compileBlockSrv({ title: ['megathread'] }) }) === false, 'word filters work on 4chan threads (include+exclude pass)');
   ok(fetchMod.feedFilterDrop(noSub, { include: null, exclude: fetchMod.compileBlockSrv({ title: ['edition'] }) }) === true, 'word filters drop matching 4chan threads');
@@ -1114,7 +1159,7 @@ console.log('regression: marking with caught-up (badgeless) feeds in the tree mu
   await settle(1200);
   const hnBadge = () => w10.document.querySelector('#tree .tree-item[data-scope="feed:fixture-hn"] .badge');
   const titleCount10 = () => Number((w10.document.title.match(/^\((\d+)\)/) || [])[1] || 0);
-  const unreadN = 12 - HIDDEN; 
+  const unreadN = 10;
   ok(Number(hnBadge()?.textContent) === unreadN, 'the HN badge starts at its unread count');
   ok(!w10.document.querySelector('#tree .tree-item[data-scope="feed:fixture-verge"] .badge'), 'the caught-up feed is badgeless (the trap is set)');
   const row10 = [...w10.document.querySelectorAll('#list .row')].find((r) => /AI model beats benchmark/.test(r.querySelector('.row-title').textContent));
@@ -1134,12 +1179,13 @@ console.log('mark-all round trip: mass read clears un-read guards, mass unread r
 {
   const dom7 = new JSDOM(html, { url: 'https://example.test/', runScripts: 'outside-only', pretendToBeVisual: true });
   const w7 = dom7.window;
-  const cfg7 = { ...config, filters: [...config.filters, { id: 'test-markread', name: 'mr', feeds: ['fixture-bbc'], include: { title: ['Election'] }, actions: { markRead: true } }] };
+  const cfg7 = { ...config };
+  const flagged7 = { articles: allFeeds.articles.map((a) => (a.title === 'Election update' ? { ...a, autoRead: true } : a)) };
   w7.fetch = async (url) => {
     const p = String(url).split('?')[0];
     if (p === 'config.json') return { ok: true, status: 200, json: async () => structuredClone(cfg7) };
     if (p === 'data/index.json') return { ok: true, status: 200, json: async () => structuredClone(index) };
-    if (p === 'data/all-feeds.json') return { ok: true, status: 200, json: async () => structuredClone(allFeeds) };
+    if (p === 'data/all-feeds.json') return { ok: true, status: 200, json: async () => structuredClone(flagged7) };
     return { ok: false, status: 404, statusText: 'Not Found', json: async () => { throw new Error('404'); } };
   };
   w7.eval(appSrc);
@@ -1154,15 +1200,15 @@ console.log('mark-all round trip: mass read clears un-read guards, mass unread r
   await settle(20);
   w7.document.querySelector('#status-items [data-status="all"]').dispatchEvent(new w7.MouseEvent('click', { bubbles: true }));
   await settle(80);
-  ok(badge7() === TOTAL - HIDDEN - 1, 'the markRead filter auto-read its match at load (Election update)');
+  ok(badge7() === TOTAL - 1, 'the backend markRead flag auto-reads its match at load (Election update)');
   rowByTitle7(/^Election update$/).querySelector('[data-act="toggle-read"]').dispatchEvent(new w7.MouseEvent('click', { bubbles: true }));
   await settle(80);
-  ok(badge7() === TOTAL - HIDDEN, 'explicit un-read wins for now');
+  ok(badge7() === TOTAL, 'explicit un-read wins for now');
   w7.document.querySelector('#btn-mark-all').dispatchEvent(new w7.MouseEvent('click', { bubbles: true }));
   await settle(30);
   w7.document.querySelector('#confirm-yes').dispatchEvent(new w7.MouseEvent('click', { bubbles: true }));
   await settle(200);
-  ok(badge7() !== TOTAL - HIDDEN, 'mark-all-as-read landed');
+  ok(badge7() !== TOTAL, 'mark-all-as-read landed');
   const guardAfterRead = JSON.parse(w7.localStorage.getItem('ghrss:userUnread') || '{}');
   ok(!guardAfterRead['fixture-bbc-0'], 'mass read CLEARED the stale un-read guard (no ghost guard survives)');
   w7.document.querySelector('#btn-mark-all').dispatchEvent(new w7.MouseEvent('click', { bubbles: true }));
@@ -1170,9 +1216,9 @@ console.log('mark-all round trip: mass read clears un-read guards, mass unread r
   w7.document.querySelector('#confirm-yes').dispatchEvent(new w7.MouseEvent('click', { bubbles: true }));
   await settle(200);
   const guardAfterUnread = JSON.parse(w7.localStorage.getItem('ghrss:userUnread') || '{}');
-  ok(guardAfterUnread['fixture-bbc-0'], 'mass unread ARMS a guard for the filter-owned article');
+  ok(guardAfterUnread['fixture-bbc-0'], 'mass unread ARMS a guard for the flag-owned article');
   await refresh7();
-  ok(badge7() === TOTAL - HIDDEN, 'after the refresh the filter article is STILL unread — the guard beats the filter re-run (no seesaw)');
+  ok(badge7() === TOTAL, 'after the refresh the flag-owned article is STILL unread — the guard beats the flag re-materializing (no seesaw)');
   ok(rowByTitle7(/^Election update$/).classList.contains('unread'), '…and the row shows unread');
   dom7.window.close();
 }
@@ -1523,29 +1569,31 @@ console.log('author shown only when it differs from the feed title');
   ok(!wX.document.querySelector('.reader-sub').textContent.includes('by Tectone'), 'the reader drops the duplicate author too');
   domX.window.close();
 }
-console.log('filter actions: keepUnread guards its matches (verified from a cold empty profile — the private-browsing case)');
+console.log('backend filter flags: keepUnread guards its matches (verified from a cold empty profile — the private-browsing case)');
 {
   const domK = new JSDOM(html, { url: 'https://example.test/', runScripts: 'outside-only', pretendToBeVisual: true });
   const wK = domK.window;
-  const cfgK = { ...config, filters: [...config.filters,
-    { id: 'test-keepunread', name: 'kr', feeds: ['fixture-bbc'], include: { title: ['Climate'] }, actions: { keepUnread: true } },
-    { id: 'test-markread2', name: 'mr2', feeds: ['fixture-bbc'], include: { title: ['Election'] }, actions: { markRead: true } }] };
+  const flaggedK = { articles: allFeeds.articles.map((a) => {
+    if (a.title === 'Climate summit') return { ...a, keepUnread: true };
+    if (a.title === 'Election update') return { ...a, autoRead: true };
+    return a;
+  }) };
   wK.fetch = async (url) => {
     const p = String(url).split('?')[0];
-    if (p === 'config.json') return { ok: true, status: 200, json: async () => structuredClone(cfgK) };
+    if (p === 'config.json') return { ok: true, status: 200, json: async () => structuredClone(config) };
     if (p === 'data/index.json') return { ok: true, status: 200, json: async () => structuredClone(index) };
-    if (p === 'data/all-feeds.json') return { ok: true, status: 200, json: async () => structuredClone(allFeeds) };
+    if (p === 'data/all-feeds.json') return { ok: true, status: 200, json: async () => structuredClone(flaggedK) };
     return { ok: false, status: 404, statusText: 'Not Found', json: async () => { throw new Error('404'); } };
   };
   wK.eval(appSrc);
   await settle(1200);
   const badgeK = () => Number(wK.document.querySelector('#badge-all-items').textContent);
-  ok(badgeK() === TOTAL - HIDDEN - 1, 'the markRead filter auto-read its match; the keepUnread match stays unread');
+  ok(badgeK() === TOTAL - 1, 'the autoRead flag read its match at load; the keepUnread flag stays unread');
   const climate = [...wK.document.querySelectorAll('#list .row')].find((r) => /Climate summit/.test(r.querySelector('.row-title').textContent));
-  ok(!!climate && climate.classList.contains('unread'), 'the keepUnread-filtered article renders unread');
+  ok(!!climate && climate.classList.contains('unread'), 'the keepUnread-flagged article renders unread');
   climate.dispatchEvent(new wK.MouseEvent('click', { bubbles: true }));
   await settle(150);
-  ok(badgeK() === TOTAL - HIDDEN - 1, 'opening a keepUnread-guarded article does NOT mark it read');
+  ok(badgeK() === TOTAL - 1, 'opening a keepUnread-guarded article does NOT mark it read');
   ok(!!wK.document.querySelector('#list .row[data-id="fixture-bbc-1"]')?.classList.contains('unread'), 'the guarded row stays unread after open (reader open, row lingers)');
   wK.document.querySelector('#reader-slot [data-act="collapse"]').dispatchEvent(new wK.MouseEvent('click', { bubbles: true }));
   await settle(50);
@@ -1641,6 +1689,34 @@ console.log('resizable divider between the list and article panes');
   ok(prop('--list-w') === '' && prop('--article-cap') === '', 'double-click resets to the default 44/56 split');
   ok(!('listW' in JSON.parse(wD.localStorage.getItem('ghrss:ui') || '{}')), 'the saved split is forgotten on reset');
   domD.window.close();
+}
+console.log('config.json contract — the shipped feed list itself');
+{
+  const cfgFile = JSON.parse(await fs.readFile(path.join(ROOT, 'config.json'), 'utf8'));
+  const feeds = cfgFile.feeds || [];
+  ok(feeds.length > 50, `the feed list is intact (${feeds.length} feeds)`);
+  ok(feeds.every((f) => typeof f.title === 'string' && f.title.trim()), 'every feed carries a title (the config reads like a list of what you follow)');
+  const chanFeed = feeds.find((f) => f.type === '4chan');
+  ok(!!chanFeed, 'the 4chan feed exists');
+  ok(chanFeed.board === 'g', 'the 4chan feed still points at /g/');
+  ok(Number(chanFeed.minReplies) === 70, 'the /g/ reply floor is 70 (threads at 70+ replies count as news)');
+  ok(chanFeed.site === 'https://boards.4channel.org/g/#catalog/reply-count', 'the /g/ website link opens the catalog sorted by reply count');
+  const blocks = chanFeed.filter?.exclude;
+  ok(Array.isArray(blocks) && blocks.length >= 38, `the 4chan X ban list is transferred (${Array.isArray(blocks) ? blocks.length : 0} blocks)`);
+  if (Array.isArray(blocks)) {
+    const flat = JSON.stringify(blocks);
+    ok(blocks.some((b) => b.capcode?.length), 'the Mod capcode ban is there');
+    ok(blocks.some((b) => b.subject?.some((s) => s.includes('?'))), 'the question-mark subject ban is there');
+    ok(flat.includes('λ'), 'the lisp-general ban carries the λ glyph');
+    let compileOk = true;
+    for (const b of blocks) for (const arr of Object.values(b)) for (const m of arr) {
+      const mm = String(m).match(/^\/(.+)\/([a-z]*)$/);
+      if (mm) { try { new RegExp(mm[1], mm[2]); } catch { compileOk = false; } }
+    }
+    ok(compileOk, 'every ban-list matcher compiles');
+    const FIELDS = new Set(['title', 'content', 'author', 'authors', 'link', 'links', 'subject', 'capcode']);
+    ok(blocks.every((b) => Object.keys(b).every((k) => FIELDS.has(k))), 'no unknown field names in the ban list');
+  }
 }
 console.log('');
 console.log(`${pass} passed, ${fail} failed`);

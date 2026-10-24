@@ -114,7 +114,7 @@ With neither cap set, it follows the HN front page. With one or both set, it pul
   "type": "4chan",
   "board": "g",
   "folder": "tech-news",
-  "minReplies": 300
+  "minReplies": 70
 }
 ```
 
@@ -122,9 +122,11 @@ With neither cap set, it follows the HN front page. With one or both set, it pul
 |---|---|
 | `type` | `"4chan"`. |
 | `board` | Board name without slashes, e.g. `"g"`. Validated against 4chan's board list — a typo keeps the old threads and flags the feed in the sidebar. |
-| `minReplies` / `maxReplies` | Keep threads with at least / at most this many replies. |
+| `minReplies` / `maxReplies` | Keep threads with at least / at most this many replies. The shipped `/g/` feed uses `70` (threads at 70+ replies count as news). |
 | `minImages` / `maxImages` | Same window on the thread's image count. |
 | `maxThreads` | Cap the number of stored threads (newest first). Omit for no cap. |
+| `site` | Optional override for the feed's Website link (the info modal's "Website" row). The shipped `/g/` feed pins `https://boards.4channel.org/g/#catalog/reply-count` — the catalog sorted by reply count. |
+| `filter` | Per-feed word filter, with 4chan-specific fields: `subject` (the real OP subject — subjectless threads never match it) and `capcode` (staff posts, e.g. `/^Mod$/`). See [Filter syntax](#filter-syntax). |
 
 Two rules are baked in and not configurable: **sticky threads are always skipped** (they're the pinned rules/announcement posts, not content) and **closed threads are always included** (an archived thread that made the cut is still worth reading — it's finished, not junk).
 
@@ -134,7 +136,7 @@ Threads are live: what's on the board is what you get, retention trims the rest.
 
 ## `filters` (global rules)
 
-Applied **in the browser** at load time. They can hide articles, highlight them, auto-mark them read, or protect them from ever being auto-marked.
+Applied **at fetch time in CI** (`scripts/fetch.mjs`) — never in the browser. Hidden articles are dropped from the published data entirely; the other actions are baked into each article as flags the web app honors. Filters re-apply to retained data on every run (including 304 and failure paths), so a new rule sweeps what was already stored and nothing slips through.
 
 ```json
 {
@@ -150,7 +152,7 @@ Applied **in the browser** at load time. They can hide articles, highlight them,
 | Option | What it does |
 |---|---|
 | `id` | Stable identifier. |
-| `name` | Shown in the UI's filtered-articles note. |
+| `name` | For your own reference. |
 | `feeds` | Scope: a list of feed ids, folder ids, or `["*"]` for everything. Omit for all feeds. |
 | `enabled` | `false` disables the rule without deleting it. |
 | `include` | Keep/match only articles matching this block (see syntax below). Omit to match everything. |
@@ -161,12 +163,12 @@ Applied **in the browser** at load time. They can hide articles, highlight them,
 
 | Action | Effect |
 |---|---|
-| `hide` | The article is filtered out of the list (visible only via "show filtered" in the menu). |
-| `markRead` | The article is marked read automatically, the moment it loads. |
-| `keepUnread` | The article can never be auto-marked — your manual read/unread is also protected from mass operations. |
-| `highlight` | The row gets a tinted highlight. |
+| `hide` | The article never reaches the browser — it is dropped from the data files, the counts, and `all-feeds.json`. |
+| `markRead` | The article ships with an `autoRead` flag; every visitor (including a fresh private window) sees it as already read. |
+| `keepUnread` | The article ships with a `keepUnread` flag; it is never auto-marked and is protected from mass mark operations. |
+| `highlight` | The article ships with a `highlight` flag; the row renders with a tinted background. |
 
-Matching logic: **within one field, any matcher hit counts (OR); across fields, every field must hit (AND)**. An article is a match when it passes `include` (or no include is set) and doesn't hit `exclude`.
+Matching logic: **within one field, any matcher hit counts (OR); across fields, every field must hit (AND)**. An article is a match when it passes `include` (or no include is set) and doesn't hit `exclude`. Removing a rule clears its flags on the next fetch.
 
 ### Filter syntax
 
@@ -180,13 +182,15 @@ Matching logic: **within one field, any matcher hit counts (OR); across fields, 
 ```
 
 - Each key takes an array of matchers, applied to that field (`content` also covers the summary and extracted text; `links` covers enclosure URLs).
-- A matcher is either a **plain substring** (case-insensitive) or a **regex** written as a string starting and ending with `/` plus optional flags: `"/\\biphone\\s?1[0-9]\\b/i"`.
+- A matcher is either a **plain substring** (case-insensitive) or a **regex** written as a string starting and ending with `/` plus optional flags: `"/\\biphone\\s?1[0-9]\\b/i"`. Regexes are case-insensitive by default.
 - `include` blocks accept the same shape; a field that lists matchers **requires** that field to match, so use only what you need.
 - Global filters use `authors`/`links`; per-feed `filter` accepts `author`/`link` too.
+- Per-feed `filter` (4chan feeds especially) additionally supports `subject` — the OP's real subject, so subject-scoped rules cannot false-positive on subjectless threads whose title comes from the first comment line — and `capcode` — matches staff posts (`"Mod"`, `"Admin"`, …).
+- `include`/`exclude` also accept an **array of blocks** — the article matches when ANY block matches (OR across blocks). This is how 4chan X's `type:subject,comment` rules transfer: one block on `subject`, one on `content`.
 
 ### Per-feed `filter` vs global `filters`
 
-Use the per-feed `filter` when the junk shouldn't even be stored (it never reaches the browser). Use global `filters` when the rule is about *presentation* — highlighting, auto-read, keep-unread — or when you want to toggle it without a CI run.
+Both run server-side at fetch time; neither touches the browser. Use the per-feed `filter` for pure word bans (the 4chan X-style hide rules — the shipped `/g/` feed carries a 38-block ban list this way). Use global `filters` when you want the other actions (highlight, auto-read, keep-unread), feed/folder scoping, or an `enabled` toggle — remembering that both take effect on the next CI run.
 
 ---
 

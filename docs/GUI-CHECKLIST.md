@@ -39,7 +39,13 @@ Run against a local static serve of the working tree with generated fixture data
 - [ ] Close via the ✕, the backdrop, or Esc; links open in new tabs with `rel="noopener noreferrer"`.
 
 ## Scopes & deep links
-- [ ] All/Unread status via the ⋯ menu; counts chip matches; the menu offers exactly: All, Unread, Show filtered-out, Refresh, Sort (Newest/Oldest), Reset read state — in that order, and nothing else.
+- [ ] All/Unread status via the ⋯ menu; counts chip matches; the menu offers exactly: All, Unread, Refresh, Sort (Newest/Oldest), Reset read state — in that order, and nothing else. There is no "Show filtered-out" entry (filters are server-side; hidden articles never arrive).
+
+## Server-side filter flags
+- [ ] An article shipped with `highlight: true` renders with the tinted row background.
+- [ ] An article shipped with `autoRead: true` appears read from a cold profile (private window): excluded from the unread badge, shown read in the All view.
+- [ ] An article shipped with `keepUnread: true` stays unread when opened, survives Mark-all-as-read, and the confirm dialog only promises "Articles kept unread are skipped".
+- [ ] Explicit un-read of an autoRead article sticks across reloads (the guard beats the flag re-materializing).
 - [ ] Folder and feed click scope the list; folder chevron expands/collapse without changing selection.
 - [ ] `#folder/<Name>` / `#feed/<Title>` links: exact, slug, lowercase, with/without spaces all resolve; URL updates on click; back/forward moves scopes.
 - [ ] Unknown folder/feed link: hash clears, toast explains.

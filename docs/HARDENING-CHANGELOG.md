@@ -1,6 +1,6 @@
 # Production-hardening changelog
 
-Baseline: `main @ d3682d6`. Every change below landed as one atomic commit with the full test suite green before and after. The suite grew from 414 assertions (401 UI + 13 e2e) to **460** across four suites: `test:ui` (behavior contract), `test:char` (known-behavior pins), `test:sec` (client boundary security), `test:e2e` (fetcher end-to-end).
+Baseline: `main @ d3682d6`. Every change below landed as one atomic commit with the full test suite green before and after. The suite grew from 414 assertions (401 UI + 13 e2e) to **559** across four suites: `test:ui` (behavior contract), `test:char` (known-behavior pins), `test:sec` (client boundary security), `test:e2e` (fetcher end-to-end).
 
 Run everything with `npm test`.
 
@@ -146,6 +146,37 @@ User-driven change after the mark-menu redesign: config entries should need **on
 npm test
 ```
 Then serve any `data/` with `npm run serve` and walk the "Feed information card", "Mark operations", and divider items in `docs/GUI-CHECKLIST.md` — click a feed's ⓘ, drag the divider both ways, double-click it, reload, and confirm the split survives.
+
+---
+
+## Post-hardening change #3 — filters move to the backend, the 4chan X ban list, titles back, lean CI
+
+User-driven change: **all filtering now happens server-side** (in the fetcher, never the browser), the user's **4chan X ban list** is transferred to the `/g/` feed verbatim, `/g/`'s reply floor drops 300 → **70**, the /g/ Website link points at the catalog sorted by reply count, the optional **titles return to `config.json`** (so it reads like a list of what you follow), the **"Show filtered-out articles"** button is removed with its code, and the **test suites leave the scheduled workflow** for a separate manually-triggered one.
+
+| Commit | Change | Verify |
+|---|---|---|
+| (this) | **Global filter actions run in the fetcher.** `compileConfigFilters` / `configFilterActions` / `applyConfigFilters` (fetch.mjs) port the browser's exact filter semantics — scope by feed id / folder id / `["*"]`, bare-filter-defaults-to-hide, exclude-exempts-from-actions, AND across fields within a block — to CI. `hide` drops the article from the data files, index counts, and `all-feeds.json` entirely; `markRead` / `keepUnread` / `highlight` bake `autoRead` / `keepUnread` / `highlight` flags onto surviving articles. **Every** write path applies them — new fetches, the 304 re-filter, *and* the failure paths (a banned article cannot slip back during an outage); flags are delete-then-set each run, so removing a rule clears its flags. | `npm run test:e2e` → runs 7–9: hide-drops-retroactively-on-304, no-slip on the connection-refused failure path, flags baked, flag clearing on rule removal; `npm run test:ui` → "global filter rules compile server-side" units |
+| (this) | **The browser honors flags instead of filtering.** All client filter machinery removed: `compileFilters`, `filterResult`, `applyFiltersToFeed`, `compileMatcher/Block/blockMatches`, `state.filters`, `ui.showFiltered`, the `#btn-show-filtered` button + handler, the `[filtered]` row tag, and the `#i-eye` symbol. In its place, `materializeFeedFlags` (one pass at data load) turns `autoRead` into read state under the exact existing guards (`userUnread` beats the flag, `keepUnread`/kept guard the materialization), `keepUnread` guards open-to-read and mark-all, and `highlight` tints the row. Explicit un-read still beats the flag across reloads; the cross-tab storage-sync KNOWN pin carries over unchanged (flags don't re-materialize on storage events). | `npm run test:ui` → "backend markRead flag"/"keepUnread guards"/boot sections; `npm run test:char` → cross-tab pin |
+| (this) | **4chan X ban list transferred.** `include`/`exclude` blocks now accept an **array of blocks** (OR across blocks) — the shape 4chan X's `type:subject,comment` rules need (one subject block + one content block per rule). New filter fields: `subject` (the OP's *real* subject — subjectless threads, whose title comes from the first comment line, can never false-positive on subject rules) and `capcode` (staff posts). `4chan.mjs` carries `subject`/`capcode` on thread articles so retained data re-filters exactly on 304/failure paths. The shipped `/g/` feed carries the full 20-rule list as 38 blocks (question-mark subjects, Mod capcode, and 18 subject,comment general-ban regexes — λ included). | `npm run test:ui` → "per-feed ingest word filters" (array-of-blocks OR, capcode anchoring, λ matcher, strict subject semantics) + "config.json contract" pins |
+| (this) | **`config.json`: titles back + /g/ tuned.** All 61 feeds carry a `title` again (restored from the pre-minimization config by url/board/type match — visible titles unchanged from what the user knows; the config now reads like a list of what you follow). `/g/`: `minReplies` 300 → 70, `site` → `https://boards.4channel.org/g/#catalog/reply-count`. Id derivation untouched — the yt-* re-keying from change #2 is unaffected. | `npm run test:ui` → "config.json contract" section (61 titled feeds, reply floor 70, catalog site, 38 ban blocks, every matcher compiles, λ present) |
+| (this) | **CI split.** The scheduled "Fetch feeds & publish" workflow no longer runs the four test steps — it only fetches and publishes (≈1–2 min saved on every 15-minute run). New `.github/workflows/tests.yml` ("Tests (manual)") runs the full suite on `workflow_dispatch` only. `npm test` still runs everything locally. | Workflow files; Actions tab shows the separate manual workflow |
+| (this) | **Docs.** README (filters are server-side; test commands; manual-CI note), CONFIGURATION.md (the whole `filters` chapter rewritten for fetch-time semantics + the flag model; filter syntax gains `subject`/`capcode` + array-of-blocks; 4chan section documents the live `/g/` shape), GUI-CHECKLIST (menu pin without show-filtered + a "Server-side filter flags" section). | reading |
+
+**Live validation (not just fixtures):** the real `/g/` catalog was pulled and run through the exact CI pipeline — 151 threads → 112 below the 70-reply floor, **9 caught by the ban list** (real `/dpt/`, `/spg/`, `/ptg/`, `/gedg/`, `/fwt/`, `/iemg/`+`/pmpg/` generals), 30 kept, and **zero** question-mark-subject leaks (strict subject semantics held against live data). Script kept at `scripts/live-4chan-check.mjs` (repo-external).
+
+**Browser walk (Chromium, flag-enriched fixtures, cold profile):** zero console messages and zero page errors throughout; no `#btn-show-filtered` and no `#i-eye` in the DOM; menu order All → Unread → Refresh → Sort → Reset; the `autoRead` article arrives read (badge 20 of 21, read row in All view); the `highlight` article renders tinted; the `keepUnread` article survives open-to-read *and* Mark-all ("Marked 19 articles as read", the guarded one still unread); mark-menu slider, info modal, divider drag (637 px applied + persisted + reload), and mobile 390×844 (resizer hidden, menu fits) all regression-checked; screenshots VLM-verified (no defects).
+
+**Behavior notes (intentional trade-offs):**
+- **Hidden articles are gone for good** — there is no client-side "show filtered" escape hatch anymore; un-hiding a rule's matches means removing/editing the rule and waiting for the next fetch (or `npm run fetch` locally).
+- The `markRead` action is now **profile-independent**: the flag ships in the data, so a private window also sees the article as read (previously it was per-browser state). Explicit un-read still wins per-browser, exactly as before.
+- `exclude` blocks still **exempt** articles from the other actions (ported semantics, pinned): only `hide` fires on an exclude match.
+- The two "Show HN" spam fixtures left the test data entirely — hidden articles never ship — which renumbered the fixture ids and the mark-slider count pins (4→2, 17→19, 6→8) accordingly.
+
+**Verify the whole change:**
+```sh
+npm test
+```
+Then walk the "Server-side filter flags" and menu items in `docs/GUI-CHECKLIST.md` against any served `data/` — and note the first CI fetch after this lands will re-filter the live `/g/` history under the new ban list and 70-reply floor in a single run.
 
 ---
 

@@ -77,8 +77,9 @@ retitle = true;
 rss1Body = rss1Real();
 await new Promise((r) => setTimeout(r, 1100)); 
 server.close();
+let liveEtag = '"v2"';
 const server2 = http.createServer((req, res) => {
-  const etag = '"v2"';
+  const etag = liveEtag;
   if (req.url === '/feed1.xml') {
     feed1Hits++;
     if (req.headers['if-none-match'] === etag) { res.writeHead(304); res.end(); return; }
@@ -152,6 +153,64 @@ ok(!fs.existsSync(path.join(SANDBOX, 'data/feeds/127-0-0-1-feed1.json')), 'the p
 const idx6 = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/index.json'), 'utf8'));
 ok(!('127-0-0-1-feed1' in idx6.feeds) && 'renamed-one' in idx6.feeds, 'the index carries only the new id');
 ok(idx6.feeds['renamed-one'].status.ok === true, 'the adopted status keeps the crawl healthy');
+console.log('run 7: global filters run in the backend — hide drops, markRead/keepUnread/highlight become article flags');
+fs.writeFileSync(path.join(SANDBOX, 'config.json'), JSON.stringify({
+  settings: { retentionDays: 30, fullTextDefault: false },
+  feeds: [{ id: 'renamed-one', url: `http://127.0.0.1:${port}/feed1.xml` }],
+  filters: [
+    { id: 'f-hide', name: 'hide', feeds: ['renamed-one'], exclude: { title: ['Second'] }, actions: { hide: true } },
+    { id: 'f-read', name: 'mr', feeds: ['renamed-one'], include: { title: ['First'] }, actions: { markRead: true } },
+    { id: 'f-keep', name: 'ku', feeds: ['renamed-one'], include: { title: ['Undated'] }, actions: { keepUnread: true } },
+    { id: 'f-hl', name: 'hl', feeds: ['renamed-one'], include: { title: ['Undated'] }, actions: { highlight: true } },
+  ],
+}, null, 2));
+await new Promise((r) => setTimeout(r, 1100));
+out = await run();
+{
+  const one7 = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/feeds/renamed-one.json'), 'utf8'));
+  ok(one7.articles.length === 2, `the hidden article is dropped retroactively — even on a 304 run (${one7.articles.length} left)`);
+  ok(!one7.articles.some((a) => a.title === 'Second post'), 'no banned article slips: "Second post" never reaches the data files');
+  const first7 = one7.articles.find((a) => /First post/.test(a.title));
+  const undated7 = one7.articles.find((a) => a.title === 'Undated post');
+  ok(first7?.autoRead === true, 'the markRead filter bakes an autoRead flag into the article');
+  ok(undated7?.keepUnread === true && undated7?.highlight === true, 'the keepUnread and highlight filters bake their flags');
+  ok(first7?.keepUnread === undefined && first7?.highlight === undefined, 'unmatched actions leave no flag keys behind');
+  const all7 = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/all-feeds.json'), 'utf8'));
+  ok(!all7.articles.some((a) => a.title === 'Second post') && all7.articles.length === 2, 'all-feeds.json carries the filtered set only');
+  const idx7 = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/index.json'), 'utf8'));
+  ok(idx7.feeds['renamed-one'].count === 2, 'the index count reflects the post-filter list');
+  ok(/dropped 1 by config filter/.test(out), 'the run logs the config-filter drop');
+}
+console.log('run 8: a failing feed still re-applies filters to retained data (no banned article slips back during an outage)');
+fs.writeFileSync(path.join(SANDBOX, 'config.json'), JSON.stringify({
+  settings: { retentionDays: 30, fullTextDefault: false },
+  feeds: [{ id: 'renamed-one', url: 'http://127.0.0.1:9/feed1.xml' }],
+  filters: [
+    { id: 'f-hide', name: 'hide', feeds: ['renamed-one'], exclude: { title: ['Second'] }, actions: { hide: true } },
+    { id: 'f-read', name: 'mr', feeds: ['renamed-one'], include: { title: ['First'] }, actions: { markRead: true } },
+  ],
+}, null, 2));
+await new Promise((r) => setTimeout(r, 1100));
+out = await run();
+{
+  const one8 = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/feeds/renamed-one.json'), 'utf8'));
+  ok(/FETCH FAILED/.test(out), 'the feed genuinely failed (connection refused)');
+  ok(one8.articles.length === 2 && !one8.articles.some((a) => a.title === 'Second post'), 'the failure path kept the RETAINED data minus the banned article — nothing slipped back');
+  ok(one8.articles.find((a) => /First post/.test(a.title))?.autoRead === true, 'flags survive the failure path');
+}
+console.log('run 9: removing a filter clears its flags and restores retention on the next run');
+liveEtag = '"v3"';
+fs.writeFileSync(path.join(SANDBOX, 'config.json'), JSON.stringify({
+  settings: { retentionDays: 30, fullTextDefault: false },
+  feeds: [{ id: 'renamed-one', url: `http://127.0.0.1:${port}/feed1.xml` }],
+}, null, 2));
+await new Promise((r) => setTimeout(r, 1100));
+out = await run();
+{
+  const one9 = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/feeds/renamed-one.json'), 'utf8'));
+  ok(one9.articles.length === 3, 'the un-banned article returns with the retained set (3 again)');
+  ok(one9.articles.every((a) => a.autoRead === undefined && a.keepUnread === undefined && a.highlight === undefined), 'removing the filters clears every stale flag');
+}
 console.log('id-migration matchers (unit)');
 {
   const { pathToFileURL } = await import('node:url');

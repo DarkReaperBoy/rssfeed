@@ -93,7 +93,7 @@ export function compileMatcherSrv(v) {
 }
 export function compileBlockSrv(block) {
   const out = {};
-  for (const [field, norm] of [['title', 'title'], ['content', 'content'], ['author', 'author'], ['authors', 'author'], ['link', 'link'], ['links', 'link']]) {
+  for (const [field, norm] of [['title', 'title'], ['content', 'content'], ['subject', 'subject'], ['capcode', 'capcode'], ['author', 'author'], ['authors', 'author'], ['link', 'link'], ['links', 'link']]) {
     const arr = block?.[field];
     if (Array.isArray(arr) && arr.length) {
       if (!out[norm]) out[norm] = [];
@@ -105,6 +105,8 @@ export function compileBlockSrv(block) {
 function blockHay(a, field) {
   if (field === 'title') return a.title || '';
   if (field === 'content') return stripTags(a.content || '') + ' ' + (a.summary || '');
+  if (field === 'subject') return a.subject || '';
+  if (field === 'capcode') return a.capcode || '';
   if (field === 'author') return a.author || '';
   return a.link || '';
 }
@@ -114,16 +116,74 @@ function blockMatchesSrv(block, a) {
   }
   return true;
 }
+const asBlockArr = (x) => (x == null ? [] : Array.isArray(x) ? x : [x]);
+export function compileBlockArrSrv(v) {
+  if (!v) return null;
+  const blocks = asBlockArr(v).map(compileBlockSrv).filter(Boolean);
+  return blocks.length ? blocks : null;
+}
 export function feedFilterDrop(a, blocks) {
-  if (blocks.exclude && blockMatchesSrv(blocks.exclude, a)) return true;         
-  if (blocks.include && !blockMatchesSrv(blocks.include, a)) return true;       
+  if (!blocks) return false;
+  if (asBlockArr(blocks.exclude).some((b) => blockMatchesSrv(b, a))) return true;
+  const inc = asBlockArr(blocks.include);
+  if (inc.length && !inc.some((b) => blockMatchesSrv(b, a))) return true;
   return false;
 }
 function compileFeedFilter(feed) {
   if (!feed?.filter || typeof feed.filter !== 'object') return null;
-  const blocks = { include: compileBlockSrv(feed.filter.include), exclude: compileBlockSrv(feed.filter.exclude) };
+  const blocks = { include: compileBlockArrSrv(feed.filter.include), exclude: compileBlockArrSrv(feed.filter.exclude) };
   return (blocks.include || blocks.exclude) ? blocks : null;
 }
+export function compileConfigFilters(filters) {
+  return (Array.isArray(filters) ? filters : []).filter((f) => f && f.enabled !== false).map((f) => {
+    const scope = Array.isArray(f.feeds) && f.feeds.length ? new Set(f.feeds.map(String)) : null;
+    const actions = Object.assign({ hide: f.actions && Object.keys(f.actions).length ? false : true }, f.actions || {});
+    return {
+      id: f.id || 'filter',
+      inScope: (feedId, folders) => !scope || scope.has('*') || scope.has(feedId) || (folders || []).some((x) => scope.has(x)),
+      include: compileBlockArrSrv(f.include),
+      exclude: compileBlockArrSrv(f.exclude),
+      actions,
+    };
+  });
+}
+export function configFilterActions(a, feedId, folders, rules) {
+  const res = { hidden: false, markRead: false, keepUnread: false, highlight: false };
+  for (const f of rules) {
+    if (!f.inScope(feedId, folders)) continue;
+    let hideMatch, actMatch;
+    if (!f.include && !f.exclude) { hideMatch = true; actMatch = true; }
+    else {
+      const inc = f.include ? f.include.some((b) => blockMatchesSrv(b, a)) : null;
+      const exc = f.exclude ? f.exclude.some((b) => blockMatchesSrv(b, a)) : false;
+      hideMatch = exc || (inc === null ? false : !inc);
+      actMatch = !exc && (inc === null ? true : inc);
+    }
+    if (f.actions.hide && hideMatch) res.hidden = true;
+    if (f.actions.markRead && actMatch) res.markRead = true;
+    if (f.actions.keepUnread && actMatch) res.keepUnread = true;
+    if (f.actions.highlight && actMatch) res.highlight = true;
+  }
+  return res;
+}
+const applyActions = (a, r) => {
+  delete a.autoRead; delete a.keepUnread; delete a.highlight;
+  if (r?.markRead) a.autoRead = true;
+  if (r?.keepUnread) a.keepUnread = true;
+  if (r?.highlight) a.highlight = true;
+};
+export function applyConfigFilters(list, feedId, folders, rules) {
+  let hidden = 0;
+  const out = [];
+  for (const a of list) {
+    const r = rules.length ? configFilterActions(a, feedId, folders, rules) : null;
+    if (r?.hidden) { hidden++; continue; }
+    applyActions(a, r);
+    out.push(a);
+  }
+  return { list: out, hidden };
+}
+const feedFolders = (feed) => (Array.isArray(feed.folders) ? feed.folders.filter(Boolean) : feed.folder ? [feed.folder] : []);
 async function fetchText(url, { maxBytes = 5_000_000 } = {}) {
   const res = await fetch(url, {
     redirect: 'follow',
@@ -234,7 +294,7 @@ function feedMetaFor(feed, prevMeta, parsed = null) {
 }
 function summarizeFeed(feed, articles) {
   const sorted = [...articles].sort((a, b) => b.date - a.date);
-  const folders = Array.isArray(feed.folders) ? feed.folders.filter(Boolean) : (feed.folder ? [feed.folder] : []);
+  const folders = feedFolders(feed);
   return {
     title: feed.title || feed.id,
     origTitle: feed.origTitle || null,
@@ -431,12 +491,15 @@ async function main() {
   const prevFeedMeta = prevIndex.feeds || {};
   const index = { generatedAt: now, folders: folderDefs, feeds: {} };
   let failures = 0;
+  const configRules = compileConfigFilters(config.filters);
+  if (configRules.length) console.log(`config filters: ${configRules.length} rule(s) applied at fetch time (server-side)`);
   const currentFeedIds = new Set();
   const written = new Map(); 
-  const purgePrev = (prev, { ytShorts = false, feedBlocks = null } = {}) => {
+  const purgePrev = (prev, { ytShorts = false, feedBlocks = null, cf = null } = {}) => {
     let list = prev.articles || [];
     if (ytShorts) list = list.filter((a) => !isShortItem(a.link, a.title, a.content));
     if (feedBlocks) list = list.filter((a) => !feedFilterDrop(a, feedBlocks));
+    if (cf) list = cf(list);
     return list.filter((a) => now - a.date < retainMs);
   };
   const processFeed = async (feed) => {
@@ -469,8 +532,16 @@ async function main() {
       etag: prevStatus.etag || null,
       lastModified: prevStatus.lastModified || null,
     };
+    const feedBlocks = compileFeedFilter(feed);
+    const folders = feedFolders(feed);
+    let cfgHidden = 0;
+    const cList = (list) => {
+      const r = applyConfigFilters(list, feed.id, folders, configRules);
+      cfgHidden += r.hidden;
+      return r.list;
+    };
     if (feed.enabled === false) {
-      const kept = purgePrev(prev);
+      const kept = purgePrev(prev, { feedBlocks, cf: cList });
       await fs.writeFile(file, JSON.stringify({ articles: kept }));
       index.feeds[feed.id] = {
         ...summarizeFeed({ ...feed, ...feedMetaFor(feed, prevMeta) }, kept),
@@ -493,23 +564,24 @@ async function main() {
       const meta = boards?.find((b) => b.board === board) || null;
       if (!board) {
         failures++;
-        await fs.writeFile(file, JSON.stringify({ articles: prev.articles || [] }));
-        index.feeds[feed.id] = { ...summarizeFeed({ ...feed, site: feed.site || 'https://boards.4channel.org' }, prev.articles || []), status: { ...status, ok: false, error: '4chan feed needs a "board"' } };
-        written.set(feed.id, prev.articles || []);
+        const keptErr = cList((prev.articles || []).filter((a) => !feedFilterDrop(a, feedBlocks)));
+        await fs.writeFile(file, JSON.stringify({ articles: keptErr }));
+        index.feeds[feed.id] = { ...summarizeFeed({ ...feed, site: feed.site || 'https://boards.4channel.org' }, keptErr), status: { ...status, ok: false, error: '4chan feed needs a "board"' } };
+        written.set(feed.id, keptErr);
         console.error(`[${feed.id}] CONFIG ERROR: 4chan feed needs a "board" (e.g. "g")`);
         return;
       }
       if (boards && !meta) {
         failures++;
-        await fs.writeFile(file, JSON.stringify({ articles: prev.articles || [] }));
-        index.feeds[feed.id] = { ...summarizeFeed({ ...feed, site: feed.site || 'https://boards.4channel.org' }, prev.articles || []), status: { ...status, ok: false, error: `unknown board /${board}/` } };
-        written.set(feed.id, prev.articles || []);
-        console.error(`[${feed.id}] FETCH FAILED: unknown 4chan board /${board}/ — keeping ${(prev.articles || []).length} threads`);
+        const keptErr = cList((prev.articles || []).filter((a) => !feedFilterDrop(a, feedBlocks)));
+        await fs.writeFile(file, JSON.stringify({ articles: keptErr }));
+        index.feeds[feed.id] = { ...summarizeFeed({ ...feed, site: feed.site || 'https://boards.4channel.org' }, keptErr), status: { ...status, ok: false, error: `unknown board /${board}/` } };
+        written.set(feed.id, keptErr);
+        console.error(`[${feed.id}] FETCH FAILED: unknown 4chan board /${board}/ — keeping ${keptErr.length} threads`);
         return;
       }
       const worksafe = meta ? meta.ws_board !== 0 : true;
       const effFeed = { ...feed, title: feed.title || meta?.title || `/${board}/`, site: feed.site || `https://${worksafe ? 'boards.4channel.org' : 'boards.4chan.org'}/${board}/` };
-      const feedBlocks = compileFeedFilter(feed);
       const cap = Number(feed.maxThreads) > 0 ? Number(feed.maxThreads) : 0;
       let res;
       try {
@@ -519,10 +591,11 @@ async function main() {
         status.ok = false;
         status.error = err.message;
         status.consecutiveFailures = (prevStatus.consecutiveFailures || 0) + 1;
-        await fs.writeFile(file, JSON.stringify({ articles: prev.articles || [] }));
-        index.feeds[feed.id] = { ...summarizeFeed({ ...effFeed, ...feedMetaFor(effFeed, prevMeta) }, prev.articles || []), status };
-        written.set(feed.id, prev.articles || []);
-        console.error(`[${feed.id}] FETCH FAILED: ${err.message} — keeping ${(prev.articles || []).length} threads`);
+        const keptFail = cList((prev.articles || []).filter((a) => !feedFilterDrop(a, feedBlocks)));
+        await fs.writeFile(file, JSON.stringify({ articles: keptFail }));
+        index.feeds[feed.id] = { ...summarizeFeed({ ...effFeed, ...feedMetaFor(effFeed, prevMeta) }, keptFail), status };
+        written.set(feed.id, keptFail);
+        console.error(`[${feed.id}] FETCH FAILED: ${err.message} — keeping ${keptFail.length} threads`);
         return;
       }
       status.ok = true;
@@ -531,12 +604,12 @@ async function main() {
       status.error = null;
       status.lastModified = res.lastModified || prevStatus.lastModified || null;
       if (res.notModified) {
-        const keptAll = (prev.articles || []).filter((a) => !(feedBlocks && feedFilterDrop(a, feedBlocks)));
+        const keptAll = cList((prev.articles || []).filter((a) => !feedFilterDrop(a, feedBlocks)));
         const kept = cap ? keptAll.slice(0, cap) : keptAll;
         await fs.writeFile(file, JSON.stringify({ articles: kept }));
         index.feeds[feed.id] = { ...summarizeFeed({ ...effFeed, ...feedMetaFor(effFeed, prevMeta) }, kept), status };
         written.set(feed.id, kept);
-        console.log(`[${feed.id}] /${board}/: not modified — keeping ${kept.length} live threads`);
+        console.log(`[${feed.id}] /${board}/: not modified — keeping ${kept.length} live threads${cfgHidden ? ` (dropped ${cfgHidden} by config filter)` : ''}`);
         return;
       }
       const opts = {
@@ -552,6 +625,9 @@ async function main() {
         if (!chanThreadPasses(t, opts)) { skipped++; continue; }
         const a = chanThreadToArticle(t, { board, worksafe, now });
         if (feedBlocks && feedFilterDrop(a, feedBlocks)) { filtered++; continue; }
+        const r = configFilterActions(a, feed.id, folders, configRules);
+        if (r.hidden) { cfgHidden++; continue; }
+        applyActions(a, r);
         a.content = sanitize(a.content);
         articles.push(a);
       }
@@ -559,12 +635,11 @@ async function main() {
       await fs.writeFile(file, JSON.stringify({ articles: kept }));
       index.feeds[feed.id] = { ...summarizeFeed({ ...effFeed, ...feedMetaFor(effFeed, prevMeta) }, kept), status };
       written.set(feed.id, kept);
-      console.log(`[${feed.id}] /${board}/: ${kept.length} live threads${skipped ? ` (skipped ${skipped} below the reply/word filters)` : ''}${filtered ? ` (dropped ${filtered} by word filter)` : ''}${cap ? ` (capped at ${cap})` : ''}`);
+      console.log(`[${feed.id}] /${board}/: ${kept.length} live threads${skipped ? ` (skipped ${skipped} below the reply/word filters)` : ''}${filtered ? ` (dropped ${filtered} by word filter)` : ''}${cfgHidden ? ` (dropped ${cfgHidden} by config filter)` : ''}${cap ? ` (capped at ${cap})` : ''}`);
       return;
     }
     if (isHnFeed(feed)) {
       const effFeed = { ...feed, title: feed.title || 'Hacker News', site: feed.site || 'https://news.ycombinator.com/' };
-      const feedBlocks = compileFeedFilter(feed);
       const { minPoints, minComments } = hnFeedOptions(feed);
       let hits;
       try {
@@ -583,7 +658,7 @@ async function main() {
         status.ok = false;
         status.error = err.message;
         status.consecutiveFailures = (prevStatus.consecutiveFailures || 0) + 1;
-        const keptFail = [...(prev.articles || [])].filter((a) => now - a.date < retainMs);
+        const keptFail = cList([...(prev.articles || [])].filter((a) => !feedFilterDrop(a, feedBlocks))).filter((a) => now - a.date < retainMs);
         await fs.writeFile(file, JSON.stringify({ articles: keptFail }));
         index.feeds[feed.id] = { ...summarizeFeed({ ...effFeed, ...feedMetaFor(effFeed, prevMeta) }, keptFail), status };
         written.set(feed.id, keptFail);
@@ -601,11 +676,14 @@ async function main() {
         if (!hit || !hit.objectID) continue;
         const a = hnHitToArticle(hit, { now });
         if (feedBlocks && feedFilterDrop(a, feedBlocks)) { filtered++; continue; }
+        const r = configFilterActions(a, feed.id, folders, configRules);
+        if (r.hidden) { cfgHidden++; continue; }
+        applyActions(a, r);
         a.content = sanitize(a.content);
         articles.push(a);
       }
       const byId = new Map();
-      const prevList = (prev.articles || []).filter((a) => !(feedBlocks && feedFilterDrop(a, feedBlocks)));
+      const prevList = cList((prev.articles || []).filter((a) => !feedFilterDrop(a, feedBlocks)));
       for (const a of [...prevList, ...articles]) byId.set(a.id, a);
       const merged = [...byId.values()].sort((a, b) => b.date - a.date).filter((a) => now - a.date < retainMs);
       await fs.writeFile(file, JSON.stringify({ articles: merged }));
@@ -614,7 +692,7 @@ async function main() {
       const capsDesc = minPoints && minComments
         ? `${minPoints}+ points and ${minComments}+ comments`
         : minPoints ? `${minPoints}+ points` : minComments ? `${minComments}+ comments` : 'front page';
-      console.log(`[${feed.id}] ${merged.length} stories (${capsDesc}, last ${retentionDays} days)${filtered ? ` (dropped ${filtered} by word filter)` : ''}`);
+      console.log(`[${feed.id}] ${merged.length} stories (${capsDesc}, last ${retentionDays} days)${filtered ? ` (dropped ${filtered} by word filter)` : ''}${cfgHidden ? ` (dropped ${cfgHidden} by config filter)` : ''}`);
       return;
     }
     let xml;
@@ -630,12 +708,13 @@ async function main() {
         status.error = null;
         const kept = purgePrev(prev, {
           ytShorts: isYouTubeFeed(feed.url) && (feed.dropShorts ?? dropShortsDefault),
-          feedBlocks: compileFeedFilter(feed),
+          feedBlocks,
+          cf: cList,
         });
         await fs.writeFile(file, JSON.stringify({ articles: kept }));
         index.feeds[feed.id] = { ...summarizeFeed({ ...feed, ...feedMetaFor(feed, prevMeta) }, kept), status };
         written.set(feed.id, kept);
-        console.log(`[${feed.id}] not modified — keeping ${kept.length} articles`);
+        console.log(`[${feed.id}] not modified — keeping ${kept.length} articles${cfgHidden ? ` (dropped ${cfgHidden} by config filter)` : ''}`);
         return;
       }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -649,7 +728,7 @@ async function main() {
       status.ok = false;
       status.error = err.message;
       status.consecutiveFailures = (prevStatus.consecutiveFailures || 0) + 1;
-      const kept = [...(prev.articles || [])].filter((a) => now - a.date < retainMs);
+      const kept = cList([...(prev.articles || [])].filter((a) => !feedFilterDrop(a, feedBlocks))).filter((a) => now - a.date < retainMs);
       await fs.writeFile(file, JSON.stringify({ articles: kept }));
       index.feeds[feed.id] = {
         ...summarizeFeed({ ...feed, ...feedMetaFor(feed, prevMeta) }, kept),
@@ -667,7 +746,7 @@ async function main() {
       status.ok = false;
       status.error = `Parse error: ${err.message}`;
       status.consecutiveFailures = (prevStatus.consecutiveFailures || 0) + 1;
-      let kept = [...(prev.articles || [])].filter((a) => now - a.date < retainMs);
+      let kept = cList([...(prev.articles || [])].filter((a) => !feedFilterDrop(a, feedBlocks))).filter((a) => now - a.date < retainMs);
       await fs.writeFile(file, JSON.stringify({ articles: kept }));
       index.feeds[feed.id] = {
         ...summarizeFeed({ ...feed, ...feedMetaFor(feed, prevMeta) }, kept),
@@ -685,7 +764,6 @@ async function main() {
     const wantText = feed.fullText ?? fullTextDefault;
     let textBudget = wantText ? TEXT_EXTRACT_BUDGET : 0;
     const ytShorts = isYouTubeFeed(feed.url) && (feed.dropShorts ?? dropShortsDefault);
-    const feedBlocks = compileFeedFilter(feed);
     const articles = [];
     let shortsDropped = 0;
     let filterDropped = 0;
@@ -725,12 +803,16 @@ async function main() {
         enclosures: pickEnclosures(item),
         fetchedAt: now,
       };
+      const r = configFilterActions(art, feed.id, folders, configRules);
+      if (r.hidden) { cfgHidden++; continue; }
+      applyActions(art, r);
       articles.push(art);
     }
     if (shortsDropped) console.log(`[${feed.id}] dropped ${shortsDropped} YouTube short(s)`);
     if (filterDropped) console.log(`[${feed.id}] dropped ${filterDropped} article(s) by the feed's word filter`);
+    if (cfgHidden) console.log(`[${feed.id}] dropped ${cfgHidden} article(s) by the config filter`);
     const byId = new Map();
-    const prevList = purgePrev(prev, { ytShorts, feedBlocks });
+    const prevList = purgePrev(prev, { ytShorts, feedBlocks, cf: cList });
     for (const a of [...prevList, ...articles]) byId.set(a.id, a);
     let merged = [...byId.values()].sort((a, b) => b.date - a.date);
     merged = merged.filter((a) => now - a.date < retainMs);

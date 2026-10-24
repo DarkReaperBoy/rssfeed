@@ -1,0 +1,30 @@
+name: Tests (manual)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: tests-manual
+  cancel-in-progress: true
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install deps
+        run: npm ci
+      - name: UI suite (smoke)
+        run: npm run test:ui
+      - name: Characterization suite (known-behavior pins)
+        run: npm run test:char
+      - name: Client boundary security suite
+        run: npm run test:sec
+      - name: Fetcher e2e (id stability, conditional GET, backend filters)
+        run: npm run test:e2e

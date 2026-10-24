@@ -11,21 +11,21 @@ const now = Date.now();
 const H = 3600e3;
 const mk = (id, title, h) => ({ id, title, link: `https://example.com/${id}`, date: now - h * H, author: null, summary: title, content: `<p>${title}</p>`, text: null, enclosures: [], fetchedAt: now });
 const arts = [mk('c-old', 'Oldest read one', 30), mk('c-a', 'Unread alpha', 9), mk('c-b', 'Unread beta', 8), mk('c-c', 'Unread gamma', 7), mk('c-new', 'Newest read one', 2)];
-const config = { settings: { siteName: 'My RSSFeed', theme: 'auto' }, folders: [], feeds: [{ id: 'cf', title: 'Char Feed', url: 'https://cf.test/rss' }], filters: [] };
+const config = { settings: { siteName: 'My RSSFeed', theme: 'auto' }, folders: [], feeds: [{ id: 'cf', title: 'Char Feed', url: 'https://cf.test/rss' }] };
 const index = { generatedAt: now, folders: [], feeds: { cf: { title: 'Char Feed', site: '', folder: null, folders: [], count: arts.length, newest: arts[0].date, oldest: arts.at(-1).date } } };
 
 const html = (await fs.readFile(path.join(ROOT, 'index.html'), 'utf8'))
   .replace(/<script src="assets\/app\.js\?v=[^"]*"><\/script>/, '');
 const appSrc = await fs.readFile(path.join(ROOT, 'assets/app.js'), 'utf8');
 
-const bootDom = async ({ url = 'https://example.test/', readSeed = null, cfg = config, idx = index, opened = [] } = {}) => {
+const bootDom = async ({ url = 'https://example.test/', readSeed = null, cfg = config, idx = index, opened = [], artsList = arts } = {}) => {
   const dom = new JSDOM(html, { url, runScripts: 'outside-only', pretendToBeVisual: true });
   const w = dom.window;
   w.fetch = async (u) => {
     const p = String(u).split('?')[0];
     if (p === 'config.json') return { ok: true, status: 200, json: async () => structuredClone(cfg) };
     if (p === 'data/index.json') return { ok: true, status: 200, json: async () => structuredClone(idx) };
-    if (p === 'data/all-feeds.json') return { ok: true, status: 200, json: async () => structuredClone({ articles: arts.map((a) => ({ ...a, _feed: 'cf' })) }) };
+    if (p === 'data/all-feeds.json') return { ok: true, status: 200, json: async () => structuredClone({ articles: artsList.map((a) => ({ ...a, _feed: 'cf' })) }) };
     return { ok: false, status: 404, statusText: 'NF', json: async () => { throw new Error('404'); } };
   };
   w.localStorage.setItem('ghrss:ver', '3');
@@ -112,11 +112,11 @@ console.log('characterization: a click with an active text selection does not op
   ok(w.document.body.classList.contains('article-open'), 'the same row opens once the selection clears');
   dom.window.close();
 }
-console.log('characterization: cross-tab storage sync re-renders, filter guards stay session-scoped');
+console.log('characterization: cross-tab storage sync re-renders, filter-flag guards stay session-scoped');
 {
-  const cfg = ({ ...config, filters: [{ id: 'mr', name: 'mr', feeds: ['cf'], include: { title: ['alpha'] }, actions: { markRead: true } }] });
-  const { dom, w } = await bootDom({ cfg });
-  ok(Number(w.document.querySelector('#badge-all-items').textContent) === 4, 'the markRead filter auto-read "alpha" at load (4 unread left of 5)');
+  const flaggedArts = arts.map((a) => (a.id === 'c-a' ? { ...a, autoRead: true } : a));
+  const { dom, w } = await bootDom({ artsList: flaggedArts });
+  ok(Number(w.document.querySelector('#badge-all-items').textContent) === 4, 'the backend markRead flag auto-reads "c-a" at load (4 unread left of 5)');
   w.localStorage.setItem('ghrss:read', JSON.stringify({ 'c-b': now - H }));
   w.dispatchEvent(new w.StorageEvent('storage', { key: 'ghrss:read', newValue: JSON.stringify({ 'c-b': now - H }), storageArea: w.localStorage }));
   await settle(120);
@@ -124,7 +124,7 @@ console.log('characterization: cross-tab storage sync re-renders, filter guards 
   ok(!hasRow('c-b') && Number(w.document.querySelector('#badge-all-items').textContent) === 4, 'the cross-tab sync adopts the incoming read map verbatim (c-b now read → gone from the unread view, badge 4)');
   const readNow = JSON.parse(w.localStorage.getItem('ghrss:read') || '{}');
   ok(typeof readNow['c-b'] === 'number' && readNow['c-a'] === undefined, 'the incoming cross-tab read map replaced the stored one');
-  ok(hasRow('c-a') && [...w.document.querySelectorAll('#list .row')].find((r) => r.dataset.id === 'c-a')?.classList.contains('unread'), 'KNOWN: the filter-read article flips back to UNREAD after the sync (read map replaced wholesale; filters do not re-run on storage events)');
+  ok(hasRow('c-a') && [...w.document.querySelectorAll('#list .row')].find((r) => r.dataset.id === 'c-a')?.classList.contains('unread'), 'KNOWN: the flag-read article flips back to UNREAD after the sync (read map replaced wholesale; flags do not re-materialize on storage events)');
   dom.window.close();
 }
 console.log('characterization: the mark-age slider remembers the last dragged value');
@@ -169,7 +169,7 @@ console.log('characterization: double-clicking the confirm button lands the acti
 }
 console.log('characterization: folder maxAgeDays cutoff + deep link into a cutoff article');
 {
-  const cfgA = { settings: config.settings, folders: [{ id: 'fold', name: 'Fold', maxAgeDays: 1 }], feeds: [{ id: 'cf', title: 'Char Feed', url: 'https://cf.test/rss', folder: 'fold' }], filters: [] };
+  const cfgA = { settings: config.settings, folders: [{ id: 'fold', name: 'Fold', maxAgeDays: 1 }], feeds: [{ id: 'cf', title: 'Char Feed', url: 'https://cf.test/rss', folder: 'fold' }] };
   const idxA = { generatedAt: now, folders: [{ id: 'fold', name: 'Fold', maxAgeDays: 1 }], feeds: { cf: { ...index.feeds.cf, folder: 'fold', folders: ['fold'] } } };
   const { dom, w } = await bootDom({ cfg: cfgA, idx: idxA, url: 'https://example.test/#folder/Fold' });
   ok(w.document.querySelectorAll('#list .row').length === 4, 'the 1-day folder cutoff drops the 30-hour-old article (4 of 5 rows)');

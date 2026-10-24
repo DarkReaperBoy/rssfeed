@@ -65,6 +65,7 @@ export function chanThreadToArticle(t, { board, worksafe = true, now = Date.now(
     }
   }
   parts.push(`<p>${replies} replies · ${images} images · <a href="${link}">Open the thread</a></p>`);
+  const subject = t.sub ? stripChanHtml(t.sub).slice(0, 300) : null;
   return {
     id: sha1(link).slice(0, 16),
     title,
@@ -76,5 +77,10 @@ export function chanThreadToArticle(t, { board, worksafe = true, now = Date.now(
     text: null,
     enclosures: t.tim ? [{ url: cdn(board, `${t.tim}s.jpg`), type: 'image/thumbnail' }] : [],
     fetchedAt: now,
+    // Filter plumbing: the real subject (only when the OP set one) and staff capcode
+    // travel with the article so subject/capcode-scoped filters stay exact — including
+    // when retained data is re-filtered on a 304 or during an outage.
+    ...(subject ? { subject } : {}),
+    ...(t.capcode ? { capcode: String(t.capcode).slice(0, 32) } : {}),
   };
 }

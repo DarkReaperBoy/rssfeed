@@ -26,7 +26,6 @@ const state = {
   read: loadObj(LS_READ),    
   kept: loadObj(LS_KEPT),    
   userUnread: loadObj(LS_USERUNREAD), 
-  filters: [],
   loading: new Map(), 
   settled: new Set(), 
   failed: new Set(),
@@ -39,12 +38,12 @@ const state = {
 const CONFIG_KEYS = ['theme', 'density', 'showFavicons',
   'absoluteDates', 'fontSize', 'sideFavicons', 'compactSidebar', 'countersClickable',
   'titleCounter', 'updatedOnly', 'dimRead', 'sortAZ', 'autoScroll'];
-const USER_KEYS = ['status', 'sortDir', 'showFiltered', 'openFolders', 'sidebarW', 'markAgeDays', 'listW'];
+const USER_KEYS = ['status', 'sortDir', 'openFolders', 'sidebarW', 'markAgeDays', 'listW'];
 
 const savedUi = loadObj(LS_UI); 
 const ui = Object.assign({
   theme: 'auto', status: 'unread',
-  showFiltered: false, openFolders: {},
+  openFolders: {},
   density: 'comfort', sortDir: 'oldest', markAgeDays: 7,
   updatedOnly: false, dimRead: false, sortAZ: false,
   showFavicons: true,
@@ -110,7 +109,7 @@ const absTime = (ts) => ts
 let baseTitle = 'My RSSFeed';
 function updateTitleCounter() {
   let n = 0;
-  for (const arts of state.feeds.values()) for (const a of arts) if (!isRead(a) && !a._f?.hidden) n++;
+  for (const arts of state.feeds.values()) for (const a of arts) if (!isRead(a)) n++;
   const prefix = n > 0 && ui.titleCounter !== false ? `(${n}) ` : '';
   const open = state.expandedId ? findArticle(state.expandedId) : null;
 
@@ -138,81 +137,19 @@ const feedTitle = (id) => feedMeta(id).title || id;
 
 const folderDefs = () => (state.index?.folders?.length ? state.index.folders : state.config?.folders || []);
 
-function compileMatcher(v) {
-  const s = String(v);
-  const m = s.match(/^\/(.+)\/([a-z]*)$/);
-  if (m) {
-    try { const re = new RegExp(m[1], (m[2] || 'i').replace(/g/g, '')); return (hay) => re.test(hay); } catch { return () => false; }
-  }
-  const lc = s.toLowerCase();
-  return (hay) => String(hay || '').toLowerCase().includes(lc);
-}
-function compileBlock(block) {
-  const out = {};
-  for (const field of ['title', 'content', 'authors', 'links']) {
-    const arr = block?.[field];
-    if (Array.isArray(arr) && arr.length) out[field] = arr.map(compileMatcher);
-  }
-  return Object.keys(out).length ? out : null;
-}
-function blockMatches(block, a) {
-
-  for (const [field, matchers] of Object.entries(block)) {
-    let hay = '';
-    if (field === 'title') hay = a.title || '';
-    else if (field === 'content') hay = `${stripTags(a.content)} ${stripTags(a.text)} ${a.summary || ''}`;
-    else if (field === 'authors') hay = a.author || '';
-    else if (field === 'links') hay = `${a.link || ''} ${(a.enclosures || []).map((e) => e.url).join(' ')}`;
-    if (!matchers.some((fn) => fn(hay))) return false;
-  }
-  return true;
-}
-function compileFilters() {
-  state.filters = (state.config.filters || []).filter((f) => f.enabled !== false).map((f) => {
-    const scope = Array.isArray(f.feeds) && f.feeds.length ? new Set(f.feeds) : null; 
-
-    const actions = Object.assign({ hide: f.actions && Object.keys(f.actions).length ? false : true }, f.actions || {});
-    return {
-      id: f.id || 'filter', name: f.name || f.id || '',
-      inScope: (feedId) => !scope || scope.has('*') || scope.has(feedId) || feedMeta(feedId).folders.some((f) => scope.has(f)),
-      include: compileBlock(f.include), exclude: compileBlock(f.exclude),
-      actions,
-    };
-  });
-}
-function filterResult(a, feedId) {
-
-  const res = { hidden: false, markRead: false, keepUnread: false, highlight: false };
-  for (const f of state.filters) {
-    if (!f.inScope(feedId)) continue;
-    let hideMatch, actMatch;
-    if (!f.include && !f.exclude) { hideMatch = true; actMatch = true; }
-    else {
-      const inc = f.include ? blockMatches(f.include, a) : null;
-      const exc = f.exclude ? blockMatches(f.exclude, a) : false;
-      hideMatch = exc || (inc === null ? false : !inc);
-      actMatch = !exc && (inc === null ? true : inc);
-    }
-    if (f.actions.hide && hideMatch) res.hidden = true;
-    if (f.actions.markRead && actMatch) res.markRead = true;
-    if (f.actions.keepUnread && actMatch) res.keepUnread = true;
-    if (f.actions.highlight && actMatch) res.highlight = true;
-  }
-  return res;
-}
-function applyFiltersToFeed(feedId, articles) {
+function materializeFeedFlags(feedId, articles) {
+  // Filters ran in the backend (fetch.mjs); their decisions ride on the article
+  // data as autoRead / keepUnread / highlight flags. Hidden articles never arrive.
   let marked = 0;
   for (const a of articles) {
-    a._f = filterResult(a, feedId);
     a._feed = feedId;
-
-    if (a._f.markRead && !a._f.keepUnread && !isKept(a) && !isRead(a) && !state.userUnread[a.id] && !state.filterMarked.has(a.id)) {
+    if (a.autoRead && !a.keepUnread && !isKept(a) && !isRead(a) && !state.userUnread[a.id] && !state.filterMarked.has(a.id)) {
       state.read[a.id] = Date.now();
       state.filterMarked.add(a.id);
       marked++;
     }
   }
-  if (marked) saveRead(); 
+  if (marked) saveRead();
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -236,7 +173,7 @@ async function loadFeed(feedId, force = false) {
   const done = (async () => {
     try {
       const data = await fetchJson(`data/feeds/${encodeURIComponent(feedId)}.json`);
-      applyFiltersToFeed(feedId, data.articles || []);
+      materializeFeedFlags(feedId, data.articles || []);
       state.feeds.set(feedId, data.articles || []);
       markFeedsChanged();
       state.failed.delete(feedId);
@@ -364,7 +301,6 @@ function computeVisible() {
     const cutoff = searchGroups ? 0 : folderCutoff(feedId);
     for (const a of state.feeds.get(feedId) || []) {
       if (cutoff && Date.now() - a.date > cutoff) continue;
-      if (a._f.hidden && !ui.showFiltered) continue;
       if (ui.status === 'unread' && isRead(a) && !state.keepVisible.has(a.id) && a.id !== state.expandedId) continue;
       if (searchGroups && !searchMatchesCompiled(a, searchGroups)) continue;
       out.push(a);
@@ -374,7 +310,7 @@ function computeVisible() {
 
   if (state.expandedId && !out.some((a) => a.id === state.expandedId)) {
     const open = findArticle(state.expandedId);
-    if (open && !open._f?.hidden && !state.search) out.push(open);
+    if (open && !state.search) out.push(open);
 
   }
   state.visible = out;
@@ -383,7 +319,7 @@ function computeVisible() {
 
 function unreadCount(feedId) {
   let n = 0;
-  for (const a of state.feeds.get(feedId) || []) if (!isRead(a) && !a._f.hidden) n++;
+  for (const a of state.feeds.get(feedId) || []) if (!isRead(a)) n++;
   return n;
 }
 function renderTree() {
@@ -396,7 +332,7 @@ function renderTree() {
   let totalUnread = 0; 
   for (const arts of state.feeds.values()) {
     for (const a of arts) {
-      if (isRead(a) || a._f?.hidden) continue;
+      if (isRead(a)) continue;
       totalUnread++;
     }
   }
@@ -471,18 +407,16 @@ function rowHtml(a) {
   const feed = feedMeta(a._feed);
   const read = isRead(a);
   const kept = isKept(a);
-  const f = a._f || {};
   const thumb = thumbFor(a);
   const isExpanded = state.expandedId === a.id;
   const timeHtml = ui.absoluteDates ? absTime(a.date) : relTime(a.date);
   const showAuthor = a.author && a.author.toLowerCase() !== String(feed.title || '').toLowerCase();
-  return `<article class="row ${read ? '' : 'unread'} ${f.highlight ? 'highlight' : ''} ${isExpanded ? 'expanded' : ''}" data-id="${esc(a.id)}">
+  return `<article class="row ${read ? '' : 'unread'} ${a.highlight ? 'highlight' : ''} ${isExpanded ? 'expanded' : ''}" data-id="${esc(a.id)}">
     ${thumb ? `<img class="row-thumb" loading="lazy" src="${esc(thumb)}" alt="">` : ''}
     <div class="row-main">
       <div class="row-meta">
         ${faviconHtml(feed)}<span class="feed-name">${esc(feed.title)}</span>
         ${showAuthor ? `<span class="author">${esc(a.author)}</span>` : ''}
-        ${f.hidden ? '<span class="author" title="Filtered">[filtered]</span>' : ''}
       </div>
       <div class="row-title">${esc(a.title)}</div>
       <span class="time" title="${esc(fullTime(a.date))}">${esc(timeHtml)}</span>
@@ -582,7 +516,7 @@ function renderList() {
   if (state.expandedId && !visible.some((a) => a.id === state.expandedId)) {
     const open = findArticle(state.expandedId);
 
-    if (!open || open._f?.hidden) { state.expandedId = null; clearHashArticle(); }
+    if (!open) { state.expandedId = null; clearHashArticle(); }
   }
   const keepScroll = list.scrollTop; 
   renderListHead();
@@ -667,7 +601,7 @@ function renderReaderPane(visible) {
   if (!slot) return;
   const open = state.expandedId ? findArticle(state.expandedId) : null;
 
-  const show = !!(open && !open._f?.hidden);
+  const show = !!open;
   if (show) {
     const key = `${open.id}:${open.fetchedAt || 0}`;
     if (key !== readerKey) {
@@ -840,7 +774,7 @@ function patchTreeCounts() {
   let total = 0;
   for (const arts of state.feeds.values()) {
     for (const a of arts) {
-      if (isRead(a) || a._f?.hidden) continue;
+      if (isRead(a)) continue;
       total++;
     }
   }
@@ -852,9 +786,9 @@ function markRead(id, on = true) {
   if (!on) {
     delete state.read[id];
 
-    if (a?._f?.markRead) { state.userUnread[id] = Date.now(); saveUserUnread(); }
+    if (a?.autoRead) { state.userUnread[id] = Date.now(); saveUserUnread(); }
   } else {
-    if (a && a._f?.keepUnread && !forceAllowed) return;
+    if (a && a.keepUnread && !forceAllowed) return;
     if (state.userUnread[id]) { delete state.userUnread[id]; saveUserUnread(); } 
     state.read[id] = Date.now();
 
@@ -874,7 +808,7 @@ function collectScopeIds(scope, cutoff = 0) {
   const ids = [];
   for (const feedId of feedIds) {
     for (const a of state.feeds.get(feedId) || []) {
-      if (a._f?.hidden || isKept(a) || a._f?.keepUnread || isRead(a)) continue;
+      if (isKept(a) || a.keepUnread || isRead(a)) continue;
       if (cutoff && a.date >= cutoff) continue;
       ids.push(a.id);
     }
@@ -946,7 +880,7 @@ function markAllAsReadInScope() {
       markScopeUnread(state.scope);
     });
   } else {
-    confirmDialog('Mark all as read', `Mark all articles in "${scopeTitle()}" as read? Articles kept unread or hidden by filters are skipped.`, async () => {
+    confirmDialog('Mark all as read', `Mark all articles in "${scopeTitle()}" as read? Articles kept unread are skipped.`, async () => {
 
       await Promise.race([ensureLoadedForScope(state.scope), sleep(11000)]);
       markScopeRead(state.scope);
@@ -959,7 +893,7 @@ function scopeUnreadCount(scope) {
   let n = 0;
   for (const feedId of scopeFeedIds(scope)) {
     for (const a of state.feeds.get(feedId) || []) {
-      if (isRead(a) || a._f?.hidden) continue;
+      if (isRead(a)) continue;
       n++;
     }
   }
@@ -978,7 +912,7 @@ function collectScopeReadIds(scope, cutoff = 0) {
 
   for (const feedId of scopeFeedIds(scope)) {
     for (const a of state.feeds.get(feedId) || []) {
-      if (!isRead(a) || a._f?.hidden) continue; 
+      if (!isRead(a)) continue; 
       if (cutoff && a.date < cutoff) continue;
       ids.push(a.id);
     }
@@ -998,7 +932,7 @@ function markScopeUnread(scope, olderDays = 0) {
     delete state.read[id];
 
     const a = findArticle(id);
-    if (a?._f?.markRead && !state.userUnread[id]) state.userUnread[id] = Date.now();
+    if (a?.autoRead && !state.userUnread[id]) state.userUnread[id] = Date.now();
   }
   saveUserUnread();
   state.keepVisible.clear();
@@ -1014,7 +948,6 @@ function scopeArticleStats(scope) {
   let unread = 0, read = 0, total = 0;
   for (const feedId of scopeFeedIds(scope)) {
     for (const a of state.feeds.get(feedId) || []) {
-      if (a._f?.hidden) continue;
       total++;
       if (isRead(a)) read++; else unread++;
     }
@@ -1184,7 +1117,7 @@ function clearHashArticle() {
 }
 function openArticle(id) {
   const a = findArticle(id);
-  if (!a || a._f?.hidden) return false;
+  if (!a) return false;
   if (state.expandedId) {
     state.keepVisible.add(state.expandedId);
     if (state.expandedId !== id) { const prevRow = rowEl(state.expandedId); if (prevRow) prevRow.classList.remove('expanded'); }
@@ -1195,7 +1128,7 @@ function openArticle(id) {
   else { renderList(); listScrollTo(id); }
   renderReaderPane(state.visible);
   if (ui.autoScroll) { const ap = $('#article_pane'); if (ap) ap.scrollTop = 0; }
-  if (!isRead(a) && !isKept(a) && !a._f?.keepUnread) markRead(a.id, true);
+  if (!isRead(a) && !isKept(a) && !a.keepUnread) markRead(a.id, true);
   updateTitleCounter();
   return true;
 }
@@ -1238,7 +1171,7 @@ function syncFromHash(notify = true) {
     if (state.expandedId === id) return;
     if (!openArticle(id)) { 
       clearHashArticle();
-      if (notify) showToast('That article is no longer available (filtered or past the retention window)');
+      if (notify) showToast('That article is no longer available (past its retention window or filtered out server-side)');
     }
   } else if (!applyScopeHash(notify)) closeArticle(true); 
 }
@@ -1423,9 +1356,6 @@ function bindEvents() {
     saveUi(); syncControls(); renderAll(); ensureLoadedForScope();
     $('#header-menu').classList.add('hidden');
     syncMenuAria();
-  });
-  $('#btn-show-filtered').addEventListener('click', () => {
-    ui.showFiltered = !ui.showFiltered; saveUi(); syncControls(); renderList();
   });
   $('#menu-refresh').addEventListener('click', () => { $('#header-menu').classList.add('hidden'); refresh(true); });
   $('#empty').addEventListener('click', (e) => {
@@ -1645,7 +1575,6 @@ function closeSearchFn() {
 function syncControls() {
   $$('#status-items [data-status]').forEach((c) => c.classList.toggle('on', c.dataset.status === ui.status));
   $$('#sort-items [data-sort]').forEach((c) => c.classList.toggle('on', c.dataset.sort === (ui.sortDir === 'oldest' ? 'oldest' : 'newest')));
-  $('#btn-show-filtered').classList.toggle('on', ui.showFiltered);
   document.documentElement.style.setProperty('--title-size', ui.fontSize || '14.5px');
   applySidebarMode();
 }
@@ -1676,7 +1605,7 @@ const ago = (ts) => (relTime(ts) === 'now' ? 'just now' : relTime(ts) + ' ago');
 function feedInfoHtml(feedId) {
   const meta = feedMeta(feedId);
   const arts = state.feeds.get(feedId) || [];
-  const unread = arts.reduce((n, a) => n + (isRead(a) || a._f?.hidden ? 0 : 1), 0);
+  const unread = arts.reduce((n, a) => n + (isRead(a) ? 0 : 1), 0);
   const st = meta.status || {};
   const folderNames = meta.folders.map((fid) => folderDefs().find((x) => x.id === fid)?.name || fid);
   const lastPost = meta.newest ? ago(meta.newest) : 'Never';
@@ -1816,7 +1745,7 @@ async function loadConsolidatedIntoState() {
     }
     state.feeds = new Map();
     for (const [feedId, arts] of grouped.entries()) {
-      applyFiltersToFeed(feedId, arts);
+      materializeFeedFlags(feedId, arts);
       state.feeds.set(feedId, arts);
     }
     for (const id of Object.keys(state.index.feeds)) {
@@ -1855,7 +1784,6 @@ async function boot() {
     baseTitle = s.siteName || 'My RSSFeed';
     document.title = baseTitle;
     applyTheme(); 
-    compileFilters();
 
     if (ui.sidebarW) {
       const w = Math.min(480, Math.max(210, Number(ui.sidebarW) || 242));
@@ -1891,7 +1819,7 @@ async function boot() {
   const hid = hashArticleId();
   if (hid && !openArticle(hid)) {
     clearHashArticle();
-    showToast('That article is no longer available (filtered or past the retention window)');
+    showToast('That article is no longer available (past its retention window or filtered out server-side)');
   }
 }
 
