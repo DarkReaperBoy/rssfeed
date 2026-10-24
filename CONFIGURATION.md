@@ -149,7 +149,7 @@ Applied **in the browser** at load time. They can hide articles, highlight them,
 | `enabled` | `false` disables the rule without deleting it. |
 | `include` | Keep/match only articles matching this block (see syntax below). Omit to match everything. |
 | `exclude` | Drop (or exempt) articles matching this block. |
-| `actions` | What happens on a match. All default to `false`; set the ones you want. |
+| `actions` | What happens on a match. **Omit it entirely and matching articles are hidden** (a bare filter is a hide rule). If you provide `actions` at all, unset actions default to `false`. |
 
 `actions`:
 
