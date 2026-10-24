@@ -171,6 +171,8 @@ svg { width: 20px; height: 20px; fill: currentColor; flex: none; }
   display: inline-flex; align-items: center; justify-content: center;
   text-transform: uppercase;
 }
+.favicon-tile::before { content: attr(data-initial); }
+.favicon-tile[hidden] { display: none; }
 .tree-folder > .tree-item .chev { transition: transform .15s; width: 16px; height: 16px; }
 .tree-folder.open > .tree-item .chev { transform: rotate(90deg); }
 .tree-children { display: none; padding-left: 14px; }

@@ -125,8 +125,8 @@ function faviconHtml(feed) {
   const site = feed?.site || '';
   let host = '';
   try { if (site) host = new URL(site).hostname; } catch {}
-  if (!host) return `<span class="favicon-wrap"><span class="favicon-tile">${esc(initial)}</span></span>`;
-  return `<span class="favicon-wrap"><img class="favicon" loading="lazy" src="https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=64" alt=""><span class="favicon-tile" hidden>${esc(initial)}</span></span>`;
+  if (!host) return `<span class="favicon-wrap" aria-hidden="true"><span class="favicon-tile" data-initial="${esc(initial)}"></span></span>`;
+  return `<span class="favicon-wrap" aria-hidden="true"><img class="favicon" loading="lazy" src="https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=64" alt=""><span class="favicon-tile" data-initial="${esc(initial)}" hidden></span></span>`;
 }
 const feedMeta = (id) => {
   const m = state.index?.feeds?.[id];

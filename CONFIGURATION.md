@@ -20,7 +20,7 @@ Changes take effect on the next workflow run (push to `main` or the scheduled ru
 | Option | Default | What it does |
 |---|---|---|
 | `siteName` | `"My RSSFeed"` | The site header and browser-tab title. |
-| `theme` | `"auto"` | `"auto"` follows the system preference; `"light"` and `"dark"` force one. Each visitor can still switch it in the UI. |
+| `theme` | `"auto"` | `"auto"` follows the system preference; `"light"` and `"dark"` force one for every visitor. The site follows the OS setting when `"auto"` — there is no in-app switcher. |
 | `retentionDays` | `60` | How many days of articles to keep. Older articles are dropped from the data files on every fetch. |
 | `refreshMinutes` | `5` | How often the browser app polls for new data while you're reading. The CI fetch itself runs on its own schedule. |
 | `fullTextDefault` | `false` | When `true`, the fetcher visits each article's page and extracts the full text instead of keeping the feed's teaser. Per-feed override: `fullText` on the feed. |
