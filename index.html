@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'sha256-ZmjlWsjlEgpYG0d7k6Hfw5vZvxxtTGkiBccwhY6b7pE='; style-src 'self'; img-src http: https: data:; connect-src 'self'; media-src http: https:; frame-src https://www.youtube-nocookie.com https://player.vimeo.com https://w.soundcloud.com; base-uri 'none'; form-action 'none'; object-src 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>My RSSFeed</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='6' cy='18' r='2.5' fill='%23e8710a'/%3E%3Cpath d='M4 10a10 10 0 0 1 10 10h3A13 13 0 0 0 4 7z' fill='%23f5a623'/%3E%3Cpath d='M4 4a16 16 0 0 1 16 16h3A19 19 0 0 0 4 1z' fill='%23e8710a'/%3E%3C/svg%3E">
+<script>
+try {
+  var t = JSON.parse(localStorage.getItem('ghrss:theme') || '"auto"');
+  if (t === 'dark' || (t !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches)) {
+    document.documentElement.dataset.theme = 'dark';
+  }
+} catch (e) {}
+</script>
+<link rel="stylesheet" href="assets/styles.css?v=8aa08eaaae">
+</head>
+<body>
+<svg xmlns="http://www.w3.org/2000/svg" class="svg-sprite">
+  <symbol id="i-all" viewBox="0 0 24 24"><path d="M4 6h16v2H4zm0 5h16v2H4zm0 5h10v2H4z"/></symbol>
+  <symbol id="i-unread" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zm0 4a5 5 0 1 1 0 10 5 5 0 0 1 0-10z"/></symbol>
+  <symbol id="i-read" viewBox="0 0 24 24"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"/></symbol>
+  <symbol id="i-bookmark" viewBox="0 0 24 24"><path d="M7 3h10c1.1 0 2 .9 2 2v16l-7-3-7 3V5c0-1.1.9-2 2-2zm0 15.1 5-2.2 5 2.2V5H7v13.1z"/></symbol>
+  <symbol id="i-bookmark-on" viewBox="0 0 24 24"><path d="M7 3h10c1.1 0 2 .9 2 2v16l-7-3-7 3V5c0-1.1.9-2 2-2z"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6z"/></symbol>
+  <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6z"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M17.65 6.35A8 8 0 1 0 19.73 14h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><path d="M15.5 14h-.8l-.3-.3a6.5 6.5 0 1 0-.7.7l.3.3v.8l5 5 1.5-1.5zm-6 0a4.5 4.5 0 1 1 0-9 4.5 4.5 0 0 1 0 9z"/></symbol>
+  <symbol id="i-sort" viewBox="0 0 24 24"><path d="M3 6h12v2H3zm0 5h9v2H3zm0 5h6v2H3zm14-3.6V19h3.4L16 22.4 12.6 19H16v-5.6z"/></symbol>
+  <symbol id="i-dots" viewBox="0 0 24 24"><path d="M6 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm6 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm6 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4z"/></symbol>
+  <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 3h7v7h-2V6.4l-8.3 8.3-1.4-1.4L17.6 5H14zM5 5h6v2H7v10h10v-4h2v6H5z"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="M18.3 5.7 12 12l6.3 6.3-1.4 1.4L10.6 13.4 4.3 19.7 2.9 18.3 9.2 12 2.9 5.7 4.3 4.3l6.3 6.3 6.3-6.3z"/></symbol>
+  <symbol id="i-menu" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></symbol>
+  <symbol id="i-prev" viewBox="0 0 24 24"><path d="M15.4 7.4 14 6l-6 6 6 6 1.4-1.4L10.8 12z"/></symbol>
+  <symbol id="i-next" viewBox="0 0 24 24"><path d="M8.6 16.6 10 18l6-6-6-6-1.4 1.4L13.2 12z"/></symbol>
+  <symbol id="i-chevron-up" viewBox="0 0 24 24"><path d="M12 8l6 6-1.4 1.4L12 10.8l-4.6 4.6L6 14z"/></symbol>
+</svg>
+<div id="wrapper">
+  <div id="side-nav">
+    <div id="tree_pane">
+      <div id="feeds_nav" class="nav-panel">
+        <div class="sidebar-head">
+          <h2 class="sidebar-heading">Feeds</h2>
+        </div>
+        <fieldset id="subscriptions_fieldset">
+          <div id="parent_all_articles" class="parent_div">
+            <button class="tree-item" data-scope="all" title="Newsfeed">
+              <i class="sys-icon"><svg><use href="#i-all"/></svg></i><span class="label">Newsfeed</span>
+              <span class="badge" id="badge-all-items" role="button" tabindex="0" data-markread="all" title="Mark as read"></span>
+            </button>
+          </div>
+          <div id="tree"></div>
+        </fieldset>
+      </div>
+      <div id="sidebar_resizer" title="Drag to resize"></div>
+      <div class="sidebar-foot" id="last-updated">
+        <div id="last-updated-text" title=""></div>
+        <div class="sidebar-credit">Powered by <a href="https://github.com/DarkReaperBoy/rssfeed" target="_blank" rel="noopener noreferrer">rssfeed</a></div>
+      </div>
+    </div>
+  </div>
+  <div id="content-wrapper">
+    <header id="header_pane">
+      <div class="heading-wrapper">
+        <button id="menu-toggle" class="icon-btn" title="Menu" aria-label="Toggle sidebar"><svg><use href="#i-menu"/></svg></button>
+        <div class="heading-title">
+          <div class="title-block">
+            <div class="title-row">
+              <span id="scope-title">Newsfeed</span>
+              <button id="scope-info" class="icon-btn scope-info hidden" title="Feed information" aria-label="Feed information" aria-haspopup="dialog"><svg><use href="#i-info"/></svg></button>
+            </div>
+            <div id="scope-count" class="text-count"></div>
+          </div>
+        </div>
+        <div class="heading-controls">
+          <div id="header-right-controls">
+            <div class="mark-wrap">
+              <div class="btn-group-markread">
+                <button id="btn-mark-all" class="btn-heading" title="Mark all as read" aria-label="Mark all as read"><svg><use href="#i-read"/></svg></button>
+                <button id="btn-mark-all-split" class="btn-heading btn-split" title="More mark actions" aria-label="More mark actions" aria-haspopup="menu" aria-expanded="false"><svg><use href="#i-chevron-down"/></svg></button>
+              </div>
+              <div id="mark-menu" class="dropdown dropdown-mark hidden">
+                <div id="mark-age-block">
+                  <div class="mark-label" id="mark-age-title">Mark as read</div>
+                  <div class="mark-age-sentence"><span id="mark-age-desc">Articles older than</span> <span id="mark-age-value">7 days</span></div>
+                  <input type="range" id="mark-age-slider" class="mark-age-slider" min="1" max="30" step="1" value="7" aria-label="Age cutoff in days">
+                  <div class="mark-age-scale" aria-hidden="true"><span>1 day</span><span>1 week</span><span>2 weeks</span><span>30 days</span></div>
+                  <div class="mark-age-count" id="mark-age-count"></div>
+                  <button type="button" class="mark-age-apply" id="mark-age-apply">Mark as read</button>
+                </div>
+              </div>
+            </div>
+            <div id="search-wrap">
+              <button id="search-open" class="icon-btn" title="Search all articles" aria-label="Search"><svg><use href="#i-search"/></svg></button>
+              <div id="search-box" class="hidden">
+                <svg class="search-icon"><use href="#i-search"/></svg>
+                <input id="search-input" type="search" placeholder="Search — feed: title: before: unread:true" autocomplete="off" spellcheck="false" aria-label="Search articles">
+                <button id="search-close" class="icon-btn" title="Close search" aria-label="Close search"><svg><use href="#i-close"/></svg></button>
+              </div>
+            </div>
+          </div>
+          <div class="more-wrap">
+            <button id="btn-more" class="icon-btn" title="More" aria-label="More options" aria-haspopup="menu" aria-expanded="false"><svg><use href="#i-dots"/></svg></button>
+            <div id="header-menu" class="dropdown dropdown-more hidden">
+              <div class="menu-label">Article list</div>
+              <div id="status-items">
+                <button class="dropdown-item" data-status="all"><span class="mi-icon"><svg><use href="#i-all"/></svg></span><span class="check"></span>All articles</button>
+                <button class="dropdown-item" data-status="unread"><span class="mi-icon"><svg><use href="#i-unread"/></svg></span><span class="check"></span>Unread articles</button>
+              </div>
+              <div class="dropdown-line"></div>
+              <button class="dropdown-item" id="menu-refresh"><span class="mi-icon"><svg><use href="#i-refresh"/></svg></span><span class="check"></span>Refresh articles</button>
+              <div class="dropdown-line"></div>
+              <div class="menu-label">Sort</div>
+              <div id="sort-items">
+                <button class="dropdown-item" data-sort="newest"><span class="mi-icon"><svg><use href="#i-sort"/></svg></span><span class="check"></span>Newest first</button>
+                <button class="dropdown-item" data-sort="oldest"><span class="mi-icon"><svg><use href="#i-sort"/></svg></span><span class="check"></span>Oldest first</button>
+              </div>
+              <div class="dropdown-line"></div>
+              <button class="dropdown-item" id="menu-reset-read"><span class="mi-icon"><svg><use href="#i-unread"/></svg></span><span class="check"></span>Reset read state</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </header>
+    <div id="reader_pane">
+      <div id="list_pane">
+        <div id="list"></div>
+        <div id="empty" class="hidden"></div>
+      </div>
+      <div id="reader_resizer" title="Drag to resize the panes — double-click to reset"></div>
+      <aside id="article_pane">
+        <div id="reader-slot" class="hidden"></div>
+      </aside>
+      <div id="scroll-nav">
+        <button id="scroll-up" class="scroll-btn" title="Previous article (k)" aria-label="Previous article"><svg><use href="#i-chevron-up"/></svg></button>
+        <button id="scroll-down" class="scroll-btn" title="Next article (j)" aria-label="Next article"><svg><use href="#i-chevron-down"/></svg></button>
+      </div>
+    </div>
+  </div>
+</div>
+<div id="scrim" class="hidden"></div>
+<noscript>
+  <div class="noscript-fallback">
+    <p><strong>This reader runs entirely in your browser and needs JavaScript.</strong><br>
+    Articles are fetched into <code>data/</code> by a GitHub Action — enable JavaScript to read them.</p>
+  </div>
+</noscript>
+<div id="toast" class="hidden" role="status" aria-live="polite"><span id="toast-text"></span><button id="toast-action"></button><button id="toast-action-2"></button></div>
+<div id="feed-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="feed-modal-title">
+  <div class="modal-card modal-feed">
+    <div class="modal-head"><h2 id="feed-modal-title">Feed</h2><button id="feed-modal-close" class="icon-btn" title="Close" aria-label="Close feed information"><svg><use href="#i-close"/></svg></button></div>
+    <div class="modal-body" id="feed-modal-body"></div>
+  </div>
+</div>
+<div id="confirm-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+  <div class="modal-card modal-small">
+    <div class="modal-head"><h2 id="confirm-title">Confirm</h2></div>
+    <div class="modal-body">
+      <p id="confirm-text"></p>
+      <div class="modal-actions">
+        <button id="confirm-no" class="tool-btn">Cancel</button>
+        <button id="confirm-yes" class="tool-btn tool-primary">Confirm</button>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="assets/app.js?v=8aa08eaaae"></script>
+</body>
+</html>
