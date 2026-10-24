@@ -222,3 +222,20 @@ npm ci && npm test
 ```
 
 and serve any generated `data/` with `npm run serve` and walk `docs/GUI-CHECKLIST.md`.
+
+### Phase 4 — Performance (measured; nothing merged — every candidate rejected with numbers)
+
+Profiled with the **real published dataset** (61 feeds / 1 978 articles / 5 MB) plus a 2× stress set (3 956), in jsdom and in real Chromium against the current code:
+
+| Metric | jsdom med (p95) | real Chromium med (p95) |
+|---|---|---|
+| boot → first rendered rows | — | **560 ms** (incl. 5 MB data over localhost) |
+| row click (open + mark-read + layout) | 25.6 (40.9) ms | **10.2 (26.5) ms** |
+| `j` / `k` navigation | 27.6 (35.1) ms | **11.7 / 9.0 (34 / 31) ms** |
+| scope switch (renderAll + layout) | 69.3 (89.4) ms | **24.2 (37.7) ms** |
+| mark-menu open / slider input | 1.7 / 0.0 ms | 2 / 0 ms |
+| mark-all flows (actual work) | ~36 / ~5 ms | 3.1 / 28.4 ms |
+
+Every path is **flat at 2× data** (row click 24.4 ms, scope 70.5 ms — cost scales with rendered rows, not the dataset). Decomposition: the jsdom `renderList` cost is ~78% parse5 `innerHTML` (51.2 ms measured in isolation for 150 rows); all app computation is sub-millisecond at 3 956 articles (filter+sort 0.6 ms, row strings 0.1 ms, full-article scans 0.1 ms).
+
+Rejected (complexity > measured gain): in-place patching for scope transitions (24 ms real — imperceptible); incremental unread counters (full scan = 0.1 ms; state duplication loses); boot (network-bound, progressive rendering already in place); fetcher (conditional GET + 5-way concurrency, no N+1). Prior pass's optimizations re-verified effective at the same scale. Zero console output and zero page errors across the whole Chromium session.
