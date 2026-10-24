@@ -416,7 +416,7 @@ async function resolveFeeds(config) {
   for (const f of config.folders || []) if (f && f.id) folderMap.set(f.id, Object.assign({}, folderMap.get(f.id) || { id: f.id }, f));
   return { feeds, folders: [...folderMap.values()] };
 }
-const CHAN_API = 'https://a.4cdn.org';
+const CHAN_API = process.env.GHRSS_CHAN_API || 'https://a.4cdn.org';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let chanLastReq = 0;
 async function chanThrottle() {
@@ -565,7 +565,7 @@ async function main() {
       const meta = boards?.find((b) => b.board === board) || null;
       if (!board) {
         failures++;
-        const keptErr = cList((prev.articles || []).filter((a) => !feedFilterDrop(a, feedBlocks)));
+        const keptErr = cList((prev.articles || []).filter((a) => !feedFilterDrop(a, feedBlocks))).filter((a) => now - a.date < retainMs);
         await fs.writeFile(file, JSON.stringify({ articles: keptErr }));
         index.feeds[feed.id] = { ...summarizeFeed({ ...feed, site: feed.site || 'https://boards.4channel.org' }, keptErr), status: { ...status, ok: false, error: '4chan feed needs a "board"' } };
         written.set(feed.id, keptErr);
@@ -574,7 +574,7 @@ async function main() {
       }
       if (boards && !meta) {
         failures++;
-        const keptErr = cList((prev.articles || []).filter((a) => !feedFilterDrop(a, feedBlocks)));
+        const keptErr = cList((prev.articles || []).filter((a) => !feedFilterDrop(a, feedBlocks))).filter((a) => now - a.date < retainMs);
         await fs.writeFile(file, JSON.stringify({ articles: keptErr }));
         index.feeds[feed.id] = { ...summarizeFeed({ ...feed, site: feed.site || 'https://boards.4channel.org' }, keptErr), status: { ...status, ok: false, error: `unknown board /${board}/` } };
         written.set(feed.id, keptErr);
@@ -592,7 +592,7 @@ async function main() {
         status.ok = false;
         status.error = err.message;
         status.consecutiveFailures = (prevStatus.consecutiveFailures || 0) + 1;
-        const keptFail = cList((prev.articles || []).filter((a) => !feedFilterDrop(a, feedBlocks)));
+        const keptFail = cList((prev.articles || []).filter((a) => !feedFilterDrop(a, feedBlocks))).filter((a) => now - a.date < retainMs);
         await fs.writeFile(file, JSON.stringify({ articles: keptFail }));
         index.feeds[feed.id] = { ...summarizeFeed({ ...effFeed, ...feedMetaFor(effFeed, prevMeta) }, keptFail), status };
         written.set(feed.id, keptFail);
@@ -605,7 +605,7 @@ async function main() {
       status.error = null;
       status.lastModified = res.lastModified || prevStatus.lastModified || null;
       if (res.notModified) {
-        const keptAll = cList((prev.articles || []).filter((a) => !feedFilterDrop(a, feedBlocks)));
+        const keptAll = cList((prev.articles || []).filter((a) => !feedFilterDrop(a, feedBlocks))).filter((a) => now - a.date < retainMs);
         const kept = cap ? keptAll.slice(0, cap) : keptAll;
         await fs.writeFile(file, JSON.stringify({ articles: kept }));
         index.feeds[feed.id] = { ...summarizeFeed({ ...effFeed, ...feedMetaFor(effFeed, prevMeta) }, kept), status };
@@ -632,7 +632,8 @@ async function main() {
         a.content = sanitize(a.content);
         articles.push(a);
       }
-      const kept = cap ? articles.slice(0, cap) : articles;
+      const live = articles.filter((a) => now - a.date < retainMs);
+      const kept = cap ? live.slice(0, cap) : live;
       await fs.writeFile(file, JSON.stringify({ articles: kept }));
       index.feeds[feed.id] = { ...summarizeFeed({ ...effFeed, ...feedMetaFor(effFeed, prevMeta) }, kept), status };
       written.set(feed.id, kept);

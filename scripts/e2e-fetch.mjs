@@ -24,6 +24,27 @@ const hostileRss = () => `<?xml version="1.0" encoding="UTF-8"?><rss version="2.
 <item><title>Duplicate guid two</title><link>https://example.test/dup2</link><guid>h-dup</guid><description>second</description></item>
 </channel></rss>`;
 const brokenRss = '<?xml version="1.0"?><rss><channel><title>Broken</title><item><title>never closes';
+let chanMode = 'ok';
+const CHAN_LM = 'Mon, 01 Jan 2024 00:00:00 GMT';
+const chanCatalog = () => JSON.stringify([{ threads: [
+  { no: 9001, time: Math.floor(now / 1000) - 3600, replies: 120, sub: 'Fresh thread', com: 'fresh op' },
+  { no: 9002, time: Math.floor(now / 1000) - 90 * 86400, replies: 400, sub: 'Ninety-day-old thread', com: 'old op' },
+] }]);
+const chanRoutes = (req, res) => {
+  if (req.url === '/boards.json') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ boards: [{ board: 'g', ws_board: 1, title: '/g/ - Technology' }] }));
+    return true;
+  }
+  if (req.url === '/g/catalog.json') {
+    if (chanMode === 'error') { res.writeHead(500); res.end(); return true; }
+    if (chanMode === 'same' && req.headers['if-modified-since'] === CHAN_LM) { res.writeHead(304); res.end(); return true; }
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Last-Modified': CHAN_LM });
+    res.end(chanCatalog());
+    return true;
+  }
+  return false;
+};
 const server = http.createServer((req, res) => {
   const etag = '"v1"';
   if (req.url === '/feed1.xml') {
@@ -41,7 +62,8 @@ const server = http.createServer((req, res) => {
   } else if (req.url === '/feed4.xml') {
     res.writeHead(200, { 'Content-Type': 'application/rss+xml; charset=utf-8' });
     res.end(brokenRss);
-  } else { res.writeHead(404); res.end(); }
+  } else if (chanRoutes(req, res)) { /* served */ }
+  else { res.writeHead(404); res.end(); }
 });
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const port = server.address().port;
@@ -108,7 +130,8 @@ const server2 = http.createServer((req, res) => {
   } else if (req.url === '/feed4.xml') {
     res.writeHead(200, { 'Content-Type': 'application/rss+xml; charset=utf-8' });
     res.end(brokenRss);
-  } else { res.writeHead(404); res.end(); }
+  } else if (chanRoutes(req, res)) { /* served */ }
+  else { res.writeHead(404); res.end(); }
 });
 await new Promise((r) => server2.listen(port, '127.0.0.1', r));
 out = await run();
@@ -270,6 +293,47 @@ out = await run();
   ok(/PARSE FAILED/.test(out), 'the malformed feed reports a parse failure');
   ok(three.articles.length === 3, 'the parse failure keeps the previous cleaned set (3)');
   ok(idxEleven.feeds.three.status.ok === false && /Parse error/.test(idxEleven.feeds.three.status.error || ''), 'the crawl status records the parse error');
+}
+console.log('run 12: 4chan feeds — retention trims on EVERY write path (success, 304, failure)');
+{
+  const chanCfg = (retentionDays) => JSON.stringify({
+    settings: { retentionDays, fullTextDefault: false },
+    feeds: [{ type: '4chan', board: 'g', id: 'chang', title: '/g/ - Technology' }],
+  }, null, 2);
+  const readChang = () => JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/feeds/chang.json'), 'utf8'));
+  const runChan = async (retentionDays) => run({ GHRSS_CHAN_API: `http://127.0.0.1:${port}` });
+
+  chanMode = 'ok';
+  fs.writeFileSync(path.join(SANDBOX, 'config.json'), chanCfg(120));
+  await new Promise((r) => setTimeout(r, 1100));
+  out = await runChan();
+  ok(readChang().articles.length === 2, `baseline: both live threads stored under a 120-day retention (${readChang().articles.length})`);
+  ok(readChang().articles.some((a) => a.title === 'Ninety-day-old thread'), 'the 90-day-old thread is inside the wide window');
+
+  fs.writeFileSync(path.join(SANDBOX, 'config.json'), chanCfg(30));
+  await new Promise((r) => setTimeout(r, 1100));
+  out = await runChan();
+  ok(readChang().articles.length === 1 && readChang().articles[0].title === 'Fresh thread', `success path: a 30-day retention drops the 90-day-old live thread at ingest (${readChang().articles.length})`);
+
+  fs.writeFileSync(path.join(SANDBOX, 'config.json'), chanCfg(120));
+  await new Promise((r) => setTimeout(r, 1100));
+  out = await runChan();
+  ok(readChang().articles.length === 2, 're-widened: the old thread is back (catalog still live)');
+
+  chanMode = 'same';
+  fs.writeFileSync(path.join(SANDBOX, 'config.json'), chanCfg(30));
+  await new Promise((r) => setTimeout(r, 1100));
+  out = await runChan();
+  ok(/not modified/.test(out), 'the catalog answered 304');
+  ok(readChang().articles.length === 1 && readChang().articles[0].title === 'Fresh thread', `304 path: retention re-trims the retained set (${readChang().articles.length})`);
+
+  chanMode = 'error';
+  fs.writeFileSync(path.join(SANDBOX, 'config.json'), chanCfg(30));
+  await new Promise((r) => setTimeout(r, 1100));
+  out = await runChan();
+  ok(/FETCH FAILED/.test(out), 'the catalog failed');
+  ok(readChang().articles.length === 1 && readChang().articles[0].title === 'Fresh thread', `failure path: retained data stays retention-trimmed (${readChang().articles.length})`);
+  chanMode = 'ok';
 }
 console.log('id-migration matchers (unit)');
 {
