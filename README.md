@@ -59,8 +59,10 @@ npm run fetch      # fetch all feeds into data/ (needs Node 22.22+ or 24+)
 npm run serve      # serve the site at http://localhost:8080
 npm run test:ui    # 470+ browser-environment assertions (jsdom)
 npm run test:char  # characterization pins for known behavior
-npm run test:sec   # client-boundary security assertions
-npm run test:e2e   # fetcher end-to-end: id stability, conditional GET, backend filters, purge
+npm run test:sec   # client-boundary security + poisoned-input assertions
+npm run test:static # document contracts: CSP hash, assets, symbols, config shape
+npm run test:chaos # rapid-interaction error sweep (~400 events, zero-error verdict)
+npm run test:e2e   # fetcher end-to-end: id stability, conditional GET, backend filters, adversarial ingest, 4chan retention, purge
 npm test           # all of the above
 ```
 

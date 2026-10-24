@@ -258,3 +258,35 @@ Threat model unchanged: public static site (no auth/cookies/writes → authoriza
 | `4e25e09` | **Poisoned-input probe** added to the sec suite: hostile localStorage (incl. `__proto__` keys), hostile `#article/<script>` hash, hostile search queries, hostile titles/authors/summaries — all neutralized, zero HTML sinks reached. | `npm run test:sec` → "poisoned inputs all neutralized" |
 
 Re-verified this pass: server ingest boundaries (adversarial e2e runs 10–11: script/onerror/`javascript:`/`data:`/evil-iframe payloads, 3000-char titles, dup-guids, malformed XML); client render boundaries (every `innerHTML` sink audited — all values esc()'d, scheme-validated, or sanitizeReaderDom'd; embed ids regex-validated + encodeURIComponent); no `eval`/`new Function`/`document.write`; every `target="_blank"` carries `noopener noreferrer` (grep-verified zero exceptions); no open redirects (hash router only); JSDOM extraction `runScripts: 'outside-only'`; 5 MB / 25–35 s fetch bounds; error surfaces carry fetch-error strings only (no internals).
+
+### Phase 7 — Full verification
+
+**Entire suite from a clean install** (`rm -rf node_modules && npm ci && npm test`): **627 assertions + security verdicts across six suites — zero failures**. `npm outdated` empty, `npm audit` clean, engines match jsdom 30's supported range.
+
+**Real-browser GUI walk** against every section of `docs/GUI-CHECKLIST.md`, on the current code + the real published dataset (61 feeds / 1 978 articles), 21 screenshots in the working notes:
+
+- *Boot & shell*: 6 folders + 61 feeds render; badge 1978; title `(1978) My RSSFeed`; oldest-first order verified against publication dates; progressive render (150 of 1 978 rows).
+- *Reading flow*: open marks read (+1 badge, `#article/<id>`, row lingers expanded); re-click closes and clears the hash; `j`/`k` walk; `m`/`s` toggle; `o` opens the original; **F5 mid-read reopens the same article**; back/forward walk the history exactly; prev/next disable at the TRUE first/last visible articles (verified after materializing all 1 607 rows).
+- *Mark operations*: confirm dialog; mark-all-read ⇄ mark-all-unread direction flip; Undo restores exactly; badge tick covers every feed; slider live count + `aria-valuetext` + persistence + apply; zero-result toast with the data-boundary hint.
+- *Scopes & deep links*: `#folder/<Name>` on click; slug (`#folder/japslop`) and case-forgiving forms resolve; unknown links clear the hash with an explanatory toast.
+- *Server-side filter flags* (mock-injected in the real browser): `highlight` tints, `autoRead` is read from a cold profile, `keepUnread` survives open-to-read AND mark-all ("Marked 2 articles as read" — the guarded one skipped).
+- *Search*: `feed:`/`title:`/`unread:`/`before:` operators; search is global across scopes; closing restores the scope.
+- *Console*: **zero messages and zero page errors across every session of the entire walk.**
+
+Two apparent walk "failures" were harness artifacts, both re-verified properly: Chromium's `pushState` rate throttle defeated a 4 200-event synthetic key burst (superhuman input; clamps proven via first/last deep links; jsdom pins also cover it), and synchronous badge reads raced the async confirm continuation (re-measured with a settle — flows land exactly as designed).
+
+**Verify the whole pass:**
+```sh
+npm ci && npm test
+```
+then serve any `data/` (`npm run serve`) and walk `docs/GUI-CHECKLIST.md`.
+
+---
+
+## How to verify the whole thing in one command
+
+```sh
+npm ci && npm test
+```
+
+and serve any generated `data/` with `npm run serve` and walk `docs/GUI-CHECKLIST.md`.
