@@ -46,7 +46,7 @@ const FIX = {
 FIX['fixture-verge'].articles[2].text = '<p>Extracted full text present</p>';
 FIX['fixture-verge'].articles[2].content = '<p>Short teaser only</p>';
 const config = {
-  settings: { siteName: 'My RSSFeed', theme: 'dark', view: 'list', refreshMinutes: 60, markReadOnOpen: true },
+  settings: { siteName: 'My RSSFeed', theme: 'dark', refreshMinutes: 60 },
   folders: [], 
   feeds: [
     { id: 'fixture-hn', title: 'Hacker News', url: 'https://hnrss.test/frontpage', site: 'https://news.ycombinator.com', folder: 'tech' },
@@ -266,14 +266,6 @@ ok($('#mark-group-unread').classList.contains('hidden') && $('#mark-alt-toggle')
 ok($('#mark-alt-label').textContent === 'Mark as unread by time', 'the expander label survives the reset');
 click('#mark-alt-toggle'); 
 await settle(20);
-click('#mark-menu [data-mark="unread"][data-read-age="1"]');
-await settle(80);
-ok($('#toast-text').textContent.includes('No articles you read more than a day ago here'), 'reading-time restore answers honestly while NOT caught up — reads from seconds ago are not "more than a day ago"');
-ok(rowCount() === TOTAL - HIDDEN - 4 && $('#badge-all-items').textContent === String(TOTAL - HIDDEN - 4), 'the reading-time cutoff held');
-click('#btn-mark-all-split');
-await settle(20);
-click('#mark-alt-toggle');
-await settle(20);
 click('#mark-menu [data-mark="unread"][data-older="1"]');
 await settle(80);
 ok($('#toast-text').textContent.includes('No read articles from a day ago here'), 'from-a-day-ago answers honestly — every read article here was published more than a day ago');
@@ -291,8 +283,8 @@ await settle(80);
 ok($('#scope-title').textContent === 'Today', 'Today view entered');
 click('#btn-mark-all-split');
 await settle(20);
-ok($$('#mark-menu .dropdown-item[data-older]').length === 8 && $$('#mark-menu .dropdown-item[data-read-age]').length === 4, 'twelve age rows exist across both groups (8 published-age + 4 reading-time)');
-ok($$('#mark-menu .dropdown-item[data-older], #mark-menu .dropdown-item[data-read-age]').every((b) => b.classList.contains('hidden')), 'every age preset (either clock) is hidden in the Today view');
+ok($$('#mark-menu .dropdown-item[data-older]').length === 8, 'eight age presets exist across both groups (published age only)');
+ok($$('#mark-menu .dropdown-item[data-older]').every((b) => b.classList.contains('hidden')), 'every age preset is hidden in the Today view');
 ok($$('#mark-menu .mark-custom').length === 2 && $$('#mark-menu .mark-custom.hidden').length === 0, 'the "Before…" pickers stay (a future date still works)');
 click('#btn-mark-all-split'); 
 await settle(20);
@@ -300,22 +292,14 @@ click('.tree-item[data-scope="all"]');
 await settle(80);
 click('#btn-mark-all-split');
 await settle(20);
-ok($$('#mark-menu .dropdown-item[data-older], #mark-menu .dropdown-item[data-read-age]').every((b) => !b.classList.contains('hidden')), 'presets return outside the Today view');
+ok($$('#mark-menu .dropdown-item[data-older]').every((b) => !b.classList.contains('hidden')), 'presets return outside the Today view');
 click('#btn-mark-all-split'); 
 await settle(20);
 console.log('filter-invisible restores explain themselves');
 click('#badge-all-items'); 
 await settle(80);
-const dr = $('#date-range');
-dr.value = 'today';
-dr.dispatchEvent(new window.Event('change', { bubbles: true }));
-await settle(80);
-ok(rowCount() === 0, 'caught up under a Today filter: the unread view is empty');
-ok($('#empty h3').textContent === 'Nothing in this time range', 'the empty state no longer claims "All caught up" while a filter narrows the view');
-ok($('#empty p').textContent.includes('No unread articles'), 'the caught-up flavor reads honestly (no hidden unread yet)');
-dr.value = 'all';
-dr.dispatchEvent(new window.Event('change', { bubbles: true }));
-await settle(80);
+ok(rowCount() === 0, 'caught up: the unread view is empty');
+ok($('#empty h3').textContent === 'All caught up 🎉', 'the caught-up empty state shows');
 click('#search-open');
 await settle(20);
 const nz = $('#search-input');
@@ -338,15 +322,7 @@ await settle(200);
 ok(rowCount() === 17, 'Clear search reveals the restored sub-day rows');
 click('#badge-all-items');
 await settle(80);
-ok(rowCount() === 0, 're-marked everything read for the reading-time no-op check');
-click('#btn-mark-all-split');
-await settle(20);
-click('#mark-menu [data-mark="unread"][data-read-age="1"]');
-await settle(120);
-ok($('#toast-text').textContent.includes('No articles you read more than a day ago here'), 'freshly-read rows are not "read more than a day ago" — honest zero under the search too');
-ok(rowCount() === 0, 'nothing restored — the reading-time cutoff held');
-click('#btn-mark-all-split');
-await settle(20);
+ok(rowCount() === 0, 're-marked everything read for the Since-picker restore');
 const dpick = $('#mark-date-unread');
 dpick.value = '2021-05-04';
 dpick.dispatchEvent(new window.Event('change', { bubbles: true }));
@@ -365,14 +341,13 @@ click('#search-close');
 await settle(50);
 ok(rowCount() === TOTAL - HIDDEN, 'closing search clears the active filter');
 ok($('#search-input').value === '', 'search input cleared');
-console.log('layouts');
-const layoutBtns = $$('#layouts [data-layout]');
-ok(layoutBtns.length === 5, 'all five layout buttons present');
-for (const l of ['expanded', 'cards', 'column', 'magazine', 'list']) {
-  click(`#layouts [data-layout="${l}"]`);
-  await settle(50);
-  ok($('#list').classList.contains(`view-${l}`), `${l} layout applies`);
-}
+console.log('views and date filter are gone — list is the only view');
+ok(!$('#layouts'), 'the ⋯ menu View section (layouts) is gone');
+ok(!$('#date-range'), 'the ⋯ menu Date section is gone');
+ok(!$('#menu-settings') && !$('#settings-modal'), 'the Settings entry and Reading-settings modal are gone');
+ok(!$$('#mark-menu [data-read-age]').length, 'the "By when you read them" presets are gone');
+ok($('#list').classList.contains('view-list'), 'the list view is the one and only view');
+ok($('#list').className.includes('density-comfort'), 'the default density applies');
 console.log('header menus');
 click('#btn-more');
 await settle(30);
@@ -450,14 +425,7 @@ click('#mark-menu [data-mark="unread"][data-older="1"]');
 await settle(80);
 ok($('#toast-text').textContent.includes('Marked 17 articles from a day ago as unread'), 'bulk mark-all-read, then from-a-day-ago: exactly the sub-day news returns');
 ok(rowCount() === 17, 'exactly the seventeen sub-day articles came back');
-click('#btn-mark-all-split');
-await settle(20);
-click('#mark-alt-toggle');
-await settle(20);
-click('#mark-menu [data-mark="unread"][data-read-age="1"]');
-await settle(80);
-ok($('#toast-text').textContent.includes('No articles you read more than a day ago here'), 'freshly-read articles are not "read more than a day ago" — no phantom restore');
-ok(rowCount() === 17, 'nothing else came back — the reading-time cutoff held');
+ok($('#btn-mark-all').title === 'Mark all as read', 'with unread articles back, the button offers read again');
 click('#badge-all-items');
 await settle(50);
 ok(rowCount() === 0, 'badge tick re-marks everything read for the caught-up restore');
@@ -713,7 +681,7 @@ console.log('feed-storage version reset');
   ok(!Object.keys(JSON.parse(w3.localStorage.getItem('ghrss:read') || '{}')).length, 'old-version feed storage is wiped on upgrade');
   ok(w3.localStorage.getItem('ghrss:ver') === '3', 'the storage version is recorded');
   ok(Number(w3.document.querySelector('#badge-all-items').textContent) === TOTAL - HIDDEN, 'all articles unread after the one-time reset');
-  ok(w3.document.querySelector('#list').classList.contains('view-cards'), 'UI prefs survive the feed-storage reset');
+  ok(w3.document.querySelector('#list').classList.contains('view-list'), 'the list view is forced (a stale saved layout is ignored)');
   ok([...w3.document.querySelectorAll('#list .row')].at(-1)?.dataset.id === 'fixture-hn-11', 'an explicit newest-first pref survives the one-time sort migration');
   dom3.window.close();
 }
@@ -728,7 +696,7 @@ console.log('feed-storage version reset');
   ok(Number(w4.document.querySelector('#badge-all-items').textContent) === TOTAL - HIDDEN - 1, 'same-version storage is kept (no re-reset)');
   dom4.window.close();
 }
-console.log('markReadAfterSeconds opts in on its own (markReadOnOpen:false + delay used to be silently dead)');
+console.log('mark-on-open is unconditional now — old markReadOnOpen/delay config keys are inert');
 {
   const dom5 = new JSDOM(html, { url: 'https://example.test/', runScripts: 'outside-only', pretendToBeVisual: true });
   const w5 = dom5.window;
@@ -744,17 +712,17 @@ console.log('markReadAfterSeconds opts in on its own (markReadOnOpen:false + del
   const badge5 = () => Number(w5.document.querySelector('#badge-all-items').textContent);
   const before5 = badge5();
   w5.document.querySelector('#list .row').dispatchEvent(new w5.MouseEvent('click', { bubbles: true }));
-  await settle(80);
-  ok(badge5() === before5, 'not marked read instantly (markReadOnOpen:false)');
-  await settle(500);
-  ok(badge5() === before5 - 1, 'the configured delay marks it read — a delay > 0 opts in on its own');
+  await settle(60);
+  ok(badge5() === before5 - 1, 'opening marks read instantly — no setting can turn it off anymore');
   const r2 = w5.document.querySelectorAll('#list .row')[1];
   const id2 = r2.dataset.id;
   r2.dispatchEvent(new w5.MouseEvent('click', { bubbles: true }));
   await settle(60);
-  w5.document.querySelector(`#list .row[data-id="${id2}"]`).dispatchEvent(new w5.MouseEvent('click', { bubbles: true })); 
+  w5.document.querySelector(`#list .row[data-id="${id2}"] [data-act="toggle-read"]`).dispatchEvent(new w5.MouseEvent('click', { bubbles: true }));
+  await settle(60);
+  ok(badge5() === before5 - 1, 'an explicit un-read on the open article sticks immediately (the first opened row stays read)');
   await settle(500);
-  ok(badge5() === before5 - 1, 'closing the article before the delay cancels the pending mark');
+  ok(badge5() === before5 - 1, 'no delayed timer ever reverts the explicit un-read (the machinery is gone)');
   dom5.window.close();
 }
 console.log('an explicit un-read beats markRead filters — even after a reload (filters re-run at load)');
@@ -814,15 +782,9 @@ console.log('degraded network: hung feed fetches never wedge the UI');
   await settle(700);
   const $$H = (s) => [...wH.document.querySelectorAll(s)];
   ok($$H('#tree .tree-item').length >= 4, 'sidebar renders from index.json even while feed fetches stall');
-  ok(wH.document.querySelector('#btn-mark-all').title === 'Mark all as read', 'stalled loads settle via the fetch cap — and a stalled feed never fakes "caught up"');
+  ok(wH.document.querySelector('.btn-group-markread').classList.contains('hidden'), 'stalled loads hide the mark-all button entirely — a stalled feed never fakes "caught up"');
   ok(wH.document.querySelector('#empty h3').textContent === "Couldn't load articles", 'the empty state names the load failure instead of celebrating');
   ok(!!wH.document.querySelector('#empty [data-retry]'), 'the failed-load state offers a retry');
-  wH.document.querySelector('#btn-mark-all-split').dispatchEvent(new wH.MouseEvent('click', { bubbles: true }));
-  await settle(30);
-  const item = wH.document.querySelector('#mark-menu [data-mark="unread"][data-older="1"]');
-  item.dispatchEvent(new wH.MouseEvent('click', { bubbles: true }));
-  await settle(400);
-  ok(wH.document.querySelector('#toast-text').textContent.includes('No read articles from a day ago here'), 'mark clicks always respond — stalled fetches cannot dead-end them');
   domH.window.close();
 }
 console.log('degraded network: a click during a slow load is visible, then lands');
@@ -1195,58 +1157,79 @@ console.log('bulk mark: the same guard rules as mark-all (explicit, filter-proof
   ok(badge8() === TOTAL - HIDDEN, 'the bulk un-read survives the filter re-running');
   dom8.window.close();
 }
-console.log('settings modal: the mark-read duration is finally user-settable, persists, and beats config.json');
+console.log('mark-all button visibility: only with news to read, unread-restore only after a real clear');
 {
-  const dom9 = new JSDOM(html, { url: 'https://example.test/', runScripts: 'outside-only', pretendToBeVisual: true });
-  const w9 = dom9.window;
-  w9.fetch = window.fetch; 
-  w9.eval(appSrc);
-  await settle(1200);
-  w9.document.querySelector('#btn-more').dispatchEvent(new w9.MouseEvent('click', { bubbles: true }));
-  await settle(20);
-  w9.document.querySelector('#menu-settings').dispatchEvent(new w9.MouseEvent('click', { bubbles: true }));
-  await settle(20);
-  ok(!w9.document.querySelector('#settings-modal').classList.contains('hidden'), 'the settings modal opens');
-  ok(w9.document.querySelector('#set-mark-on-open').checked === true, 'the checkbox shows the config default (mark on open)');
-  ok(w9.document.querySelector('#set-mark-after').value === '0', 'the delay input shows the config default (0)');
-  ok(/the moment you open/.test(w9.document.querySelector('#set-mark-hint').textContent), 'the hint explains instant marking');
-  const after = w9.document.querySelector('#set-mark-after');
-  after.value = '1';
-  after.dispatchEvent(new w9.Event('change', { bubbles: true }));
-  await settle(20);
-  ok(/1 second after you open/.test(w9.document.querySelector('#set-mark-hint').textContent), 'the hint reflects the new delay');
-  const ui9 = JSON.parse(w9.localStorage.getItem('ghrss:ui') || '{}');
-  ok(ui9.settings?.markReadAfterSeconds === 1, 'the override persists to ghrss:ui.settings');
-  w9.document.dispatchEvent(new w9.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-  await settle(20);
-  ok(w9.document.querySelector('#settings-modal').classList.contains('hidden'), 'Escape closes the settings modal');
-  const badge9 = () => Number(w9.document.querySelector('#badge-all-items').textContent);
-  const before9 = badge9();
-  w9.document.querySelector('#list .row').dispatchEvent(new w9.MouseEvent('click', { bubbles: true }));
-  await settle(80);
-  ok(badge9() === before9, 'with a 1s delay the open does NOT mark instantly');
-  await settle(1100);
-  ok(badge9() === before9 - 1, 'the configured delay marks it read a second later');
-  dom9.window.close();
-  const dom9b = new JSDOM(html, { url: 'https://example.test/', runScripts: 'outside-only', pretendToBeVisual: true });
-  const w9b = dom9b.window;
-  w9b.fetch = async (url) => {
+  const emptyFix = { 'fixture-hn': FIX['fixture-hn'], 'fixture-empty': { title: 'Empty Feed', site: 'https://empty.test', folder: 'tech', articles: [] } };
+  const idxE = { generatedAt: now, folders: index.folders, feeds: {
+    'fixture-hn': index.feeds['fixture-hn'],
+    'fixture-empty': { title: 'Empty Feed', site: 'https://empty.test', folder: 'tech', folders: ['tech'], count: 0, newest: null, oldest: null },
+  } };
+  const domE = new JSDOM(html, { url: 'https://example.test/', runScripts: 'outside-only', pretendToBeVisual: true });
+  const wE = domE.window;
+  wE.fetch = async (url) => {
     const p = String(url).split('?')[0];
-    if (p === 'config.json') return { ok: true, status: 200, json: async () => structuredClone({ ...config, settings: { ...config.settings, markReadOnOpen: true, markReadAfterSeconds: 99 } }) };
-    if (p === 'data/index.json') return { ok: true, status: 200, json: async () => structuredClone(index) };
-    if (p === 'data/all-feeds.json') return { ok: true, status: 200, json: async () => structuredClone(allFeeds) };
+    if (p === 'config.json') return { ok: true, status: 200, json: async () => structuredClone(config) };
+    if (p === 'data/index.json') return { ok: true, status: 200, json: async () => structuredClone(idxE) };
+    if (p === 'data/all-feeds.json') return { ok: true, status: 200, json: async () => structuredClone({ articles: emptyFix['fixture-hn'].articles.map((a) => ({ ...a, _feed: 'fixture-hn' })) }) };
     return { ok: false, status: 404, statusText: 'Not Found', json: async () => { throw new Error('404'); } };
   };
-  w9b.localStorage.setItem('ghrss:ver', '3');
-  w9b.localStorage.setItem('ghrss:ui', JSON.stringify({ settings: { markReadOnOpen: false, markReadAfterSeconds: 0 } }));
-  w9b.eval(appSrc);
+  wE.eval(appSrc);
   await settle(1200);
-  const badge9b = () => Number(w9b.document.querySelector('#badge-all-items').textContent);
-  const before9b = badge9b();
-  w9b.document.querySelector('#list .row').dispatchEvent(new w9b.MouseEvent('click', { bubbles: true }));
-  await settle(900);
-  ok(badge9b() === before9b, 'the saved local override (manual marking) beats config.json\'s mark-on-open');
-  dom9b.window.close();
+  const wrapE = () => wE.document.querySelector('.btn-group-markread');
+  const btnE = () => wE.document.querySelector('#btn-mark-all');
+  ok(!wrapE().classList.contains('hidden') && btnE().title === 'Mark all as read', 'unread news exist → the button offers "Mark all as read"');
+  wE.document.querySelector('.tree-item[data-scope="feed:fixture-empty"]').dispatchEvent(new wE.MouseEvent('click', { bubbles: true }));
+  await settle(80);
+  ok(wrapE().classList.contains('hidden'), 'a scope with no articles at all hides the button (nothing to read, nothing to restore)');
+  wE.document.querySelector('.tree-item[data-scope="all"]').dispatchEvent(new wE.MouseEvent('click', { bubbles: true }));
+  await settle(80);
+  wE.document.querySelector('#badge-all-items').dispatchEvent(new wE.MouseEvent('click', { bubbles: true }));
+  await settle(150);
+  ok(!wrapE().classList.contains('hidden') && btnE().title === 'Mark all as unread', 'everything cleared by the user → the SAME button flips to "Mark all as unread"');
+  wE.document.querySelector('#btn-mark-all').dispatchEvent(new wE.MouseEvent('click', { bubbles: true }));
+  await settle(30);
+  wE.document.querySelector('#confirm-yes').dispatchEvent(new wE.MouseEvent('click', { bubbles: true }));
+  await settle(150);
+  ok(btnE().title === 'Mark all as read', 'unread articles exist again → the button flips back');
+  domE.window.close();
+}
+console.log('hardened: read state survives a feed that transiently vanishes from the data');
+{
+  const gapAll = { articles: allFeeds.articles.filter((a) => a._feed !== 'fixture-bbc') };
+  const mkDomGap = async (payloadAll, seed) => {
+    const domG = new JSDOM(html, { url: 'https://example.test/', runScripts: 'outside-only', pretendToBeVisual: true });
+    const wG = domG.window;
+    wG.fetch = async (url) => {
+      const p = String(url).split('?')[0];
+      if (p === 'config.json') return { ok: true, status: 200, json: async () => structuredClone(config) };
+      if (p === 'data/index.json') return { ok: true, status: 200, json: async () => structuredClone(index) };
+      if (p === 'data/all-feeds.json') return { ok: true, status: 200, json: async () => structuredClone(payloadAll) };
+      return { ok: false, status: 404, statusText: 'Not Found', json: async () => { throw new Error('404'); } };
+    };
+    if (seed) {
+      wG.localStorage.setItem('ghrss:ver', '3');
+      wG.localStorage.setItem('ghrss:read', JSON.stringify(seed));
+    }
+    wG.eval(appSrc);
+    await settle(1200);
+    return { wG, domG };
+  };
+  const readSeed = {};
+  for (const a of allFeeds.articles) readSeed[a.id] = now - 60e3;
+  const { wG: wGap, domG: domGap } = await mkDomGap(gapAll, readSeed);
+  const lsGap = JSON.parse(wGap.localStorage.getItem('ghrss:read') || '{}');
+  ok(lsGap['fixture-bbc-0'] === readSeed['fixture-bbc-0'], 'a feed missing from one publish does NOT delete its read keys (the old live-set prune destroyed them)');
+  ok(!wGap.document.querySelector('.tree-item[data-scope="feed:fixture-bbc"] .badge'), 'the vanished feed shows no unread');
+  ok(Number(wGap.document.querySelector('#badge-all-items').textContent) === 0, 'nothing appears as unread while the feed is missing');
+  domGap.window.close();
+  const { wG: wBack, domG: domBack } = await mkDomGap(allFeeds, readSeed);
+  ok(Number(wBack.document.querySelector('#badge-all-items').textContent) === 0, 'the feed returns with its articles STILL READ — no phantom unread resurrection');
+  wBack.document.querySelector('.tree-item[data-scope="folder:tech"]').dispatchEvent(new wBack.MouseEvent('click', { bubbles: true }));
+  await settle(120);
+  ok(wBack.document.querySelectorAll('#list .row').length === 0, 'THE USER\u2019S SCENARIO: mark-all-read → reload → click a folder → ZERO random unread news appear (same data)');
+  const lsBack = JSON.parse(wBack.localStorage.getItem('ghrss:read') || '{}');
+  ok(Object.keys(lsBack).length === Object.keys(readSeed).length, 'the read map is intact after the round trip');
+  domBack.window.close();
 }
 console.log('progressive rendering: 400 rows chunk in, scroll grows the list, deep links materialize their row');
 {
@@ -1295,7 +1278,7 @@ console.log('progressive rendering: 400 rows chunk in, scroll grows the list, de
   ok(!!wD.document.querySelector('.row[data-id="big-350"]'), 'the deep-linked row is materialized in the DOM (renderUpTo)');
   domD.window.close();
 }
-console.log('mark-as-unread: TWO clocks — publication window AND reading age');
+console.log('mark-as-unread: the publication window (from N ago / since a date)');
 {
   const D = 864e5;
   const nowU = Date.now();
@@ -1343,50 +1326,17 @@ console.log('mark-as-unread: TWO clocks — publication window AND reading age')
   ok(wU.document.querySelectorAll('#list .row').length === 6, 'all six rows render in the All-articles view');
   ok(unreadRow('u-3d') === false && unreadRow('u-fresh') === false, 'sanity: the seeded reads render as read');
   ok(unreadRow('u-10d') === false && unreadRow('u-40d') === false && unreadRow('u-55d') === false, 'sanity: the old reads render as read');
-  const drU = wU.document.querySelector('#date-range');
-  drU.value = 'today';
-  drU.dispatchEvent(new wU.Event('change', { bubbles: true }));
-  await settle(80);
-  ok(wU.document.querySelectorAll('#list .row').length === 1, 'the Today filter narrows the view to the fresh article');
-  wU.document.querySelector('#btn-mark-all-split').dispatchEvent(new wU.MouseEvent('click', { bubbles: true }));
-  await settle(20);
-  wU.document.querySelector('#mark-alt-toggle').dispatchEvent(new wU.MouseEvent('click', { bubbles: true }));
-  await settle(20);
-  wU.document.querySelector('#mark-menu [data-mark="unread"][data-read-age="2"]').dispatchEvent(new wU.MouseEvent('click', { bubbles: true }));
-  await settle(400);
-  const toastU = wU.document.querySelector('#toast-text').textContent;
-  ok(toastU.includes('Marked 3 articles you read more than two days ago as unread'), 'reading clock: the toast counts READING age (three old reads, not four)');
-  ok(toastU.includes('— hidden by the date filter'), 'the toast names the filter that hides every restored row');
-  ok(wU.document.querySelector('#toast-action-2').textContent === 'Show all', 'the one-click Show-all companion rides along');
-  const lsU = JSON.parse(wU.localStorage.getItem('ghrss:read') || '{}');
-  ok(JSON.stringify(Object.keys(lsU).sort()) === JSON.stringify(['u-3d', 'u-fresh']), 'THE REPORTED CASE, persisted: read an hour ago (published 3 days ago) → the read entry SURVIVES');
-  wU.document.querySelector('#btn-more').dispatchEvent(new wU.MouseEvent('click', { bubbles: true }));
-  await settle(20);
-  wU.document.querySelector('#status-items [data-status="unread"]').dispatchEvent(new wU.MouseEvent('click', { bubbles: true }));
-  await settle(80);
-  ok(wU.document.querySelector('#empty h3').textContent === 'Nothing in this time range', 'the empty state names the filter instead of celebrating');
-  const emptyU = wU.document.querySelector('#empty p').textContent;
-  ok(emptyU.includes('4 unread articles') && emptyU.includes('older than Today'), 'the empty state counts the hidden unread (the three restored + the never-read)');
-  wU.document.querySelector('#toast-action-2').dispatchEvent(new wU.MouseEvent('click', { bubbles: true }));
-  await settle(80);
-  ok(wU.document.querySelector('#date-range').value === 'all', 'Show all resets the Date filter');
-  ok(wU.document.querySelectorAll('#list .row').length === 4, 'Show all reveals the restored rows (three + the never-read)');
-  wU.document.querySelector('#btn-more').dispatchEvent(new wU.MouseEvent('click', { bubbles: true }));
-  await settle(20);
-  wU.document.querySelector('#status-items [data-status="all"]').dispatchEvent(new wU.MouseEvent('click', { bubbles: true }));
-  await settle(80);
   ok(unreadRow('u-3d') === false, 'THE REPORTED CASE, rendered: read an hour ago (published 3 days ago) → row stays READ');
   ok(unreadRow('u-fresh') === false, 'read 2 h ago → stays read');
-  ok(unreadRow('u-10d') === true && unreadRow('u-40d') === true && unreadRow('u-55d') === true, 'reads from 5/20 days ago come back unread');
+  ok(unreadRow('u-10d') === false && unreadRow('u-40d') === false && unreadRow('u-55d') === false, 'the older reads stay read too (one clock — no reading-age restore exists to resurrect them)');
   ok(unreadRow('u-1d') === true, 'the never-read article is untouched');
-  ok(Number(wU.document.querySelector('#badge-all-items').textContent) === 4, 'badge: 4 unread (the restored three + the never-read one)');
+  ok(Number(wU.document.querySelector('#badge-all-items').textContent) === 1, 'badge: only the never-read article is unread');
   wU.document.querySelector('#btn-mark-all-split').dispatchEvent(new wU.MouseEvent('click', { bubbles: true }));
   await settle(20);
   wU.document.querySelector('#mark-menu [data-mark="read"][data-older="2"]').dispatchEvent(new wU.MouseEvent('click', { bubbles: true }));
   await settle(300);
-  ok(wU.document.querySelector('#toast-text').textContent.includes('Marked 3 articles older than two days as read'), 'mark-as-read still counts by PUBLICATION age');
+  ok(wU.document.querySelector('#toast-text').textContent.includes('No unread articles older than two days here'), 'mark-as-read counts by PUBLICATION age — the 0.98-day unread article is too new to match');
   ok(unreadRow('u-1d') === true, 'the day-old unread article survives mark-read-older-than-two-days (published < 2 days ago)');
-  ok(unreadRow('u-10d') === false && unreadRow('u-40d') === false && unreadRow('u-55d') === false, 'the three old-published unread ones were cleared');
   console.log('publication clock: bulk mark-all-read, then from-a-day-ago, then from-a-week-ago');
   wU.document.querySelector('#btn-mark-all').dispatchEvent(new wU.MouseEvent('click', { bubbles: true }));
   await settle(30);
@@ -1425,7 +1375,7 @@ console.log('mark-as-unread: TWO clocks — publication window AND reading age')
   ok(Number(wU.document.querySelector('#badge-all-items').textContent) === 3, 'badge: 3 restored');
   domU.window.close();
 }
-console.log('recently-read scope: both clocks inside the 7-day view');
+console.log('recently-read scope: the publication window inside the 7-day view');
 {
   const D = 864e5;
   const nowV = Date.now();
@@ -1467,43 +1417,24 @@ console.log('recently-read scope: both clocks inside the 7-day view');
   ok(wV.document.querySelectorAll('#list .row').length === 3, 'the view lists exactly the reads from the last 7 days');
   wV.document.querySelector('#btn-mark-all-split').dispatchEvent(new wV.MouseEvent('click', { bubbles: true }));
   await settle(20);
-  const hiddenRA7 = wV.document.querySelector('#mark-menu [data-mark="unread"][data-read-age="7"]').classList.contains('hidden');
-  const hiddenRA31 = wV.document.querySelector('#mark-menu [data-mark="unread"][data-read-age="31"]').classList.contains('hidden');
-  const shownRA1 = !wV.document.querySelector('#mark-menu [data-mark="unread"][data-read-age="1"]').classList.contains('hidden');
-  const shownRA2 = !wV.document.querySelector('#mark-menu [data-mark="unread"][data-read-age="2"]').classList.contains('hidden');
   const pubPresetsLive = [...wV.document.querySelectorAll('#mark-menu [data-mark="unread"][data-older]')].every((b) => !b.classList.contains('hidden'));
   const readPresetsLive = [...wV.document.querySelectorAll('#mark-menu [data-mark="read"][data-older]')].every((b) => !b.classList.contains('hidden'));
-  ok(hiddenRA7 && hiddenRA31, 'reading-time week/month presets hide in the Recently read view (dead: the view caps at 7 days of reads)');
-  ok(shownRA1 && shownRA2, 'reading-time day/two-day presets stay (reads 1–7 days old exist here)');
   ok(pubPresetsLive, 'publication presets stay live in the Recently read view (a listed read can be any published age)');
   ok(readPresetsLive, 'the read group keeps its presets (publication age, unbounded by the view)');
   wV.document.querySelector('#mark-menu [data-mark="unread"][data-older="1"]').dispatchEvent(new wV.MouseEvent('click', { bubbles: true }));
   await settle(300);
-  ok(wV.document.querySelector('#toast-text').textContent.includes('Marked 1 article from a day ago as unread'), 'publication clock inside the view: only v-b (0.98 d) restores, v-a (2 d) and v-c (20 d) do not');
+  ok(wV.document.querySelector('#toast-text').textContent.includes('Marked 1 article from a day ago as unread'), 'publication window inside the view: only v-b (0.98 d) restores, v-a (2 d) and v-c (20 d) do not');
   ok(wV.document.querySelectorAll('#list .row').length === 2, 'the un-read article left the Recently read view');
   const rowA = wV.document.querySelector('#list .row[data-id="v-a"]');
   const rowC = wV.document.querySelector('#list .row[data-id="v-c"]');
   ok(!!rowA && !rowA.classList.contains('unread') && !!rowC && !rowC.classList.contains('unread'), 'the two- and twenty-day-published reads stay read');
-  wV.document.querySelector('#btn-mark-all-split').dispatchEvent(new wV.MouseEvent('click', { bubbles: true }));
-  await settle(20);
-  wV.document.querySelector('#mark-menu [data-mark="unread"][data-read-age="1"]').dispatchEvent(new wV.MouseEvent('click', { bubbles: true }));
-  await settle(300);
-  ok(wV.document.querySelector('#toast-text').textContent.includes('Marked 1 article you read more than a day ago as unread'), 'reading clock inside the view: v-c (read six and a half days ago) restores');
-  ok(wV.document.querySelectorAll('#list .row').length === 1, 'only the twelve-hour-old read remains in the view');
   domV.window.close();
 }
-console.log('an explicit mark-as-unread is never reverted by the pending delayed mark-read timer');
+console.log('read ⇄ unread toggles on the open article are immediate and final');
 {
   const domW = new JSDOM(html, { url: 'https://example.test/', runScripts: 'outside-only', pretendToBeVisual: true });
   const wW = domW.window;
-  const cfgW = { ...config, settings: { ...config.settings, markReadOnOpen: true, markReadAfterSeconds: 0.4 } };
-  wW.fetch = async (url) => {
-    const p = String(url).split('?')[0];
-    if (p === 'config.json') return { ok: true, status: 200, json: async () => structuredClone(cfgW) };
-    if (p === 'data/index.json') return { ok: true, status: 200, json: async () => structuredClone(index) };
-    if (p === 'data/all-feeds.json') return { ok: true, status: 200, json: async () => structuredClone(allFeeds) };
-    return { ok: false, status: 404, statusText: 'Not Found', json: async () => { throw new Error('404'); } };
-  };
+  wW.fetch = window.fetch;
   wW.eval(appSrc);
   await settle(1200);
   const badgeW = () => Number(wW.document.querySelector('#badge-all-items').textContent);
@@ -1512,15 +1443,13 @@ console.log('an explicit mark-as-unread is never reverted by the pending delayed
   const idW = rowW.dataset.id;
   rowW.dispatchEvent(new wW.MouseEvent('click', { bubbles: true }));
   await settle(80);
-  wW.document.querySelector('#reader-slot [data-act="toggle-read"]').dispatchEvent(new wW.MouseEvent('click', { bubbles: true }));
-  await settle(80);
-  ok(badgeW() === beforeW - 1, 'manual toggle marks the open article read before the delay fires');
+  ok(badgeW() === beforeW - 1, 'opening the article marks it read on the spot');
   wW.document.querySelector('#reader-slot [data-act="toggle-read"]').dispatchEvent(new wW.MouseEvent('click', { bubbles: true }));
   await settle(80);
   ok(badgeW() === beforeW, 'explicit mark-as-unread on the open article lands');
   await settle(900);
-  ok(badgeW() === beforeW, 'the pending delayed mark-read timer no longer reverts the explicit unread');
-  ok(!!wW.document.querySelector(`#list .row[data-id="${idW}"]`)?.classList.contains('unread'), 'the row still shows unread after the timer window passed');
+  ok(badgeW() === beforeW, 'the explicit unread sticks — nothing delayed can revert it');
+  ok(!!wW.document.querySelector(`#list .row[data-id="${idW}"]`)?.classList.contains('unread'), 'the row still shows unread');
   wW.document.querySelector('#btn-mark-all').dispatchEvent(new wW.MouseEvent('click', { bubbles: true }));
   await settle(30);
   wW.document.querySelector('#confirm-yes').dispatchEvent(new wW.MouseEvent('click', { bubbles: true }));
@@ -1531,8 +1460,7 @@ console.log('an explicit mark-as-unread is never reverted by the pending delayed
   wW.document.querySelector('#confirm-yes').dispatchEvent(new wW.MouseEvent('click', { bubbles: true }));
   await settle(200);
   ok(badgeW() === beforeW, 'mark-all-as-unread restores everything');
-  const openRow = wW.document.querySelector(`#list .row[data-id="${idW}"]`);
-  openRow.dispatchEvent(new wW.MouseEvent('click', { bubbles: true }));
+  wW.document.querySelector(`#list .row[data-id="${idW}"]`).dispatchEvent(new wW.MouseEvent('click', { bubbles: true }));
   await settle(120);
   wW.document.querySelector('#btn-mark-all').dispatchEvent(new wW.MouseEvent('click', { bubbles: true }));
   await settle(30);
@@ -1541,8 +1469,8 @@ console.log('an explicit mark-as-unread is never reverted by the pending delayed
   wW.document.querySelector('#btn-mark-all').dispatchEvent(new wW.MouseEvent('click', { bubbles: true }));
   await settle(30);
   wW.document.querySelector('#confirm-yes').dispatchEvent(new wW.MouseEvent('click', { bubbles: true }));
-  await settle(900);
-  ok(badgeW() === beforeW, 'mass unread over an open article with a pending timer is not reverted either');
+  await settle(400);
+  ok(badgeW() === beforeW, 'mass unread over an open article is not reverted either');
   domW.window.close();
 }
 console.log('search: a trailing OR no longer matches everything; OR still unions groups');

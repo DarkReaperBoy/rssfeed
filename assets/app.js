@@ -27,7 +27,6 @@ const state = {
   kept: loadObj(LS_KEPT),    
   userUnread: loadObj(LS_USERUNREAD), 
   filters: [],
-  markTimers: new Map(),
   loading: new Map(), 
   settled: new Set(), 
   failed: new Set(),
@@ -35,33 +34,25 @@ const state = {
   lastPollAt: 0,
   bulkSel: new Set(),
   filterMarked: new Set(), 
+  byId: new Map(),
 };
 
-const CONFIG_KEYS = ['theme', 'density', 'markReadOnOpen', 'markReadAfterSeconds',
-  'titlesOnly', 'openOriginal', 'showFavicons', 'columnThumbs', 'scrollTracking',
+const CONFIG_KEYS = ['theme', 'density', 'showFavicons',
   'absoluteDates', 'fontSize', 'sideFavicons', 'compactSidebar', 'countersClickable',
   'titleCounter', 'showToday', 'updatedOnly', 'dimRead', 'sortAZ', 'autoScroll'];
-const USER_KEYS = ['layout', 'status', 'dateRange', 'sortDir', 'showFiltered', 'openFolders', 'sidebarW'];
-
-const SETTING_KEYS = ['markReadOnOpen', 'markReadAfterSeconds', 'openOriginal', 'titlesOnly', 'scrollTracking'];
+const USER_KEYS = ['status', 'sortDir', 'showFiltered', 'openFolders', 'sidebarW'];
 
 const savedUi = loadObj(LS_UI); 
 const ui = Object.assign({
-  theme: 'auto', layout: 'list', status: 'unread', dateRange: 'all',
+  theme: 'auto', status: 'unread',
   showFiltered: false, openFolders: {},
-  markReadOnOpen: true, markReadAfterSeconds: 0,
   density: 'comfort', sortDir: 'oldest',
-  updatedOnly: false, dimRead: false, sortAZ: false, scrollTracking: false,
-  titlesOnly: false, openOriginal: false, showFavicons: true, columnThumbs: true,
+  updatedOnly: false, dimRead: false, sortAZ: false,
+  showFavicons: true,
   bulkSelect: false, autoScroll: true, absoluteDates: false, fontSize: '14.5px',
   sideFavicons: true, compactSidebar: false, countersClickable: true, titleCounter: true, showToday: false,
-  settings: {}, 
 }, Object.fromEntries(USER_KEYS.filter((k) => k in savedUi).map((k) => [k, savedUi[k]])));
-if (savedUi.settings && typeof savedUi.settings === 'object') {
-  for (const k of SETTING_KEYS) if (k in savedUi.settings) ui.settings[k] = savedUi.settings[k];
-}
 
-if (ui.layout === 'compact') { ui.layout = 'list'; ui.density = 'compact'; }
 if (ui.status === 'read') ui.status = 'all';
 if (!savedUi.sortFlip) {
   if (ui.sortDir === 'newest') ui.sortDir = 'oldest';
@@ -81,10 +72,20 @@ function saveObj(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } cat
 function saveRead() { saveObj(LS_READ, state.read); }
 function saveKept() { saveObj(LS_KEPT, state.kept); }
 function saveUserUnread() { saveObj(LS_USERUNREAD, state.userUnread); }
-function saveUi() { saveObj(LS_UI, Object.assign(Object.fromEntries(USER_KEYS.map((k) => [k, ui[k]])), { settings: ui.settings, sortFlip: 1 })); }
+function saveUi() { saveObj(LS_UI, Object.assign(Object.fromEntries(USER_KEYS.map((k) => [k, ui[k]])), { sortFlip: 1 })); }
 
 const isRead = (a) => !!state.read[a.id];
 const isKept = (a) => !!state.kept[a.id];
+let byIdDirty = true;
+const markFeedsChanged = () => { byIdDirty = true; };
+const findArticle = (id) => {
+  if (byIdDirty) {
+    state.byId = new Map();
+    for (const arts of state.feeds.values()) for (const a of arts) state.byId.set(a.id, a);
+    byIdDirty = false;
+  }
+  return state.byId.get(id) || null;
+};
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const stripTags = (html) => String(html ?? '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
@@ -238,6 +239,7 @@ async function loadFeed(feedId, force = false) {
       const data = await fetchJson(`data/feeds/${encodeURIComponent(feedId)}.json`);
       applyFiltersToFeed(feedId, data.articles || []);
       state.feeds.set(feedId, data.articles || []);
+      markFeedsChanged();
       state.failed.delete(feedId);
     } catch {
       state.failed.add(feedId);
@@ -355,16 +357,6 @@ function scopeFilter(a) {
   return true;
 }
 const startOfToday = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); };
-function dateRangeFilter(a) {
-  const now = Date.now();
-  switch (ui.dateRange) {
-    case 'today': return a.date >= startOfToday();
-    case '3d': return a.date >= now - 3 * 864e5;
-    case 'week': return a.date >= now - 7 * 864e5;
-    case 'month': return a.date >= now - 30 * 864e5;
-    default: return true;
-  }
-}
 function folderCutoff(feedId) {
 
   if (!state.scope.startsWith('folder:')) return 0;
@@ -382,7 +374,6 @@ function computeVisible() {
     for (const a of state.feeds.get(feedId) || []) {
       if (cutoff && Date.now() - a.date > cutoff) continue;
       if (!searchGroups && !scopeFilter(a)) continue;
-      if (!dateRangeFilter(a)) continue;
       if (a._f.hidden && !ui.showFiltered) continue;
       const read = isRead(a);
       if (state.scope !== 'recently-read') {
@@ -401,7 +392,7 @@ function computeVisible() {
 
   if (state.expandedId && !out.some((a) => a.id === state.expandedId)) {
     const open = findArticle(state.expandedId);
-    if (open && !open._f?.hidden && !state.search && scopeFilter(open) && dateRangeFilter(open)) out.push(open);
+    if (open && !open._f?.hidden && !state.search && scopeFilter(open)) out.push(open);
 
   }
   state.visible = out;
@@ -502,11 +493,8 @@ function rowHtml(a) {
   const read = isRead(a);
   const kept = isKept(a);
   const f = a._f || {};
-  const stacked = ['cards', 'column', 'magazine'].includes(ui.layout);
-  const listLike = ui.layout === 'list';
-  const thumbWanted = (stacked || listLike) && (ui.layout !== 'column' || ui.columnThumbs);
-  const thumb = thumbWanted ? thumbFor(a) : null;
-  const isExpanded = state.expandedId === a.id && ui.layout !== 'expanded';
+  const thumb = thumbFor(a);
+  const isExpanded = state.expandedId === a.id;
   const timeHtml = ui.absoluteDates ? absTime(a.date) : relTime(a.date);
   const showAuthor = a.author && a.author.toLowerCase() !== String(feed.title || '').toLowerCase();
   return `<article class="row ${read ? '' : 'unread'} ${f.highlight ? 'highlight' : ''} ${isExpanded ? 'expanded' : ''} ${state.bulkSel.has(a.id) ? 'selected' : ''}" data-id="${esc(a.id)}">
@@ -519,7 +507,6 @@ function rowHtml(a) {
         ${f.hidden ? '<span class="author" title="Filtered">[filtered]</span>' : ''}
       </div>
       <div class="row-title">${esc(a.title)}</div>
-      ${!ui.titlesOnly && !listLike ? `<div class="row-snippet">${esc(a.summary || stripTags(a.content).slice(0, 220))}</div>` : ''}
       <span class="time" title="${esc(fullTime(a.date))}">${esc(timeHtml)}</span>
     </div>
     <div class="row-actions">
@@ -613,7 +600,7 @@ function updateScopeCount() {
 function renderList() {
   const list = $('#list');
   const visible = computeVisible();
-  list.className = `view-${ui.layout}${ui.layout === 'list' ? ` density-${ui.density}` : ''}${ui.showFavicons ? '' : ' no-favicons'}`;
+  list.className = `view-list density-${ui.density}${ui.showFavicons ? '' : ' no-favicons'}`;
   document.body.classList.toggle('bulk-mode', !!ui.bulkSelect);
   updateBulkBar();
   if (state.expandedId && !visible.some((a) => a.id === state.expandedId)) {
@@ -632,7 +619,6 @@ function renderList() {
   if (xi >= renderedCount) renderUpTo(xi + 1);
   list.scrollTop = keepScroll;
   renderReaderPane(visible);
-  setupScrollTracking();
   updateScopeCount();
   updateTitleCounter();
   syncMarkButtons(); 
@@ -642,22 +628,16 @@ function renderList() {
 const LIST_CHUNK = 150;
 let renderedCount = 0; 
 let listAppendQueued = false;
-function buildRowHtml(a) {
-  let row = rowHtml(a);
-  if (ui.layout === 'expanded') row = row.replace('</article>', `<div class="row-body-inline">${articleBody(a)}</div></article>`);
-  return row;
-}
 function rowsHtml(from, toExclusive) {
   let out = '';
   const visible = state.visible;
-  for (let i = from; i < toExclusive && i < visible.length; i++) out += buildRowHtml(visible[i]);
+  for (let i = from; i < toExclusive && i < visible.length; i++) out += rowHtml(visible[i]);
   return out;
 }
 function renderListHead() {
   const list = $('#list');
   renderedCount = Math.min(state.visible.length, LIST_CHUNK);
   list.innerHTML = rowsHtml(0, renderedCount) + (renderedCount < state.visible.length ? '<div id="list-tail" aria-hidden="true"></div>' : '');
-  sanitizeListBodies(0);
 }
 function appendListChunk() {
   const list = $('#list');
@@ -672,9 +652,7 @@ function appendListChunk() {
   }
   tail.insertAdjacentHTML('beforebegin', rowsHtml(from, to));
   renderedCount = to;
-  sanitizeListBodies(from);
   if (renderedCount >= state.visible.length) tail.remove(); 
-  setupScrollTracking(); 
 }
 function renderUpTo(indexInclusive) { while (renderedCount < indexInclusive && renderedCount < state.visible.length) appendListChunk(); }
 function maybeAppendListChunk() {
@@ -684,15 +662,6 @@ function maybeAppendListChunk() {
   let guard = 0;
   while (renderedCount < state.visible.length && guard++ < 8
     && list.scrollTop + list.clientHeight >= list.scrollHeight - 1600) appendListChunk();
-}
-
-function sanitizeListBodies(fromRowIdx) {
-  if (ui.layout !== 'expanded') return;
-  const rows = $$('#list .row');
-  for (let i = fromRowIdx; i < rows.length; i++) {
-    const el = rows[i].querySelector('.row-body-inline');
-    if (el) { sanitizeReaderDom(el); upgradeEmbeds(el, findArticle(rows[i].dataset.id)?.link); }
-  }
 }
 let readerKey = ''; 
 function syncReaderControls(slot, a) {
@@ -722,7 +691,7 @@ function renderReaderPane(visible) {
   if (!slot) return;
   const open = state.expandedId ? findArticle(state.expandedId) : null;
 
-  const show = !!(open && !open._f?.hidden && ui.layout !== 'expanded');
+  const show = !!(open && !open._f?.hidden);
   if (show) {
     const key = `${open.id}:${open.fetchedAt || 0}`;
     if (key !== readerKey) {
@@ -765,19 +734,9 @@ function renderEmpty(visible) {
   if (state.search) {
     el.innerHTML = `<h3>No matches</h3><p>Nothing matched <code>${esc(state.search)}</code> in any feed.<br>Operators: <code>feed:name</code> <code>title:word</code> <code>before:2026-01-01</code> <code>after:2026-01-01</code> <code>unread:true</code> <code>is:read</code></p>`;
   } else if (ui.status === 'unread') {
-    const caughtUp = !state.search && ui.dateRange === 'all' && allReadInScope();
-    if (caughtUp) {
-      el.innerHTML = `<h3>All caught up 🎉</h3><p>No unread articles here.</p><p class="empty-hint">Over-marked? The ✓ button and its ▾ menu now offer <em>Mark as unread</em> — everything, from a day or a week ago, or since an exact date.</p>`;
-    } else if (ui.dateRange !== 'all') {
-
-      const n = scopeUnreadCount(state.scope);
-      const label = { today: 'Today', '3d': 'the last 3 days', week: 'this week', month: 'this month' }[ui.dateRange] || 'this range';
-      el.innerHTML = `<h3>Nothing in this time range</h3><p>${n ? `${n} unread article${n === 1 ? '' : 's'} in ${esc(scopeTitle())} ${n === 1 ? 'is' : 'are'} older than ${label}. Widen the Date filter (⋯ menu) to see ${n === 1 ? 'it' : 'them'}.` : `No unread articles in ${esc(scopeTitle())} for this time range.`}</p>`;
-    } else {
-      el.innerHTML = `<h3>All caught up 🎉</h3><p>No unread articles here.</p>`;
-    }
+    el.innerHTML = `<h3>All caught up 🎉</h3><p>No unread articles here.</p><p class="empty-hint">Over-marked? The ✓ button and its ▾ menu now offer <em>Mark as unread</em> — everything, from a day or a week ago, or since an exact date.</p>`;
   } else {
-    el.innerHTML = `<h3>Nothing here</h3><p>No articles in this view${ui.dateRange !== 'all' ? ' for this time range' : ''}. New items arrive when the hourly fetch runs.</p>`;
+    el.innerHTML = `<h3>Nothing here</h3><p>No articles in this view. New items arrive when the hourly fetch runs.</p>`;
   }
 }
 
@@ -912,13 +871,8 @@ function patchTreeCounts() {
   if (all) all.textContent = total > 0 ? String(total) : '';
   if (td) td.textContent = todayN > 0 ? String(todayN) : '';
 }
-function cancelMarkTimer(id) {
-  clearTimeout(state.markTimers.get(id));
-  state.markTimers.delete(id);
-}
 function markRead(id, on = true) {
   const a = findArticle(id);
-  cancelMarkTimer(id);
   if (!on) {
     delete state.read[id];
 
@@ -938,24 +892,6 @@ function markRead(id, on = true) {
     if (slot && state.expandedId === id) { const open = findArticle(id); if (open) syncReaderControls(slot, open); }
   } else renderList();
 }
-function findArticle(id) {
-  for (const arts of state.feeds.values()) { const a = arts.find((x) => x.id === id); if (a) return a; }
-  return null;
-}
-function scheduleMarkRead(a) {
-  cancelMarkTimer(a.id);
-  const delay = (Number(ui.markReadAfterSeconds) || 0) * 1000;
-
-  if (!ui.markReadOnOpen && delay <= 0) return;
-  const run = () => {
-    state.markTimers.delete(a.id);
-
-    if (delay > 0 && state.expandedId !== a.id && !ui.openOriginal) return; 
-    if (!isRead(a) && !isKept(a) && !a._f?.keepUnread) markRead(a.id, true);
-  };
-  if (delay <= 0) run();
-  else state.markTimers.set(a.id, setTimeout(run, delay));
-}
 function collectScopeIds(scope, cutoff = 0) {
 
   if (scope === 'recently-read') return []; 
@@ -974,9 +910,8 @@ function collectScopeIds(scope, cutoff = 0) {
 
 const OLDER_LABELS = { 1: 'a day', 2: 'two days', 7: 'a week', 31: 'a month' };
 const cutoffFrom = (olderDays = 0, beforeTs = 0) => (beforeTs > 0 ? beforeTs : olderDays > 0 ? Date.now() - olderDays * 864e5 : 0);
-function describeCutoff(olderDays = 0, beforeTs = 0, clock = 'pub', forUnread = false) {
+function describeCutoff(olderDays = 0, beforeTs = 0, forUnread = false) {
   const label = OLDER_LABELS[olderDays] || (olderDays > 0 ? `${olderDays} days` : '');
-  if (clock === 'read') return olderDays > 0 ? ` you read more than ${label} ago` : '';
   if (beforeTs > 0) return ` ${forUnread ? 'since' : 'before'} ${new Date(beforeTs).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`;
   return olderDays > 0 ? (forUnread ? ` from ${label} ago` : ` older than ${label}`) : '';
 }
@@ -1000,13 +935,6 @@ function viewHiddenExtra(ids) {
   if (!ids.length) return null;
   const vis = new Set(state.visible.map((a) => a.id));
   if (ids.some((id) => vis.has(id))) return null;
-  if (ui.dateRange !== 'all') {
-    return {
-      note: ' — hidden by the date filter',
-      label: 'Show all',
-      cb: () => { ui.dateRange = 'all'; saveUi(); syncControls(); renderList(); },
-    };
-  }
   if (state.search) {
     return { note: ' — hidden by the search', label: 'Clear search', cb: () => closeSearchFn() };
   }
@@ -1074,7 +1002,7 @@ function allReadInScope() {
   if (ids.some((id) => state.failed.has(id))) return false;
   return scopeUnreadCount(state.scope) === 0;
 }
-function collectScopeReadIds(scope, cutoff = 0, clock = 'pub') {
+function collectScopeReadIds(scope, cutoff = 0) {
   const ids = [];
 
   if (scope === 'recently-read') {
@@ -1083,8 +1011,7 @@ function collectScopeReadIds(scope, cutoff = 0, clock = 'pub') {
         if (!isRead(a) || a._f?.hidden) continue;
         const ts = state.read[a.id] || 0;
         if (ts <= 0 || Date.now() - ts >= RECENTLY_READ_WINDOW) continue;
-        if (!dateRangeFilter(a)) continue;
-        if (cutoff && (clock === 'read' ? ts >= cutoff : a.date < cutoff)) continue;
+        if (cutoff && a.date < cutoff) continue;
         ids.push(a.id);
       }
     }
@@ -1094,23 +1021,22 @@ function collectScopeReadIds(scope, cutoff = 0, clock = 'pub') {
     for (const a of state.feeds.get(feedId) || []) {
       if (!isRead(a) || a._f?.hidden) continue; 
       if (scope === 'today' && a.date < startOfToday()) continue;
-      if (cutoff && (clock === 'read' ? (state.read[a.id] || 0) >= cutoff : a.date < cutoff)) continue;
+      if (cutoff && a.date < cutoff) continue;
       ids.push(a.id);
     }
   }
   return ids;
 }
-function markScopeUnread(scope, olderDays = 0, beforeTs = 0, clock = 'pub') {
-  const what = describeCutoff(olderDays, beforeTs, clock, true);
+function markScopeUnread(scope, olderDays = 0, beforeTs = 0) {
+  const what = describeCutoff(olderDays, beforeTs, true);
   const cutoff = cutoffFrom(olderDays, beforeTs);
-  const ids = collectScopeReadIds(scope, cutoff, clock);
+  const ids = collectScopeReadIds(scope, cutoff);
   if (!ids.length) {
-    showToast(olderDays || beforeTs ? `${clock === 'read' ? 'No articles' : 'No read articles'}${what} here${boundaryHint(cutoff)}` : 'Nothing to restore — no read articles here');
+    showToast(olderDays || beforeTs ? `No read articles${what} here${boundaryHint(cutoff)}` : 'Nothing to restore — no read articles here');
     return;
   }
   const snapshot = ids.map((id) => ({ id, ts: state.read[id], guard: state.userUnread[id] || 0 }));
   for (const id of ids) {
-    cancelMarkTimer(id);
     delete state.read[id];
 
     const a = findArticle(id);
@@ -1121,14 +1047,47 @@ function markScopeUnread(scope, olderDays = 0, beforeTs = 0, clock = 'pub') {
   saveRead(); renderTree(); renderList();
   const extra = viewHiddenExtra(ids);
   showToast(`Marked ${ids.length} article${ids.length === 1 ? '' : 's'}${what} as unread${extra?.note || ''}`, 'Undo', () => {
-    for (const { id, ts, guard } of snapshot) { cancelMarkTimer(id); if (ts) state.read[id] = ts; else delete state.read[id]; if (guard) state.userUnread[id] = guard; else delete state.userUnread[id]; }
+    for (const { id, ts, guard } of snapshot) { if (ts) state.read[id] = ts; else delete state.read[id]; if (guard) state.userUnread[id] = guard; else delete state.userUnread[id]; }
     saveRead(); saveUserUnread(); renderTree(); renderList();
   }, false, extra && extra.label ? extra : null);
 }
+function scopeArticleStats(scope) {
+  if (scope === 'recently-read') {
+    let read = 0;
+    for (const feedId of scopeFeedIds(scope)) {
+      for (const a of state.feeds.get(feedId) || []) {
+        if (a._f?.hidden) continue;
+        const ts = state.read[a.id] || 0;
+        if (ts > 0 && Date.now() - ts < RECENTLY_READ_WINDOW) read++;
+      }
+    }
+    return { unread: 0, read, total: read };
+  }
+  let unread = 0, read = 0, total = 0;
+  for (const feedId of scopeFeedIds(scope)) {
+    for (const a of state.feeds.get(feedId) || []) {
+      if (a._f?.hidden) continue;
+      if (scope === 'today' && a.date < startOfToday()) continue;
+      total++;
+      if (isRead(a)) read++; else unread++;
+    }
+  }
+  return { unread, read, total };
+}
 function syncMarkButtons(forceReset = false) {
-  const caughtUp = allReadInScope();
+  const wrap = $('.btn-group-markread');
   const btn = $('#btn-mark-all');
-  if (!btn) return;
+  if (!btn || !wrap) return;
+  const deadPresets = state.scope === 'today';
+  $$('#mark-menu .dropdown-item[data-older]').forEach((b) => b.classList.toggle('hidden', deadPresets));
+  const stats = scopeArticleStats(state.scope);
+  const caughtUp = stats.unread === 0 && stats.read > 0 && allReadInScope();
+  const show = stats.unread > 0 || caughtUp;
+  wrap.classList.toggle('hidden', !show);
+  if (!show) {
+    $('#mark-menu')?.classList.add('hidden');
+    return;
+  }
   btn.title = caughtUp ? 'Mark all as unread' : 'Mark all as read';
   btn.setAttribute('aria-label', btn.title);
   const use = btn.querySelector('use');
@@ -1150,14 +1109,6 @@ function syncMarkButtons(forceReset = false) {
       if (lbl) lbl.textContent = caughtUp ? 'Mark as read by age' : 'Mark as unread by time';
     }
   }
-
-  const scopeId = state.scope;
-  $$('#mark-menu .dropdown-item[data-older], #mark-menu .dropdown-item[data-read-age]').forEach((b) => {
-    const days = Number(b.dataset.older || b.dataset.readAge) || 0;
-    const dead = scopeId === 'today'
-      || (scopeId === 'recently-read' && !!b.dataset.readAge && days >= 7);
-    b.classList.toggle('hidden', dead);
-  });
 }
 
 function updateBulkBar() {
@@ -1178,7 +1129,6 @@ function bulkMark(on) {
       state.read[id] = Date.now();
       if (state.userUnread[id]) { delete state.userUnread[id]; guardsChanged = true; } 
     } else {
-      cancelMarkTimer(id);
       delete state.read[id];
       if (a?._f?.markRead && !state.userUnread[id]) { state.userUnread[id] = Date.now(); guardsChanged = true; } 
     }
@@ -1189,7 +1139,7 @@ function bulkMark(on) {
   if (guardsChanged) saveUserUnread();
   saveRead(); renderTree(); renderList();
   showToast(`${on ? 'Marked' : 'Unmarked'} ${n} article${n === 1 ? '' : 's'}${on ? ' as read' : ' as unread'}`, 'Undo', () => {
-    for (const { id, ts, guard } of snapshot) { cancelMarkTimer(id); if (ts) state.read[id] = ts; else delete state.read[id]; if (guard) state.userUnread[id] = guard; else delete state.userUnread[id]; }
+    for (const { id, ts, guard } of snapshot) { if (ts) state.read[id] = ts; else delete state.read[id]; if (guard) state.userUnread[id] = guard; else delete state.userUnread[id]; }
     saveRead(); saveUserUnread(); renderTree(); renderList();
   });
 }
@@ -1247,21 +1197,16 @@ function openArticle(id) {
   const a = findArticle(id);
   if (!a || a._f?.hidden) return false;
 
-  if (state.expandedId && state.expandedId !== id) {
-
-    cancelMarkTimer(state.expandedId);
-    state.keepVisible.add(state.expandedId);
-  } else if (state.expandedId) state.keepVisible.add(state.expandedId);
+  if (state.expandedId) state.keepVisible.add(state.expandedId);
   state.expandedId = id;
   renderList();
   listScrollTo(id);
   if (ui.autoScroll) { const ap = $('#article_pane'); if (ap) ap.scrollTop = 0; }
-  scheduleMarkRead(a);
+  if (!isRead(a) && !isKept(a) && !a._f?.keepUnread) markRead(a.id, true);
   return true;
 }
 function closeArticle(keep = true) {
   if (!state.expandedId) return;
-  cancelMarkTimer(state.expandedId);
   if (keep) state.keepVisible.add(state.expandedId); 
   state.expandedId = null;
   renderList();
@@ -1342,14 +1287,6 @@ function onListClick(e) {
     const chk = rowEl.querySelector('.row-check');
     if (chk) chk.checked = state.bulkSel.has(id);
     updateBulkBar();
-    return;
-  }
-  if (ui.openOriginal) { 
-    const url = safeHref(a.link);
-    if (url !== '#') {
-      window.open(url, '_blank', 'noopener');
-      scheduleMarkRead(a);
-    }
     return;
   }
   if (state.expandedId === id) { closeViaHash(); return; } 
@@ -1472,12 +1409,6 @@ function bindEvents() {
     $('#header-menu').classList.add('hidden');
     syncMenuAria();
   });
-  $('#date-range').addEventListener('change', (e) => { ui.dateRange = e.target.value; state.keepVisible.clear(); saveUi(); renderList(); });
-  $('#layouts').addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-layout]');
-    if (!btn) return;
-    ui.layout = btn.dataset.layout; saveUi(); syncControls(); renderList();
-  });
   $('#btn-show-filtered').addEventListener('click', () => {
     ui.showFiltered = !ui.showFiltered; saveUi(); syncControls(); renderList();
   });
@@ -1536,7 +1467,7 @@ function bindEvents() {
     if (g) g.classList.toggle('hidden', !open);
   });
 
-  const applyMark = async (fn, olderDays, beforeTs, clock) => {
+  const applyMark = async (fn, olderDays, beforeTs) => {
     const load = ensureLoadedForScope(state.scope);
     const slow = setTimeout(() => showToast('Still loading this view — marking what has arrived so far', undefined, undefined, true), 1500);
     try {
@@ -1544,7 +1475,7 @@ function bindEvents() {
     } finally {
       clearTimeout(slow);
     }
-    fn(state.scope, olderDays, beforeTs, clock);
+    fn(state.scope, olderDays, beforeTs);
   };
   $('#mark-menu').addEventListener('click', (e) => {
     if (e.target.tagName === 'INPUT') return; 
@@ -1554,10 +1485,10 @@ function bindEvents() {
       if (inp) { inp.focus(); try { inp.showPicker?.(); } catch {} }
       return;
     }
-    const item = e.target.closest('[data-older], [data-read-age]');
+    const item = e.target.closest('[data-older]');
     if (!item) return;
     $('#mark-menu').classList.add('hidden');
-    applyMark(item.dataset.mark === 'unread' ? markScopeUnread : markScopeRead, Number(item.dataset.older || item.dataset.readAge) || 0, 0, item.dataset.readAge ? 'read' : 'pub');
+    applyMark(item.dataset.mark === 'unread' ? markScopeUnread : markScopeRead, Number(item.dataset.older) || 0, 0);
   });
   let datePickTimer = null; 
 
@@ -1577,23 +1508,6 @@ function bindEvents() {
     const item = e.target.closest('[data-sort]');
     if (!item) return;
     ui.sortDir = item.dataset.sort; saveUi(); syncControls(); renderList();
-  });
-  $('#menu-settings').addEventListener('click', () => {
-    $('#header-menu').classList.add('hidden');
-    syncMenuAria();
-    openSettingsModal();
-  });
-  $('#settings-close').addEventListener('click', closeSettingsModal);
-  $('#settings-modal').addEventListener('click', (e) => {
-    if (e.target === $('#settings-modal')) closeSettingsModal(); 
-  });
-  $('#set-mark-on-open').addEventListener('change', (e) => applySetting('markReadOnOpen', e.target.checked));
-  $('#set-scroll-track').addEventListener('change', (e) => applySetting('scrollTracking', e.target.checked));
-  $('#set-open-original').addEventListener('change', (e) => applySetting('openOriginal', e.target.checked));
-  $('#set-titles-only').addEventListener('change', (e) => applySetting('titlesOnly', e.target.checked));
-  $('#set-mark-after').addEventListener('change', (e) => {
-    const n = Math.min(3600, Math.max(0, Math.round(Number(e.target.value) || 0)));
-    applySetting('markReadAfterSeconds', n);
   });
 
   $('#search-open').addEventListener('click', openSearchFn);
@@ -1643,8 +1557,6 @@ function bindEvents() {
 
     const modal = $('#confirm-modal');
     if (modal && !modal.classList.contains('hidden')) { $('#confirm-no')?.click(); return; }
-    const settings = $('#settings-modal');
-    if (settings && !settings.classList.contains('hidden')) { closeSettingsModal(); return; }
     const menuOpen = !$('#header-menu')?.classList.contains('hidden') || !$('#mark-menu')?.classList.contains('hidden');
     const sidebarOpen = document.body.classList.contains('sidebar-open');
     $('#header-menu')?.classList.add('hidden');
@@ -1704,38 +1616,10 @@ function syncControls() {
   const status = state.scope === 'today' ? 'today' : state.scope === 'recently-read' ? 'recently-read' : ui.status;
   $$('#status-items [data-status]').forEach((c) => c.classList.toggle('on', c.dataset.status === status));
   $$('#sort-items [data-sort]').forEach((c) => c.classList.toggle('on', c.dataset.sort === (ui.sortDir === 'oldest' ? 'oldest' : 'newest')));
-  $$('#layouts [data-layout]').forEach((b) => b.classList.toggle('active', b.dataset.layout === ui.layout));
-  $('#date-range').value = ui.dateRange;
   $('#btn-show-filtered').classList.toggle('on', ui.showFiltered);
   $('#menu-select-mode').classList.toggle('on', !!ui.bulkSelect);
   document.documentElement.style.setProperty('--title-size', ui.fontSize || '14.5px');
   applySidebarMode();
-}
-
-let scrollObserver = null;
-function setupScrollTracking() {
-  if (scrollObserver) { scrollObserver.disconnect(); scrollObserver = null; }
-  if (!ui.scrollTracking || typeof IntersectionObserver === 'undefined') return;
-  let dirty = false;
-  scrollObserver = new IntersectionObserver((entries) => {
-    for (const en of entries) {
-      if (en.isIntersecting || en.boundingClientRect.top >= 0) continue;
-      const a = findArticle(en.target.dataset.id);
-      if (!a || isRead(a) || isKept(a) || a._f?.keepUnread || a._f?.hidden) continue;
-      state.read[a.id] = Date.now();
-
-      state.keepVisible.add(a.id);
-      en.target.classList.remove('unread');
-      dirty = true;
-    }
-    if (dirty) {
-      dirty = false;
-      saveRead();
-      patchTreeCounts();
-      updateScopeCount(); updateTitleCounter(); syncMarkButtons();
-    }
-  }, { threshold: 0 });
-  $$('#list .row').forEach((r) => scrollObserver.observe(r));
 }
 
 function syncMenuAria() {
@@ -1744,39 +1628,6 @@ function syncMenuAria() {
   $('#btn-mark-all-split')?.setAttribute('aria-expanded', String(!$('#mark-menu')?.classList.contains('hidden')));
 }
 
-function markHintText() {
-  const delay = Math.max(0, Number(ui.markReadAfterSeconds) || 0);
-  if (delay > 0) return `Articles are marked read ${delay} second${delay === 1 ? '' : 's'} after you open them — closing one before then keeps it unread.`;
-  if (ui.markReadOnOpen) return 'Articles are marked read the moment you open them.';
-  return 'Articles are only marked read when you mark them yourself.';
-}
-function syncSettingsModal() {
-  const on = $('#set-mark-on-open'), after = $('#set-mark-after');
-  const track = $('#set-scroll-track'), openOrig = $('#set-open-original'), titles = $('#set-titles-only');
-  if (on) on.checked = ui.markReadOnOpen !== false;
-  if (after) after.value = String(Math.max(0, Number(ui.markReadAfterSeconds) || 0));
-  if (track) track.checked = !!ui.scrollTracking;
-  if (openOrig) openOrig.checked = !!ui.openOriginal;
-  if (titles) titles.checked = !!ui.titlesOnly;
-  const hint = $('#set-mark-hint');
-  if (hint) hint.textContent = markHintText();
-}
-function applySetting(key, value) {
-  ui[key] = value;
-  ui.settings[key] = value;
-  saveUi();
-  if (key === 'scrollTracking') setupScrollTracking();
-  else if (key === 'titlesOnly') renderList();
-  syncSettingsModal();
-}
-function openSettingsModal() {
-  syncSettingsModal();
-  $('#settings-modal').classList.remove('hidden');
-  $('#set-mark-on-open')?.focus();
-}
-function closeSettingsModal() {
-  $('#settings-modal').classList.add('hidden');
-}
 function confirmDialog(title, text, onYes) {
   $('#confirm-title').textContent = title;
   $('#confirm-text').textContent = text;
@@ -1865,17 +1716,7 @@ function pruneReadState() {
     const ts = state.read[k];
     if (typeof ts === 'number' ? (ts >= Y2K && ts < cutoff) : !ts) { delete state.read[k]; dropped = true; }
   }
-  const ids = Object.keys(state.index.feeds);
-  if (ids.length && ids.every((id) => state.settled.has(id)) && ids.every((id) => state.index.feeds[id]?.status?.ok !== false)) {
-    const live = new Set();
-    for (const arts of state.feeds.values()) for (const a of arts) live.add(a.id);
-    if (live.size) {
-      for (const k of Object.keys(state.kept)) if (!live.has(k)) { delete state.kept[k]; dropped = true; }
-      for (const k of Object.keys(state.read)) if (!live.has(k)) { delete state.read[k]; dropped = true; }
-      for (const k of Object.keys(state.userUnread)) if (!live.has(k)) { delete state.userUnread[k]; dropped = true; }
-    }
-  }
-  if (dropped) { saveRead(); saveKept(); saveUserUnread(); }
+  if (dropped) saveRead();
 }
 async function loadConsolidatedIntoState() {
   try {
@@ -1906,6 +1747,7 @@ async function loadConsolidatedIntoState() {
       if (!state.feeds.has(id)) state.feeds.set(id, []); 
       state.settled.add(id);
     }
+    markFeedsChanged();
     const feedsMeta = { ...state.index.feeds };
     for (const [feedId, arts] of state.feeds.entries()) {
       const meta = feedsMeta[feedId];
@@ -1934,8 +1776,6 @@ async function boot() {
 
     for (const k of CONFIG_KEYS) if (k in s) ui[k] = s[k];
 
-    for (const k of SETTING_KEYS) if (k in ui.settings) ui[k] = ui.settings[k];
-    if (s.view && !localStorage.getItem(LS_UI)) ui.layout = s.view; 
     baseTitle = s.siteName || 'My RSSFeed';
     document.title = baseTitle;
     applyTheme(); 
