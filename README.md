@@ -53,7 +53,7 @@ That's it — your reader is live at `https://<you>.github.io/rssfeed/`.
 
 ```sh
 npm install
-npm run fetch      # fetch all feeds into data/ (needs Node 22+)
+npm run fetch      # fetch all feeds into data/ (needs Node 22.22+ or 24+)
 npm run serve      # serve the site at http://localhost:8080
 npm run test:ui    # 400+ browser-environment assertions (jsdom)
 npm run test:e2e   # fetcher end-to-end: id stability, conditional GET
