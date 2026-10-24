@@ -118,6 +118,37 @@ Then serve and walk the "Mark operations" section of `docs/GUI-CHECKLIST.md` —
 
 ---
 
+## Post-hardening UI change #2 — zero-maintenance feeds, info card, minimal menu, resizable panes
+
+User-driven change after the mark-menu redesign: config entries should need **only a URL and a folder** (id/title/site derived by the fetcher), every feed deserves an **information card** beside its title, the ⋯ menu sheds three dead weights (**Today**, **Recently read**, **Multiple select** — code and all), the **list⇄article divider** becomes draggable, and the keep-unread icon moves off the broken eye-off path to clean bookmark glyphs. Filters get an explicit working-verification pass (including the private-browsing / fresh-profile case).
+
+| Commit | Change | Verify |
+|---|---|---|
+| (this) | **Backend derives what the config omits.** `id` is no longer required: it is derived stably from the URL (`yt-<channel id>` for YouTube feeds, `4chan-<board>` for boards, `hackernews` for HN, host+path slug otherwise; collisions get `-2` suffixes; an explicit config id always wins). `title` falls back to the feed's own `<title>`, `site` to the channel link, and the channel `<image>` is captured for the info card — each only when the config doesn't set it. `index.json` entries gain `xml` (raw feed URL), `origTitle` (the source's self-title, present only when the config renamed the feed), and `image`. | `npm run test:e2e` → runs 4–5: URL-derived data filename, title/site/xml from the feed, `origTitle` under rename, image capture, no trace of old ids |
+| (this) | **Feed-id changes are read-state safe.** Article ids are guid-keyed `stableId()` hashes with no feed-id component, so a config that drops explicit ids swaps feed files without touching article ids — pinned by e2e ("article ids survive the feed-id change"). Old data files for ids the config no longer names are wiped, and a directory sweep also removes orphan files with no config *and* no index entry (crashed-run leftovers). | `npm run test:e2e` → run 5: removed feed's file deleted, ghost file swept, index and all-feeds clean |
+| (this) | **`config.json` minimized.** All 60 feed entries stripped to `{url, folder}` (HN keeps `type`+caps, 4chan keeps `board`+`minReplies`); display names now come from the sources themselves. New feed added to **Tech News**: `https://www.youtube.com/feeds/videos.xml?channel_id=UCgKePkWtPuF36bJy0n2cEMQ` (Jadi Mirmirani — the channel id as first pasted was 27 characters and 404s; the valid 24-char id sharing its 21-char prefix resolves to this channel). | `node -e "console.log(require('./config.json').feeds.length)"` → 61; first CI run re-keys data files under `yt-*` ids |
+| (this) | **Feed information card.** A ⓘ button beside `#scope-title` (feed scopes only) opens a centered modal: pfp (feed image, else favicon/letter tile), name, "N articles · M unread", rows for **Original title** (only under a rename), **Website**, **XML address**, **Folder**, **Last post** (relative age or "Never"), **Last crawled** ("Success · age" / "Failed — error · age (last success …)" / "Disabled"), and a status dot. Closes via ✕, backdrop, or Esc; all links `target=_blank rel="noopener noreferrer"`. | `npm run test:ui` → "feed information modal" + "Last post reads Never" sections |
+| (this) | **⋯ menu minimalism.** Today, Recently read, and Multiple select are gone — features *and* code: the two scopes (`scopeFilter`, the 7-day read window, all today/recently-read branches in the collectors/stats/sort/mark logic), the sidebar Today row, bulk-select mode (checkboxes, `#bulk-bar`, `bulkMark`, `state.bulkSel`), and the `#i-today`/`#i-bulk`/`#i-eyeoff` symbols. Remaining order: All articles, Unread, Show filtered-out, Refresh, Sort (Newest/Oldest), Reset read state. The `showToday` config key is dead and removed. | `npm run test:ui` → "header menus: minimal and reordered" section (structure + order pinned); `rg 'bulkSel\|recently-read\|pdinner_today\|i-eyeoff' assets/ index.html` → no hits |
+| (this) | **Resizable list⇄article divider.** A 7px drag handle sits between `#list_pane` and `#article_pane` (`#reader_resizer`): pointer-drag sets `--list-w` (px) and lifts the 940px article cap (`--article-cap: none`), clamped to a 260px list minimum and a 320px article minimum (pane width measured once at drag start — no per-move layout reads). Persists in `ui.listW`, restores on boot (re-clamped to the viewport), double-click resets to the default 44/56 split, hidden below 1120px where the panes stack. | `npm run test:ui` → "resizable divider" section; browser walk in this entry's verification notes |
+| (this) | **Keep-unread icon → bookmark glyphs.** The eye/eye-off pair (whose eye-off path rendered broken on some systems) is replaced by outline (`#i-bookmark`) / filled (`#i-bookmark-on`) bookmarks; aria-pressed and titles unchanged, `s` shortcut unchanged. `#i-eye` stays for "Show filtered-out articles". | `npm run test:ui` → "a kept article shows the FILLED bookmark glyph" |
+| (this) | **Filters verified working — including the private-browsing case.** All four client-side actions pinned from a cold, empty profile (equivalent to a private window, since filters ship in `config.json` and apply before any state exists): hide (excluded rows vanish), highlight (only matches tint), markRead (auto-read at load), and **keepUnread — previously untested — guards its matches against both auto-marking and mark-on-open**. Per-feed fetch-time word filters were already pinned server-side. | `npm run test:ui` → "filter actions: keepUnread guards its matches (verified from a cold empty profile…)" + boot filter pins |
+
+**Perf (jsdom, 55 feeds / 4090 articles / 1390-article feed):** info-modal open+close 3.3 ms mean (p95 3.6 ms — a one-off click action); divider drag 0.021 ms per pointermove (a 300-move sweep ≈ 6 ms total, <0.3% of a 60fps frame budget); no layout reads inside the drag loop. All Phase-4 hot paths untouched (row click, j/k, mark preview).
+
+**Behavior notes (intentional trade-offs):**
+- Feed **titles now follow the source**. If a channel renames itself, the sidebar follows on the next fetch; old `#feed/<old-title>` deep links self-clear with the standard toast (case/slug-forgiving matching still applies). A config `title` remains a hard override and enables the "Original title" row in the info card.
+- Dropping the explicit ids from `config.json` re-keys every data file once (old files wiped, new `yt-*` files built). Read state and `#article/<id>` deep links survive untouched because article ids are guid-keyed; `#feed/<old-custom-title>` links follow the title rule above.
+- Running **several Hacker News feeds** with different caps now requires explicit `id`s to tell them apart (single-HN setups derive `hackernews`).
+- The mark menu's ▾ split button is now available in **every** scope (the Today scope that used to hide it no longer exists).
+
+**Verify the whole change:**
+```sh
+npm test
+```
+Then serve any `data/` with `npm run serve` and walk the "Feed information card", "Mark operations", and divider items in `docs/GUI-CHECKLIST.md` — click a feed's ⓘ, drag the divider both ways, double-click it, reload, and confirm the split survives.
+
+---
+
 ## How to verify the whole thing in one command
 
 ```sh

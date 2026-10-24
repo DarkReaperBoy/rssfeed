@@ -18,11 +18,13 @@ config.json ──► GitHub Action (every 15 min) ──► data/*.json on the 
 
 ## Features
 
-- **Folders and feeds** — organize sources into folders; unread badges per feed, folder, and everywhere.
-- **Solid read/unread** — opening an article marks it read; the row tick, keyboard shortcut, and bulk select toggle it back. Bulk "mark as read" / "mark as unread by time window" work per folder, per feed, or globally, with Undo.
+- **Folders and feeds** — organize sources into folders; unread badges per feed, folder, and everywhere. Click the ⓘ beside a feed's title for its card: website, raw feed URL, folder, last post, last crawl, and counts.
+- **Zero-maintenance feed entries** — most feeds only need their URL and a folder; the fetcher derives the id and pulls the title, site link, and image from the feed itself. Everything is still overridable in `config.json`.
+- **Solid read/unread** — opening an article marks it read; the row tick and keyboard shortcuts flip it back. "Mark as read" / "Mark as unread" work per folder, per feed, or globally — everything, or articles from the last 1–30 days — with Undo.
 - **Filters** — global rules that hide, highlight, auto-mark-read, or keep-unread matching articles, scoped to specific feeds or folders, matching on title, content, author, or link with plain words or regex.
 - **Full text extraction** — optionally fetch and store the article's own text instead of the feed's teaser.
 - **Beyond RSS** — YouTube channel feeds (Shorts dropped by default), Hacker News by points/comments, and 4chan boards by reply count.
+- **Resizable reading layout** — drag the divider between the list and the article to suit your screen (double-click resets it); the sidebar resizes too.
 - **Shareable links** — every view has a URL (see below).
 - **Keyboard shortcuts** — `j`/`k` to move through articles, `m` to toggle read, `o`/`v` to open the original, `s` to keep unread, `/` to search, `Esc` to dismiss.
 - **Dark mode** — auto, light, or dark; respects the system preference by default.
@@ -55,8 +57,8 @@ That's it — your reader is live at `https://<you>.github.io/rssfeed/`.
 npm install
 npm run fetch      # fetch all feeds into data/ (needs Node 22.22+ or 24+)
 npm run serve      # serve the site at http://localhost:8080
-npm run test:ui    # 400+ browser-environment assertions (jsdom)
-npm run test:e2e   # fetcher end-to-end: id stability, conditional GET
+npm run test:ui    # 430+ browser-environment assertions (jsdom)
+npm run test:e2e   # fetcher end-to-end: id stability, conditional GET, minimal-config derivation, purge
 ```
 
 `data/` is generated output — it is committed by CI, not by you.

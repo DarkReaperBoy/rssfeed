@@ -32,15 +32,14 @@ const state = {
   failed: new Set(),
   refreshTimer: null,
   lastPollAt: 0,
-  bulkSel: new Set(),
   filterMarked: new Set(), 
   byId: new Map(),
 };
 
 const CONFIG_KEYS = ['theme', 'density', 'showFavicons',
   'absoluteDates', 'fontSize', 'sideFavicons', 'compactSidebar', 'countersClickable',
-  'titleCounter', 'showToday', 'updatedOnly', 'dimRead', 'sortAZ', 'autoScroll'];
-const USER_KEYS = ['status', 'sortDir', 'showFiltered', 'openFolders', 'sidebarW', 'markAgeDays'];
+  'titleCounter', 'updatedOnly', 'dimRead', 'sortAZ', 'autoScroll'];
+const USER_KEYS = ['status', 'sortDir', 'showFiltered', 'openFolders', 'sidebarW', 'markAgeDays', 'listW'];
 
 const savedUi = loadObj(LS_UI); 
 const ui = Object.assign({
@@ -49,8 +48,8 @@ const ui = Object.assign({
   density: 'comfort', sortDir: 'oldest', markAgeDays: 7,
   updatedOnly: false, dimRead: false, sortAZ: false,
   showFavicons: true,
-  bulkSelect: false, autoScroll: true, absoluteDates: false, fontSize: '14.5px',
-  sideFavicons: true, compactSidebar: false, countersClickable: true, titleCounter: true, showToday: false,
+  autoScroll: true, absoluteDates: false, fontSize: '14.5px',
+  sideFavicons: true, compactSidebar: false, countersClickable: true, titleCounter: true,
 }, Object.fromEntries(USER_KEYS.filter((k) => k in savedUi).map((k) => [k, savedUi[k]])));
 
 if (ui.status === 'read') ui.status = 'all';
@@ -291,7 +290,7 @@ function scopeFeedIds(scope) {
     const fid = scope.slice(7);
     return Object.keys(state.index?.feeds || {}).filter((id) => feedMeta(id).folders.includes(fid));
   }
-  if (scope === 'all' || scope === 'today') return Object.keys(state.index?.feeds || {});
+  if (scope === 'all') return Object.keys(state.index?.feeds || {});
   return feedIdsInScope();
 }
 async function loadAllFeeds(onChange) {
@@ -349,14 +348,6 @@ function searchGroupMatches(a, ops, terms) {
   return true;
 }
 
-const RECENTLY_READ_WINDOW = 7 * 864e5; 
-function scopeFilter(a) {
-  if (state.scope === 'today') return a.date >= startOfToday();
-
-  if (state.scope === 'recently-read') { const ts = state.read[a.id] || 0; return ts > 0 && Date.now() - ts < RECENTLY_READ_WINDOW; }
-  return true;
-}
-const startOfToday = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); };
 function folderCutoff(feedId) {
 
   if (!state.scope.startsWith('folder:')) return 0;
@@ -373,26 +364,17 @@ function computeVisible() {
     const cutoff = searchGroups ? 0 : folderCutoff(feedId);
     for (const a of state.feeds.get(feedId) || []) {
       if (cutoff && Date.now() - a.date > cutoff) continue;
-      if (!searchGroups && !scopeFilter(a)) continue;
       if (a._f.hidden && !ui.showFiltered) continue;
-      const read = isRead(a);
-      if (state.scope !== 'recently-read') {
-        if (ui.status === 'unread' && read && !state.keepVisible.has(a.id) && a.id !== state.expandedId) continue;
-      }
+      if (ui.status === 'unread' && isRead(a) && !state.keepVisible.has(a.id) && a.id !== state.expandedId) continue;
       if (searchGroups && !searchMatchesCompiled(a, searchGroups)) continue;
       out.push(a);
     }
   }
-  out.sort((x, y) => {
-    const dir = ui.sortDir === 'oldest' ? 1 : -1;
-    return state.scope === 'recently-read'
-      ? dir * ((state.read[x.id] || 0) - (state.read[y.id] || 0))
-      : dir * (x.date - y.date);
-  });
+  out.sort((x, y) => (ui.sortDir === 'oldest' ? 1 : -1) * (x.date - y.date));
 
   if (state.expandedId && !out.some((a) => a.id === state.expandedId)) {
     const open = findArticle(state.expandedId);
-    if (open && !open._f?.hidden && !state.search && scopeFilter(open)) out.push(open);
+    if (open && !open._f?.hidden && !state.search) out.push(open);
 
   }
   state.visible = out;
@@ -411,12 +393,11 @@ function renderTree() {
   if (ui.sortAZ) folders.sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id)); 
   const inFolder = new Set();
   let html = '';
-  let totalUnread = 0, todayN = 0; 
+  let totalUnread = 0; 
   for (const arts of state.feeds.values()) {
     for (const a of arts) {
       if (isRead(a) || a._f?.hidden) continue;
       totalUnread++;
-      if (a.date >= startOfToday()) todayN++;
     }
   }
 
@@ -461,8 +442,6 @@ function renderTree() {
   if (loose.length) html += loose.map(feedItem).join('');
   tree.innerHTML = html;
 
-  $('#pdinner_today').classList.toggle('hidden', !ui.showToday);
-  $('#badge-today').textContent = todayN > 0 ? String(todayN) : '';
   $('#badge-all-items').textContent = totalUnread > 0 ? String(totalUnread) : '';
 
   $('#subscriptions_fieldset').dataset.counters = ui.countersClickable ? '1' : '0';
@@ -472,8 +451,6 @@ function renderTree() {
 function scopeTitle() {
   const s = state.scope;
   if (s === 'all') return 'Newsfeed';
-  if (s === 'today') return 'Today';
-  if (s === 'recently-read') return 'Recently read';
   if (s.startsWith('feed:')) return feedTitle(s.slice(5));
   if (s.startsWith('folder:')) {
     const f = folderDefs().find((x) => x.id === s.slice(7));
@@ -499,8 +476,7 @@ function rowHtml(a) {
   const isExpanded = state.expandedId === a.id;
   const timeHtml = ui.absoluteDates ? absTime(a.date) : relTime(a.date);
   const showAuthor = a.author && a.author.toLowerCase() !== String(feed.title || '').toLowerCase();
-  return `<article class="row ${read ? '' : 'unread'} ${f.highlight ? 'highlight' : ''} ${isExpanded ? 'expanded' : ''} ${state.bulkSel.has(a.id) ? 'selected' : ''}" data-id="${esc(a.id)}">
-    ${ui.bulkSelect ? `<input type="checkbox" class="row-check" aria-label="Select article" ${state.bulkSel.has(a.id) ? 'checked' : ''} title="Select">` : ''}
+  return `<article class="row ${read ? '' : 'unread'} ${f.highlight ? 'highlight' : ''} ${isExpanded ? 'expanded' : ''}" data-id="${esc(a.id)}">
     ${thumb ? `<img class="row-thumb" loading="lazy" src="${esc(thumb)}" alt="">` : ''}
     <div class="row-main">
       <div class="row-meta">
@@ -513,7 +489,7 @@ function rowHtml(a) {
     </div>
     <div class="row-actions">
       <a class="icon-btn" href="${esc(safeHref(a.link))}" target="_blank" rel="noopener noreferrer" title="Open original in new tab" aria-label="Open original in new tab" data-act="open-original"><svg><use href="#i-external"/></svg></a>
-      <button class="icon-btn" data-act="keep" title="${kept ? 'Stop keeping unread' : 'Keep unread'}" aria-pressed="${kept}" aria-label="Keep unread"><svg><use href="#i-${kept ? 'eye' : 'eyeoff'}"/></svg></button>
+      <button class="icon-btn" data-act="keep" title="${kept ? 'Stop keeping unread' : 'Keep unread'}" aria-pressed="${kept}" aria-label="Keep unread"><svg><use href="#i-${kept ? 'bookmark-on' : 'bookmark'}"/></svg></button>
       <button class="icon-btn" data-act="toggle-read" title="${read ? 'Mark as unread' : 'Mark as read'}" aria-label="Toggle read"><svg><use href="#i-${read ? 'read' : 'unread'}"/></svg></button>
     </div>
   </article>`;
@@ -543,7 +519,7 @@ function readerHtml(a) {
   return `<div class="reader" data-id="${esc(a.id)}">
     <div class="reader-toolbar">
       <span class="spacer"></span>
-      <button class="icon-btn" data-act="keep" title="${kept ? 'Stop keeping unread' : 'Keep unread'}" aria-pressed="${kept}" aria-label="Keep unread"><svg><use href="#i-${kept ? 'eye' : 'eyeoff'}"/></svg></button>
+      <button class="icon-btn" data-act="keep" title="${kept ? 'Stop keeping unread' : 'Keep unread'}" aria-pressed="${kept}" aria-label="Keep unread"><svg><use href="#i-${kept ? 'bookmark-on' : 'bookmark'}"/></svg></button>
       <button class="icon-btn" data-act="toggle-read" title="${read ? 'Mark as unread' : 'Mark as read'}" aria-label="Toggle read"><svg><use href="#i-${read ? 'read' : 'unread'}"/></svg></button>
       <button class="icon-btn" data-act="prev" title="Previous article (k)" ${idx <= 0 ? 'disabled' : ''}><svg><use href="#i-prev"/></svg></button>
       <button class="icon-btn" data-act="next" title="Next article (j)" ${idx >= state.visible.length - 1 ? 'disabled' : ''}><svg><use href="#i-next"/></svg></button>
@@ -596,16 +572,13 @@ function readingTime(a) {
 function updateScopeCount() {
   const unread = state.visible.filter((a) => !isRead(a)).length;
   $('#scope-title').textContent = scopeTitle();
-  $('#scope-count').textContent = state.scope === 'recently-read'
-    ? `${state.visible.length} recently read`
-    : `${unread} unread`; 
+  $('#scope-info')?.classList.toggle('hidden', !state.scope.startsWith('feed:'));
+  $('#scope-count').textContent = `${unread} unread`; 
 }
 function renderList() {
   const list = $('#list');
   const visible = computeVisible();
   list.className = `view-list density-${ui.density}${ui.showFavicons ? '' : ' no-favicons'}`;
-  document.body.classList.toggle('bulk-mode', !!ui.bulkSelect);
-  updateBulkBar();
   if (state.expandedId && !visible.some((a) => a.id === state.expandedId)) {
     const open = findArticle(state.expandedId);
 
@@ -685,7 +658,7 @@ function syncReaderControls(slot, a) {
     k.title = kept ? 'Stop keeping unread' : 'Keep unread';
     k.setAttribute('aria-pressed', String(kept));
     const u = k.querySelector('use');
-    if (u) u.setAttribute('href', kept ? '#i-eye' : '#i-eyeoff');
+    if (u) u.setAttribute('href', kept ? '#i-bookmark-on' : '#i-bookmark');
   }
 }
 function renderReaderPane(visible) {
@@ -737,7 +710,7 @@ function renderEmpty(visible) {
   if (state.search) {
     el.innerHTML = `<h3>No matches</h3><p>Nothing matched <code>${esc(state.search)}</code> in any feed.<br>Operators: <code>feed:name</code> <code>title:word</code> <code>before:2026-01-01</code> <code>after:2026-01-01</code> <code>unread:true</code> <code>is:read</code></p>`;
   } else if (ui.status === 'unread') {
-    el.innerHTML = `<h3>All caught up 🎉</h3><p>No unread articles here.</p><p class="empty-hint">Over-marked? The ✓ button and its ▾ menu now offer <em>Mark as unread</em> — everything, from a day or a week ago, or since an exact date.</p>`;
+    el.innerHTML = `<h3>All caught up 🎉</h3><p>No unread articles here.</p><p class="empty-hint">Over-marked? The ✓ button and its ▾ menu offer <em>Mark as unread</em> — everything, or articles read within the last 1–30 days.</p>`;
   } else {
     el.innerHTML = `<h3>Nothing here</h3><p>No articles in this view. New items arrive when the hourly fetch runs.</p>`;
   }
@@ -835,7 +808,7 @@ function patchRow(id) {
     k.title = isKept(a) ? 'Stop keeping unread' : 'Keep unread';
     k.setAttribute('aria-pressed', String(isKept(a)));
     const u = k.querySelector('use');
-    if (u) u.setAttribute('href', isKept(a) ? '#i-eye' : '#i-eyeoff');
+    if (u) u.setAttribute('href', isKept(a) ? '#i-bookmark-on' : '#i-bookmark');
   }
   return true;
 }
@@ -864,17 +837,15 @@ function patchTreeCounts() {
     row.classList.toggle('unread', n > 0);
     row.classList.toggle('dimmed', !!ui.dimRead && n === 0);
   }
-  let total = 0, todayN = 0;
+  let total = 0;
   for (const arts of state.feeds.values()) {
     for (const a of arts) {
       if (isRead(a) || a._f?.hidden) continue;
       total++;
-      if (a.date >= startOfToday()) todayN++;
     }
   }
-  const all = $('#badge-all-items'), td = $('#badge-today');
+  const all = $('#badge-all-items');
   if (all) all.textContent = total > 0 ? String(total) : '';
-  if (td) td.textContent = todayN > 0 ? String(todayN) : '';
 }
 function markRead(id, on = true) {
   const a = findArticle(id);
@@ -899,13 +870,11 @@ function markRead(id, on = true) {
 }
 function collectScopeIds(scope, cutoff = 0) {
 
-  if (scope === 'recently-read') return []; 
   const feedIds = scopeFeedIds(scope);
   const ids = [];
   for (const feedId of feedIds) {
     for (const a of state.feeds.get(feedId) || []) {
       if (a._f?.hidden || isKept(a) || a._f?.keepUnread || isRead(a)) continue;
-      if (scope === 'today' && a.date < startOfToday()) continue;
       if (cutoff && a.date >= cutoff) continue;
       ids.push(a.id);
     }
@@ -987,12 +956,10 @@ function markAllAsReadInScope() {
 
 function scopeUnreadCount(scope) {
 
-  if (scope === 'recently-read') return 0; 
   let n = 0;
   for (const feedId of scopeFeedIds(scope)) {
     for (const a of state.feeds.get(feedId) || []) {
       if (isRead(a) || a._f?.hidden) continue;
-      if (scope === 'today' && a.date < startOfToday()) continue;
       n++;
     }
   }
@@ -1009,22 +976,9 @@ function allReadInScope() {
 function collectScopeReadIds(scope, cutoff = 0) {
   const ids = [];
 
-  if (scope === 'recently-read') {
-    for (const feedId of scopeFeedIds(scope)) {
-      for (const a of state.feeds.get(feedId) || []) {
-        if (!isRead(a) || a._f?.hidden) continue;
-        const ts = state.read[a.id] || 0;
-        if (ts <= 0 || Date.now() - ts >= RECENTLY_READ_WINDOW) continue;
-        if (cutoff && a.date < cutoff) continue;
-        ids.push(a.id);
-      }
-    }
-    return ids;
-  }
   for (const feedId of scopeFeedIds(scope)) {
     for (const a of state.feeds.get(feedId) || []) {
       if (!isRead(a) || a._f?.hidden) continue; 
-      if (scope === 'today' && a.date < startOfToday()) continue;
       if (cutoff && a.date < cutoff) continue;
       ids.push(a.id);
     }
@@ -1056,22 +1010,11 @@ function markScopeUnread(scope, olderDays = 0) {
   }, false, extra && extra.label ? extra : null);
 }
 function scopeArticleStats(scope) {
-  if (scope === 'recently-read') {
-    let read = 0;
-    for (const feedId of scopeFeedIds(scope)) {
-      for (const a of state.feeds.get(feedId) || []) {
-        if (a._f?.hidden) continue;
-        const ts = state.read[a.id] || 0;
-        if (ts > 0 && Date.now() - ts < RECENTLY_READ_WINDOW) read++;
-      }
-    }
-    return { unread: 0, read, total: read };
-  }
+
   let unread = 0, read = 0, total = 0;
   for (const feedId of scopeFeedIds(scope)) {
     for (const a of state.feeds.get(feedId) || []) {
       if (a._f?.hidden) continue;
-      if (scope === 'today' && a.date < startOfToday()) continue;
       total++;
       if (isRead(a)) read++; else unread++;
     }
@@ -1136,12 +1079,7 @@ function syncMarkButtons(forceReset = false) {
   const use = btn.querySelector('use');
   if (use) use.setAttribute('href', caughtUp ? '#i-unread' : '#i-read');
   const split = $('#btn-mark-all-split');
-  const ageDead = state.scope === 'today';
-  if (split) {
-    split.classList.toggle('hidden', ageDead);
-    if (ageDead) $('#mark-menu')?.classList.add('hidden');
-    split.title = caughtUp ? 'Mark as unread — more options' : 'Mark as read — more options';
-  }
+  if (split) split.title = caughtUp ? 'Mark as unread — more options' : 'Mark as read — more options';
   const menu = $('#mark-menu');
   if (!menu || menu.classList.contains('hidden')) return;
   if (forceReset) {
@@ -1155,39 +1093,6 @@ function syncMarkButtons(forceReset = false) {
     buildMarkAge(markAge.unread);
     updateAgeUi(Math.min(30, Math.max(1, Number($('#mark-age-slider')?.value) || 1)));
   }
-}
-
-function updateBulkBar() {
-  const bar = $('#bulk-bar');
-  if (!ui.bulkSelect || !state.bulkSel.size) { bar.classList.add('hidden'); return; }
-  bar.classList.remove('hidden');
-  $('#bulk-count').textContent = String(state.bulkSel.size);
-}
-function bulkMark(on) {
-  if (!state.bulkSel.size) return;
-  const ids = [...state.bulkSel];
-  const snapshot = ids.map((id) => ({ id, ts: state.read[id], guard: state.userUnread[id] || 0 }));
-  let n = 0, guardsChanged = false;
-  for (const id of ids) {
-    const a = findArticle(id); 
-    if (on && a && (isKept(a) || a._f?.keepUnread)) continue;
-    if (on) {
-      state.read[id] = Date.now();
-      if (state.userUnread[id]) { delete state.userUnread[id]; guardsChanged = true; } 
-    } else {
-      delete state.read[id];
-      if (a?._f?.markRead && !state.userUnread[id]) { state.userUnread[id] = Date.now(); guardsChanged = true; } 
-    }
-    n++;
-  }
-  state.bulkSel.clear();
-  state.keepVisible.clear();
-  if (guardsChanged) saveUserUnread();
-  saveRead(); renderTree(); renderList();
-  showToast(`${on ? 'Marked' : 'Unmarked'} ${n} article${n === 1 ? '' : 's'}${on ? ' as read' : ' as unread'}`, 'Undo', () => {
-    for (const { id, ts, guard } of snapshot) { if (ts) state.read[id] = ts; else delete state.read[id]; if (guard) state.userUnread[id] = guard; else delete state.userUnread[id]; }
-    saveRead(); saveUserUnread(); renderTree(); renderList();
-  });
 }
 
 let toastTimer = null;
@@ -1374,14 +1279,6 @@ function onListClick(e) {
   const a = findArticle(id);
   if (!a) return;
 
-  if (e.target.classList?.contains('row-check')) {
-    e.stopPropagation();
-    if (state.bulkSel.has(id)) state.bulkSel.delete(id); else state.bulkSel.add(id);
-    rowEl.classList.toggle('selected', state.bulkSel.has(id));
-    updateBulkBar();
-    return;
-  }
-
   const sel = window.getSelection?.();
   if (sel && String(sel).trim()) return;
   const actBtn = e.target.closest('[data-act]');
@@ -1389,14 +1286,6 @@ function onListClick(e) {
   if (actBtn) {
     e.stopPropagation();
     dispatchAct(actBtn.dataset.act, id);
-    return;
-  }
-  if (ui.bulkSelect) { 
-    if (state.bulkSel.has(id)) state.bulkSel.delete(id); else state.bulkSel.add(id);
-    rowEl.classList.toggle('selected', state.bulkSel.has(id));
-    const chk = rowEl.querySelector('.row-check');
-    if (chk) chk.checked = state.bulkSel.has(id);
-    updateBulkBar();
     return;
   }
   if (state.expandedId === id) { closeViaHash(); return; } 
@@ -1412,6 +1301,24 @@ function listScrollTo(id) {
 }
 
 function renderAll() { renderTree(); renderList(); }
+
+const LIST_MIN_W = 260, ARTICLE_MIN_W = 320;
+const paneAvail = () => {
+  const pane = $('#reader_pane');
+  const paneW = pane && pane.getBoundingClientRect ? pane.getBoundingClientRect().width : 0;
+  return paneW > 0 ? paneW : (window.innerWidth || 0);
+};
+const clampListW = (w, avail) => Math.min(Math.max(LIST_MIN_W, Math.round(w)), Math.max(LIST_MIN_W, Math.round(avail - ARTICLE_MIN_W)));
+const applyListW = (w) => {
+  const root = document.documentElement;
+  if (w > 0) {
+    root.style.setProperty('--list-w', `${w}px`);
+    root.style.setProperty('--article-cap', 'none');
+  } else {
+    root.style.removeProperty('--list-w');
+    root.style.removeProperty('--article-cap');
+  }
+};
 
 function bindEvents() {
   $('#list').addEventListener('click', onListClick);
@@ -1508,9 +1415,8 @@ function bindEvents() {
     const item = e.target.closest('[data-status]');
     if (!item) return;
     const v = item.dataset.status;
-    if (v === 'today') state.scope = 'today';
-    else if (v === 'recently-read') state.scope = 'recently-read';
-    else { ui.status = v; if (state.scope !== 'all' && !state.scope.startsWith('feed:') && !state.scope.startsWith('folder:')) state.scope = 'all'; }
+    ui.status = v === 'all' ? 'all' : 'unread';
+    if (state.scope !== 'all' && !state.scope.startsWith('feed:') && !state.scope.startsWith('folder:')) state.scope = 'all';
     clearHashArticle();
     state.expandedId = null;
     state.keepVisible.clear(); 
@@ -1520,9 +1426,6 @@ function bindEvents() {
   });
   $('#btn-show-filtered').addEventListener('click', () => {
     ui.showFiltered = !ui.showFiltered; saveUi(); syncControls(); renderList();
-  });
-  $('#menu-select-mode').addEventListener('click', () => {
-    ui.bulkSelect = !ui.bulkSelect; state.bulkSel.clear(); syncControls(); renderList(); 
   });
   $('#menu-refresh').addEventListener('click', () => { $('#header-menu').classList.add('hidden'); refresh(true); });
   $('#empty').addEventListener('click', (e) => {
@@ -1536,7 +1439,7 @@ function bindEvents() {
     syncMenuAria();
     confirmDialog('Reset read state', 'Forget all read and keep-unread state? Every article goes back to unread.', () => {
       state.read = Object.create(null); state.kept = Object.create(null); state.userUnread = Object.create(null);
-      state.keepVisible.clear(); state.bulkSel.clear();
+      state.keepVisible.clear();
       saveRead(); saveKept(); saveUserUnread(); renderTree(); renderList();
       showToast('Feed state reset — every article is unread again');
     });
@@ -1629,20 +1532,61 @@ function bindEvents() {
     });
   }
 
+  const readerResizer = $('#reader_resizer');
+  if (readerResizer) {
+    readerResizer.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      const startX = e.clientX;
+      const avail = paneAvail();
+      const lp = $('#list_pane');
+      const rectW = lp && lp.getBoundingClientRect ? lp.getBoundingClientRect().width : 0;
+      const startW = clampListW(ui.listW || Math.round(rectW || (window.innerWidth || 1024) * 0.44), avail);
+      let cur = startW;
+      const move = (ev) => {
+        cur = clampListW(startW + (ev.clientX - startX), avail);
+        applyListW(cur);
+      };
+      const up = () => {
+        document.removeEventListener('pointermove', move);
+        document.removeEventListener('pointerup', up);
+        document.removeEventListener('pointercancel', up);
+        document.body.classList.remove('reader-dragging');
+        if (cur !== ui.listW) { ui.listW = cur; saveUi(); }
+      };
+      document.body.classList.add('reader-dragging');
+      document.addEventListener('pointermove', move);
+      document.addEventListener('pointerup', up);
+      document.addEventListener('pointercancel', up);
+    });
+    readerResizer.addEventListener('dblclick', () => {
+      delete ui.listW;
+      applyListW(0);
+      saveUi();
+    });
+  }
+
+  $('#scope-info')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    openFeedModal();
+  });
+  $('#feed-modal-close')?.addEventListener('click', closeFeedModal);
+  $('#feed-modal')?.addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) closeFeedModal();
+  });
+
   $('#menu-toggle').addEventListener('click', () => {
     document.body.classList.toggle('sidebar-open');
     $('#scrim').classList.toggle('hidden', !document.body.classList.contains('sidebar-open'));
   });
   $('#scrim').addEventListener('click', () => { document.body.classList.remove('sidebar-open'); $('#scrim').classList.add('hidden'); });
 
-  $('#bulk-read').addEventListener('click', () => bulkMark(true));
-  $('#bulk-unread').addEventListener('click', () => bulkMark(false));
-  $('#bulk-clear').addEventListener('click', () => { state.bulkSel.clear(); renderList(); });
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
 
     const modal = $('#confirm-modal');
     if (modal && !modal.classList.contains('hidden')) { $('#confirm-no')?.click(); return; }
+    const feedModal = $('#feed-modal');
+    if (feedModal && !feedModal.classList.contains('hidden')) { closeFeedModal(); return; }
     const menuOpen = !$('#header-menu')?.classList.contains('hidden') || !$('#mark-menu')?.classList.contains('hidden');
     const sidebarOpen = document.body.classList.contains('sidebar-open');
     $('#header-menu')?.classList.add('hidden');
@@ -1699,11 +1643,9 @@ function closeSearchFn() {
   if (state.search) { state.search = ''; renderList(); } 
 }
 function syncControls() {
-  const status = state.scope === 'today' ? 'today' : state.scope === 'recently-read' ? 'recently-read' : ui.status;
-  $$('#status-items [data-status]').forEach((c) => c.classList.toggle('on', c.dataset.status === status));
+  $$('#status-items [data-status]').forEach((c) => c.classList.toggle('on', c.dataset.status === ui.status));
   $$('#sort-items [data-sort]').forEach((c) => c.classList.toggle('on', c.dataset.sort === (ui.sortDir === 'oldest' ? 'oldest' : 'newest')));
   $('#btn-show-filtered').classList.toggle('on', ui.showFiltered);
-  $('#menu-select-mode').classList.toggle('on', !!ui.bulkSelect);
   document.documentElement.style.setProperty('--title-size', ui.fontSize || '14.5px');
   applySidebarMode();
 }
@@ -1728,6 +1670,54 @@ function confirmDialog(title, text, onYes) {
   yes.onclick = () => { done(); onYes(); };
   no.onclick = done;
   yes.focus();
+}
+
+const ago = (ts) => (relTime(ts) === 'now' ? 'just now' : relTime(ts) + ' ago');
+function feedInfoHtml(feedId) {
+  const meta = feedMeta(feedId);
+  const arts = state.feeds.get(feedId) || [];
+  const unread = arts.reduce((n, a) => n + (isRead(a) || a._f?.hidden ? 0 : 1), 0);
+  const st = meta.status || {};
+  const folderNames = meta.folders.map((fid) => folderDefs().find((x) => x.id === fid)?.name || fid);
+  const lastPost = meta.newest ? ago(meta.newest) : 'Never';
+  const crawlTs = st.ok === false ? st.lastAttempt : (st.lastSuccess || st.lastAttempt);
+  const crawlState = st.ok === false
+    ? (st.disabled ? 'Disabled' : `Failed${st.error ? ` — ${st.error}` : ''}`)
+    : 'Success';
+  const crawl = `${crawlState} · ${crawlTs ? ago(crawlTs) : 'never'}${st.ok === false && st.lastSuccess ? ` (last success ${ago(st.lastSuccess)})` : ''}`;
+  const link = (u) => (/^https?:\/\//i.test(stripCtrl(String(u))) ? String(u) : '');
+  const site = link(meta.site), xml = link(meta.xml);
+  const pfpImg = link(meta.image);
+  const row = (k, v) => `<div class="fi-row"><span class="fi-k">${k}</span><span class="fi-v">${v}</span></div>`;
+  const rowLink = (k, u) => row(k, `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(u)}</a>`);
+  return `<div class="fi-head">
+    <span class="fi-pfp">${pfpImg ? `<img src="${esc(pfpImg)}" alt="">` : faviconHtml(meta)}</span>
+    <span class="fi-headtext">
+      <span class="fi-name">${esc(meta.title || feedId)}</span>
+      <span class="fi-sub">${arts.length} article${arts.length === 1 ? '' : 's'} · ${unread} unread</span>
+    </span>
+    <span class="fi-dot ${st.ok === false ? 'bad' : 'good'}" title="${esc(crawlState)}"></span>
+  </div>
+  <div class="fi-rows">
+    ${meta.origTitle ? row('Original title', esc(meta.origTitle)) : ''}
+    ${site ? rowLink('Website', site) : ''}
+    ${xml ? rowLink('XML address', xml) : ''}
+    ${row('Folder', esc(folderNames.join(', ') || '—'))}
+    ${row('Last post', esc(lastPost))}
+    ${row('Last crawled', esc(crawl))}
+  </div>`;
+}
+function openFeedModal() {
+  if (!state.scope.startsWith('feed:')) return;
+  const feedId = state.scope.slice(5);
+  const meta = feedMeta(feedId);
+  $('#feed-modal-title').textContent = meta.title || feedId;
+  $('#feed-modal-body').innerHTML = feedInfoHtml(feedId);
+  $('#feed-modal').classList.remove('hidden');
+  $('#feed-modal-close')?.focus();
+}
+function closeFeedModal() {
+  $('#feed-modal')?.classList.add('hidden');
 }
 
 async function refresh(manual = false) {
@@ -1871,6 +1861,14 @@ async function boot() {
       const w = Math.min(480, Math.max(210, Number(ui.sidebarW) || 242));
       ui.sidebarW = w;
       document.documentElement.style.setProperty('--sidebar-width', `${w}px`);
+    }
+    if (ui.listW) {
+      const raw = Math.round(Number(ui.listW) || 0);
+      if (raw > 0) {
+        const lw = clampListW(raw, paneAvail());
+        ui.listW = lw;
+        applyListW(lw);
+      } else delete ui.listW;
     }
   } catch (err) {
     $('#empty').classList.remove('hidden');

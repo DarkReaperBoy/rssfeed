@@ -26,14 +26,20 @@ Run against a local static serve of the working tree with generated fixture data
 - [ ] When caught up, the SAME button flips to "Mark all as unread" (confirm); the ▾ menu flips direction too — only ONE direction is ever offered.
 - [ ] ▾ menu age slider: 1–30 days; sentence, value, count preview, and apply button all name the current direction; dragging or arrow keys update the preview live; the last-used value persists across opens.
 - [ ] Apply closes the menu, marks exactly the previewed set, and offers Undo.
-- [ ] Today scope: the ▾ split button hides (age marking is structurally dead there); it returns in every other scope.
+- [ ] The ▾ split button is available in every scope (the Today scope that used to disable it is gone).
 - [ ] Sidebar badge tick (hover shows ✓): marks that feed/folder/all; works from inside any scope; Undo works.
-- [ ] Bulk select mode: checkboxes; row click selects; bulk read/unread with Undo; clear; exit mode.
 - [ ] Rapid triple-click on a confirm: lands once.
 - [ ] Zero-result toasts ("No unread articles older than…") + boundary hint naming the data start.
 
+## Feed information card
+- [ ] A ⓘ button sits beside the scope title **only** in a feed scope (absent in Newsfeed/folder scopes).
+- [ ] Clicking it opens a centered modal: pfp (feed image or favicon), name, "N articles · M unread", and rows Website / XML address / Folder / Last post / Last crawled.
+- [ ] "Last post" shows a relative age ("1h ago") or "Never" for an empty feed; "Last crawled" shows "Success · <age>" or "Failed — <error> · <age> (last success <age>)".
+- [ ] An "Original title" row appears only when the config title differs from the feed's own name.
+- [ ] Close via the ✕, the backdrop, or Esc; links open in new tabs with `rel="noopener noreferrer"`.
+
 ## Scopes & deep links
-- [ ] Newsfeed/Today/Recently read via the ⋯ menu; counts chip matches.
+- [ ] All/Unread status via the ⋯ menu; counts chip matches; the menu offers exactly: All, Unread, Show filtered-out, Refresh, Sort (Newest/Oldest), Reset read state — in that order, and nothing else.
 - [ ] Folder and feed click scope the list; folder chevron expands/collapse without changing selection.
 - [ ] `#folder/<Name>` / `#feed/<Title>` links: exact, slug, lowercase, with/without spaces all resolve; URL updates on click; back/forward moves scopes.
 - [ ] Unknown folder/feed link: hash clears, toast explains.
@@ -54,15 +60,16 @@ Run against a local static serve of the working tree with generated fixture data
 - [ ] Last-updated line updates ("Updated just now").
 
 ## Visual & interaction quality
-- [ ] Dark/light parity across sidebar, list, reader, dropdowns, toasts, bulk bar, modal.
+- [ ] Dark/light parity across sidebar, list, reader, dropdowns, toasts, and modals.
 - [ ] Focus-visible rings on all interactive elements; tab order sensible (sidebar → header → list → reader).
 - [ ] Hover states: rows, buttons, badges (✓ appears on badge hover).
 - [ ] Keyboard: full read/mark/open/nav flow without a mouse.
 - [ ] Mobile: sidebar becomes a drawer with scrim; article pane takes over below 1120px; touch targets ≥34px (coarse pointer CSS).
 - [ ] Narrow desktop resize: sidebar resizer drag (210–480px), persists across reload.
 - [ ] Reduced motion: transitions suppressed.
-- [ ] Empty states never overlap the list; toasts never cover the bulk bar or modal.
+- [ ] Empty states never overlap the list; toasts never cover a modal.
 - [ ] No layout shift when favicons/thumbnails swap in; failed thumbnails removed cleanly.
+- [ ] List⇄article divider: drag both directions with the mouse; clamps at the list minimum (260px) and the article minimum (320px); persists across reload; double-click resets to the default split; hidden below 1120px; drag never selects text or freezes iframes.
 
 ## Console
 - [ ] Zero errors and zero unhandled promise rejections across the whole walk (watch the console during every section above).

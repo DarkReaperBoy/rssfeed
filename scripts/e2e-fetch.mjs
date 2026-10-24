@@ -13,10 +13,10 @@ let retitle = false;
 const item = (i, t, extra = '') => `<item><title>${t}</title><link>https://example.test/a/${i}</link><guid>https://example.test/a/${i}</guid><pubDate>${new Date(now - i * 3600e3).toUTCString()}</pubDate><description>Body of ${t}${extra}</description></item>`;
 const rss1Real = () => {
   const undated = '<item><title>Undated post</title><link>https://example.test/a/3</link><guid>https://example.test/a/3</guid><description>No date here</description></item>';
-  return `<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel><title>Feed One</title>${item(1, retitle ? 'First post (EDITED TITLE)' : 'First post')}${item(2, 'Second post')}${undated}</channel></rss>`;
+  return `<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel><title>Feed One</title><link>https://example.test/one</link>${item(1, retitle ? 'First post (EDITED TITLE)' : 'First post')}${item(2, 'Second post')}${undated}</channel></rss>`;
 };
 let rss1Body = rss1Real();
-const rss2 = () => `<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel><title>Feed Two</title>${item(10, 'Other feed post')}</channel></rss>`;
+const rss2 = () => `<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel><title>Feed Two</title><link>https://example.test/two</link><image><url>https://example.test/two.png</url><title>Feed Two</title></image>${item(10, 'Other feed post')}</channel></rss>`;
 const server = http.createServer((req, res) => {
   const etag = '"v1"';
   if (req.url === '/feed1.xml') {
@@ -98,6 +98,44 @@ const edited = one3.articles.find((a) => a.title === 'First post (EDITED TITLE)'
 ok(!!edited, 'retitled article present under the new title');
 ok(edited && edited.id === first1.id, `retitled article KEPT its id (${edited?.id} vs ${first1.id}) — read state and deep links survive`);
 ok(one3.articles.filter((a) => a.title === 'First post').length === 0, 'old-title copy is gone (no duplicate)');
+console.log('run 4: minimal config — no id/title/site; the backend derives everything it can from the feed');
+fs.writeFileSync(path.join(SANDBOX, 'config.json'), JSON.stringify({
+  settings: { retentionDays: 30, fullTextDefault: false },
+  feeds: [
+    { url: `http://127.0.0.1:${port}/feed1.xml` },
+    { url: `http://127.0.0.1:${port}/feed2.xml`, title: 'Custom Two' },
+  ],
+}, null, 2));
+await new Promise((r) => setTimeout(r, 1100));
+out = await run();
+const idOne = '127-0-0-1-feed1', idTwo = '127-0-0-1-feed2';
+ok(fs.existsSync(path.join(SANDBOX, 'data/feeds', `${idOne}.json`)), `the data file is named by the URL-derived id (${idOne}.json)`);
+const idx4 = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/index.json'), 'utf8'));
+ok(idx4.feeds[idOne] && idx4.feeds[idOne].title === 'Feed One', 'title comes from the feed itself when the config omits it');
+ok(idx4.feeds[idOne].site === 'https://example.test/one', 'site comes from the channel link when the config omits it');
+ok(idx4.feeds[idOne].xml === `http://127.0.0.1:${port}/feed1.xml`, 'the index records the raw feed URL (xml)');
+ok(idx4.feeds[idOne].origTitle === null, 'no origTitle when nothing was renamed');
+ok(idx4.feeds[idTwo].title === 'Custom Two', 'a config title still wins when set');
+ok(idx4.feeds[idTwo].origTitle === 'Feed Two', 'the source self-title is preserved as origTitle under a rename');
+ok(idx4.feeds[idTwo].image === 'https://example.test/two.png', 'a channel image is captured for the modal pfp');
+ok(!fs.existsSync(path.join(SANDBOX, 'data/feeds/one.json')) && !fs.existsSync(path.join(SANDBOX, 'data/feeds/two.json')), 'the old explicit-id files for the same URLs are wiped (config no longer names them)');
+ok(!('one' in idx4.feeds) && !('two' in idx4.feeds), 'the index carries no trace of the old ids');
+const one4 = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/feeds', `${idOne}.json`), 'utf8'));
+ok(one4.articles.find((a) => a.title === 'First post (EDITED TITLE)').id === first1.id, 'article ids survive the feed-id change (guid-keyed) — read state and deep links keep working');
+console.log('run 5: removing a feed from the config wipes its cached data (and orphans are swept)');
+fs.writeFileSync(path.join(SANDBOX, 'config.json'), JSON.stringify({
+  settings: { retentionDays: 30, fullTextDefault: false },
+  feeds: [{ url: `http://127.0.0.1:${port}/feed1.xml` }],
+}, null, 2));
+fs.writeFileSync(path.join(SANDBOX, 'data/feeds/ghost.json'), JSON.stringify({ articles: [] }));
+await new Promise((r) => setTimeout(r, 1100));
+out = await run();
+ok(!fs.existsSync(path.join(SANDBOX, 'data/feeds', `${idTwo}.json`)), 'the removed feed\u2019s data file is deleted');
+ok(!fs.existsSync(path.join(SANDBOX, 'data/feeds/ghost.json')), 'an orphan file with no config entry is swept too');
+const idx5 = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/index.json'), 'utf8'));
+ok(!(idTwo in idx5.feeds), 'the removed feed leaves the index');
+const all5 = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/all-feeds.json'), 'utf8'));
+ok(all5.articles.length > 0 && all5.articles.every((a) => a._feed === idOne), 'the removed feed leaves all-feeds.json entirely');
 server2.close();
 fs.rmSync(SANDBOX, { recursive: true, force: true });
 console.log(`${pass} passed, ${fail} failed`);

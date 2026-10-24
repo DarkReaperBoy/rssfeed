@@ -220,12 +220,27 @@ function pickEnclosures(item) {
 async function loadJson(file, fallback) {
   try { return JSON.parse(await fs.readFile(file, 'utf8')); } catch { return fallback; }
 }
+const trimStr = (t, cap = 300) => (typeof t === 'string' && t.trim() ? t.trim().slice(0, cap) : '');
+const httpOr = (u, fb = '') => (typeof u === 'string' && /^https?:\/\//i.test(u) ? u : fb);
+function feedMetaFor(feed, prevMeta, parsed = null) {
+  const parsedTitle = parsed ? trimStr(parsed.title) : '';
+  const title = trimStr(feed.title) || parsedTitle || trimStr(prevMeta?.title) || feed.id;
+  const origTitle = trimStr(feed.title)
+    ? (parsed ? (parsedTitle && parsedTitle !== feed.title.trim() ? parsedTitle : null) : (trimStr(prevMeta?.origTitle) || null))
+    : null;
+  const site = trimStr(feed.site) || httpOr(parsed?.link) || httpOr(prevMeta?.site);
+  const image = httpOr(parsed?.image?.url || parsed?.icon || parsed?.logo, httpOr(prevMeta?.image, null));
+  return { title, origTitle, site, xml: feed.url || null, image };
+}
 function summarizeFeed(feed, articles) {
   const sorted = [...articles].sort((a, b) => b.date - a.date);
   const folders = Array.isArray(feed.folders) ? feed.folders.filter(Boolean) : (feed.folder ? [feed.folder] : []);
   return {
     title: feed.title || feed.id,
+    origTitle: feed.origTitle || null,
     site: feed.site || '',
+    xml: feed.xml || null,
+    image: feed.image || null,
     folder: folders[0] || null,
     folders,
     count: articles.length,
@@ -276,12 +291,29 @@ function parseOpml(xml) {
   }
 }
 const isHnFeed = (f) => f?.type === 'hackernews' || f?.type === 'hn';
+const deriveFeedId = (f) => {
+  if (f.id) return String(f.id);
+  if (f.type === '4chan') return `4chan-${slugify(String(f.board || '').toLowerCase().replace(/\//g, ''), 'board')}`;
+  if (isHnFeed(f)) return 'hackernews';
+  const u = String(f.url || '');
+  try {
+    const url = new URL(u);
+    const host = url.hostname.replace(/^www\./i, '');
+    if (/(^|\.)youtube\.com$/i.test(host)) {
+      const yt = url.searchParams.get('channel_id') || url.searchParams.get('user') || url.searchParams.get('playlist_id');
+      if (yt) return `yt-${String(yt).toLowerCase()}`;
+    }
+    const hostSlug = slugify(host, 'feed');
+    const pathSlug = slugify(url.pathname.replace(/\.(xml|rss|atom|json)$/i, ''), '');
+    return `${hostSlug}${pathSlug ? '-' + pathSlug : ''}`.slice(0, 64);
+  } catch { return slugify(u, 'feed').slice(0, 64); }
+};
 async function resolveFeeds(config) {
-  const feedKey = (f) => f.url || (f.type === '4chan' ? `4chan:${String(f.board || '').toLowerCase().replace(/\//g, '')}` : isHnFeed(f) ? `hackernews:${f.id}` : `id:${f.id}`);
-  const usable = (f) => f && f.id && (f.url || f.type === '4chan' || isHnFeed(f));
+  const feedKey = (f) => f.url || (f.type === '4chan' ? `4chan:${String(f.board || '').toLowerCase().replace(/\//g, '')}` : isHnFeed(f) ? `hackernews:${f.id || 'default'}` : `id:${f.id}`);
+  const usable = (f) => f && (f.url || f.type === '4chan' || isHnFeed(f));
   const configFeeds = (config.feeds || []).filter(usable);
-  for (const f of config.feeds || []) if (!usable(f)) console.warn(`skip feed (no id/url): ${JSON.stringify(f)}`);
-  const byId = new Map(configFeeds.map((f) => [f.id, f]));
+  for (const f of config.feeds || []) if (!usable(f)) console.warn(`skip feed (no url/board/type): ${JSON.stringify(f)}`);
+  const byId = new Map(configFeeds.filter((f) => f.id).map((f) => [f.id, f]));
   const byUrl = new Map(configFeeds.filter((f) => f.url).map((f) => [f.url, f]));
   const feeds = [];
   const seenUrls = new Set();
@@ -290,9 +322,10 @@ async function resolveFeeds(config) {
     const key = feedKey(f);
     if (seenUrls.has(key)) return; 
     seenUrls.add(key);
-    let id = f.id;
+    const base = deriveFeedId(f);
+    let id = base;
     let i = 2;
-    while (seenIds.has(id)) id = `${f.id}-${i++}`;
+    while (seenIds.has(id)) id = `${base}-${i++}`;
     seenIds.add(id);
     feeds.push({ ...f, id });
   };
@@ -410,7 +443,7 @@ async function main() {
       const kept = purgePrev(prev);
       await fs.writeFile(file, JSON.stringify({ articles: kept }));
       index.feeds[feed.id] = {
-        ...summarizeFeed(feed, kept),
+        ...summarizeFeed({ ...feed, ...feedMetaFor(feed, prevFeedMeta[feed.id]) }, kept),
         status: {
           ok: false,
           disabled: true,
@@ -457,7 +490,7 @@ async function main() {
         status.error = err.message;
         status.consecutiveFailures = (prevStatus.consecutiveFailures || 0) + 1;
         await fs.writeFile(file, JSON.stringify({ articles: prev.articles || [] }));
-        index.feeds[feed.id] = { ...summarizeFeed(effFeed, prev.articles || []), status };
+        index.feeds[feed.id] = { ...summarizeFeed({ ...effFeed, ...feedMetaFor(effFeed, prevFeedMeta[feed.id]) }, prev.articles || []), status };
         written.set(feed.id, prev.articles || []);
         console.error(`[${feed.id}] FETCH FAILED: ${err.message} — keeping ${(prev.articles || []).length} threads`);
         return;
@@ -471,7 +504,7 @@ async function main() {
         const keptAll = (prev.articles || []).filter((a) => !(feedBlocks && feedFilterDrop(a, feedBlocks)));
         const kept = cap ? keptAll.slice(0, cap) : keptAll;
         await fs.writeFile(file, JSON.stringify({ articles: kept }));
-        index.feeds[feed.id] = { ...summarizeFeed(effFeed, kept), status };
+        index.feeds[feed.id] = { ...summarizeFeed({ ...effFeed, ...feedMetaFor(effFeed, prevFeedMeta[feed.id]) }, kept), status };
         written.set(feed.id, kept);
         console.log(`[${feed.id}] /${board}/: not modified — keeping ${kept.length} live threads`);
         return;
@@ -494,7 +527,7 @@ async function main() {
       }
       const kept = cap ? articles.slice(0, cap) : articles;
       await fs.writeFile(file, JSON.stringify({ articles: kept }));
-      index.feeds[feed.id] = { ...summarizeFeed(effFeed, kept), status };
+      index.feeds[feed.id] = { ...summarizeFeed({ ...effFeed, ...feedMetaFor(effFeed, prevFeedMeta[feed.id]) }, kept), status };
       written.set(feed.id, kept);
       console.log(`[${feed.id}] /${board}/: ${kept.length} live threads${skipped ? ` (skipped ${skipped} below the reply/word filters)` : ''}${filtered ? ` (dropped ${filtered} by word filter)` : ''}${cap ? ` (capped at ${cap})` : ''}`);
       return;
@@ -522,7 +555,7 @@ async function main() {
         status.consecutiveFailures = (prevStatus.consecutiveFailures || 0) + 1;
         const keptFail = [...(prev.articles || [])].filter((a) => now - a.date < retainMs);
         await fs.writeFile(file, JSON.stringify({ articles: keptFail }));
-        index.feeds[feed.id] = { ...summarizeFeed(effFeed, keptFail), status };
+        index.feeds[feed.id] = { ...summarizeFeed({ ...effFeed, ...feedMetaFor(effFeed, prevFeedMeta[feed.id]) }, keptFail), status };
         written.set(feed.id, keptFail);
         console.error(`[${feed.id}] FETCH FAILED: ${err.message} — keeping ${keptFail.length} stories from last ${retentionDays} days`);
         return;
@@ -531,6 +564,7 @@ async function main() {
       status.lastSuccess = now;
       status.consecutiveFailures = 0;
       status.error = null;
+      const fmeta = feedMetaFor(feed, prevFeedMeta[feed.id]);
       const articles = [];
       let filtered = 0;
       for (const hit of hits) {
@@ -545,7 +579,7 @@ async function main() {
       for (const a of [...prevList, ...articles]) byId.set(a.id, a);
       const merged = [...byId.values()].sort((a, b) => b.date - a.date).filter((a) => now - a.date < retainMs);
       await fs.writeFile(file, JSON.stringify({ articles: merged }));
-      index.feeds[feed.id] = { ...summarizeFeed(effFeed, merged), status };
+      index.feeds[feed.id] = { ...summarizeFeed({ ...effFeed, ...fmeta }, merged), status };
       written.set(feed.id, merged);
       const capsDesc = minPoints && minComments
         ? `${minPoints}+ points and ${minComments}+ comments`
@@ -569,7 +603,7 @@ async function main() {
           feedBlocks: compileFeedFilter(feed),
         });
         await fs.writeFile(file, JSON.stringify({ articles: kept }));
-        index.feeds[feed.id] = { ...summarizeFeed(feed, kept), status };
+        index.feeds[feed.id] = { ...summarizeFeed({ ...feed, ...feedMetaFor(feed, prevFeedMeta[feed.id]) }, kept), status };
         written.set(feed.id, kept);
         console.log(`[${feed.id}] not modified — keeping ${kept.length} articles`);
         return;
@@ -588,7 +622,7 @@ async function main() {
       const kept = [...(prev.articles || [])].filter((a) => now - a.date < retainMs);
       await fs.writeFile(file, JSON.stringify({ articles: kept }));
       index.feeds[feed.id] = {
-        ...summarizeFeed(feed, kept),
+        ...summarizeFeed({ ...feed, ...feedMetaFor(feed, prevFeedMeta[feed.id]) }, kept),
         status,
       };
       written.set(feed.id, kept);
@@ -606,7 +640,7 @@ async function main() {
       let kept = [...(prev.articles || [])].filter((a) => now - a.date < retainMs);
       await fs.writeFile(file, JSON.stringify({ articles: kept }));
       index.feeds[feed.id] = {
-        ...summarizeFeed(feed, kept),
+        ...summarizeFeed({ ...feed, ...feedMetaFor(feed, prevFeedMeta[feed.id]) }, kept),
         status,
       };
       written.set(feed.id, kept);
@@ -617,6 +651,7 @@ async function main() {
     status.lastSuccess = now;
     status.consecutiveFailures = 0;
     status.error = null;
+    const fmeta = feedMetaFor(feed, prevFeedMeta[feed.id], parsed);
     const wantText = feed.fullText ?? fullTextDefault;
     let textBudget = wantText ? TEXT_EXTRACT_BUDGET : 0;
     const ytShorts = isYouTubeFeed(feed.url) && (feed.dropShorts ?? dropShortsDefault);
@@ -671,11 +706,11 @@ async function main() {
     merged = merged.filter((a) => now - a.date < retainMs);
     await fs.writeFile(file, JSON.stringify({ articles: merged }));
     index.feeds[feed.id] = {
-      ...summarizeFeed(feed, merged),
+      ...summarizeFeed({ ...feed, ...fmeta }, merged),
       status,
     };
     written.set(feed.id, merged);
-    console.log(`[${feed.id}] ${merged.length} articles (last ${retentionDays} days, no cap) from "${parsed.title || feed.title}"`);
+    console.log(`[${feed.id}] ${merged.length} articles (last ${retentionDays} days, no cap) from "${fmeta.origTitle || fmeta.title}"`);
   };
   const chanFeeds = feeds.filter((f) => f.type === '4chan');
   const poolFeeds = feeds.filter((f) => f.type !== '4chan');
@@ -696,6 +731,17 @@ async function main() {
       } catch {}
     }
   }
+  try {
+    for (const name of await fs.readdir(FEEDS_DIR)) {
+      if (!name.endsWith('.json')) continue;
+      const fid = name.slice(0, -5);
+      if (currentFeedIds.has(fid) || fid in prevFeedMeta) continue;
+      try {
+        await fs.unlink(path.join(FEEDS_DIR, name));
+        console.log(`[${fid}] orphan feed data swept`);
+      } catch {}
+    }
+  } catch {}
   const allArticles = [];
   for (const feed of feeds) {
     for (const a of written.get(feed.id) || []) allArticles.push({ ...a, _feed: feed.id });

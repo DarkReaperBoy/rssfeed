@@ -60,12 +60,19 @@ const config = {
       include: { title: ['laptop'] }, actions: { highlight: true } },
   ],
 };
+const urlOf = Object.fromEntries(config.feeds.map((f) => [f.id, f.url]));
 const index = {
   generatedAt: now,
   folders: [{ id: 'tech', name: 'Technology' }, { id: 'news', name: 'News' }],
   feeds: Object.fromEntries(Object.entries(FIX).map(([id, f]) => [id, {
-    title: f.title, site: f.site, folder: f.folder, folders: [f.folder],
+    title: f.title, site: f.site, xml: urlOf[id] || null,
+    origTitle: id === 'fixture-verge' ? 'The Verge (source self-title)' : null,
+    image: id === 'fixture-bbc' ? 'https://www.bbc.test/logo.png' : null,
+    folder: f.folder, folders: [f.folder],
     count: f.articles.length, newest: f.articles[0].date, oldest: f.articles.at(-1).date,
+    status: id === 'fixture-junk'
+      ? { ok: false, disabled: false, lastAttempt: now - 3600e3, lastSuccess: now - 48 * 3600e3, consecutiveFailures: 3, error: 'HTTP 500' }
+      : { ok: true, disabled: false, lastAttempt: now - 600e3, lastSuccess: now - 600e3, consecutiveFailures: 0, error: null },
   }])),
 };
 const allFeeds = {
@@ -108,7 +115,7 @@ ok(!$('#feeds_nav').classList.contains('hidden'), 'feeds panel visible');
 ok(!!$('.tree-item[data-scope="all"]'), 'Newsfeed row renders');
 ok(!$('#parent_starred'), 'Starred sidebar row removed');
 ok(!$('#i-star'), 'star icon removed');
-ok($('#pdinner_today').classList.contains('hidden'), 'Today row hidden by default');
+ok(!$('#pdinner_today'), 'Today sidebar row removed entirely');
 ok($('#tree').textContent.includes('Technology'), 'folder renders (from generated index.folders)');
 ok($('#tree').textContent.includes('Hacker News'), 'feeds render');
 ok(!$('#reader-placeholder'), 'reader placeholder removed');
@@ -222,6 +229,8 @@ click(`#list .row[data-id="${firstId}"] [data-act="keep"]`);
 await settle(50);
 ok(Number($('#badge-all-items').textContent) === TOTAL - HIDDEN, 'keep-unread deletes the read entry too (the badge counts it again)');
 ok($(`#list .row[data-id="${firstId}"] [data-act="keep"]`)?.getAttribute('aria-pressed') === 'true', 'the keep button reports its pressed state');
+ok($(`#list .row[data-id="${firstId}"] [data-act="keep"] use`)?.getAttribute('href') === '#i-bookmark-on', 'a kept article shows the FILLED bookmark glyph');
+ok($$('#list .row')[1].querySelector('[data-act="keep"] use')?.getAttribute('href') === '#i-bookmark', 'an un-kept article shows the outline bookmark glyph (the old eye-off path rendered broken)');
 click(`#list .row[data-id="${firstId}"] [data-act="keep"]`); 
 await settle(50);
 click($('#reader-slot [data-act="collapse"]'));
@@ -272,15 +281,6 @@ ok($('#mark-age-count').textContent === 'Will mark 4 articles', 'the preview reb
 setAge(window, 7);
 click('#btn-mark-all-split');
 await settle(20);
-console.log('Today scope: age marking is structurally dead — the split button hides');
-click('#status-items [data-status="today"]');
-await settle(80);
-ok($('#scope-title').textContent === 'Today', 'Today view entered');
-ok($('#btn-mark-all-split').classList.contains('hidden'), 'the split button hides in the Today view (every article is from today)');
-ok($('#mark-menu').classList.contains('hidden'), 'no mark menu lingers');
-click('.tree-item[data-scope="all"]');
-await settle(80);
-ok(!$('#btn-mark-all-split').classList.contains('hidden'), 'the split button returns outside the Today view');
 console.log('filter-invisible restores explain themselves');
 click('#badge-all-items');
 await settle(80);
@@ -343,28 +343,20 @@ ok(!$('#menu-settings') && !$('#settings-modal'), 'the Settings entry and Readin
 ok(!$$('#mark-menu [data-read-age]').length, 'the "By when you read them" presets are gone');
 ok($('#list').classList.contains('view-list'), 'the list view is the one and only view');
 ok($('#list').className.includes('density-comfort'), 'the default density applies');
-console.log('header menus');
+console.log('header menus: minimal and reordered — Today / Recently read / Multiple select are gone');
 click('#btn-more');
 await settle(30);
 ok(!$('#header-menu').classList.contains('hidden'), 'header menu opens');
+ok(!$$('#status-items [data-status="today"]').length, 'no Today status item');
+ok(!$$('#status-items [data-status="recently-read"]').length, 'no Recently read status item');
+ok($$('#status-items .dropdown-item').length === 2, 'exactly two list statuses remain (All / Unread)');
+ok(!$('#menu-select-mode'), 'no Multiple select entry');
+ok(!$('#bulk-bar'), 'the bulk action bar is gone');
+ok(!$('#i-bulk') && !$('#i-today') && !$('#i-eyeoff'), 'dead SVG symbols removed (bulk, today, eye-off)');
+const menuOrder = $$('#header-menu .dropdown-item').map((b) => b.id || b.dataset.status || b.dataset.sort);
+ok(JSON.stringify(menuOrder) === JSON.stringify(['all', 'unread', 'btn-show-filtered', 'menu-refresh', 'newest', 'oldest', 'menu-reset-read']), `menu order: statuses → show-filtered → refresh → sort → reset (${menuOrder.join(', ')})`);
 click('#btn-more');
 await settle(20);
-console.log('bulk select');
-click('#menu-select-mode');
-await settle(20);
-ok(window.document.body.classList.contains('bulk-mode'), 'bulk mode toggles on');
-click($$('#list .row')[5]); 
-await settle(20);
-ok($('#bulk-count').textContent === '1', 'row click selects in bulk mode');
-click('#bulk-read');
-await settle(50);
-ok(rowCount() === TOTAL - HIDDEN - 1, 'bulk mark read removes the row from the unread view');
-ok($('#toast-text').textContent.includes('1 article'), 'bulk toast reports the count');
-click($('#toast-action'));
-await settle(50);
-click('#menu-select-mode');
-await settle(20);
-ok(!$$('#list .row-check').length, 'bulk mode toggles off');
 console.log('reset read state (menu)');
 click('#btn-more');
 await settle(20);
@@ -380,7 +372,6 @@ console.log('tab title format');
 const tRow = $('#list .row');
 const tTitle = tRow.querySelector('.row-title').textContent;
 ok($('#badge-all-items').dataset.markread === 'all', 'Newsfeed badge is a working mark-all tick');
-ok($('#badge-today').dataset.markread === 'today', 'Today badge is a mark-read tick');
 const unreadBefore = Number($('#badge-all-items').textContent);
 click(tRow);
 await settle(50);
@@ -645,27 +636,14 @@ console.log('a read click patches the sidebar in place (no favicon churn)');
   click($('#reader-slot [data-act="collapse"]'));
   await settle(50);
 }
-console.log('Recently read: mark-all is the honest mass un-read, never a backlog nuke');
-{
-  click('#badge-all-items'); 
-  await settle(150);
-  click('#btn-more');
-  await settle(20);
-  click('#status-items [data-status="recently-read"]');
-  await settle(80);
-  ok($('#scope-title').textContent === 'Recently read', 'recently-read view');
-  ok(rowCount() > 0, 'read articles are listed');
-  ok($('#btn-mark-all').title === 'Mark all as unread', 'the view is caught-up by definition → the SAME button flips to the honest mass un-read');
-  click('#btn-mark-all');
-  await settle(20);
-  ok($('#confirm-text').textContent.includes('as unread'), 'the confirm offers un-read (it used to say Recently read while marking the entire UNREAD backlog)');
-  click('#confirm-yes');
-  await settle(80);
-  ok(rowCount() === 0, 'nothing is read anymore → the read-only view empties');
-  click('.tree-item[data-scope="all"]');
-  await settle(80);
-  ok(rowCount() === TOTAL - HIDDEN, 'back in the Newsfeed with every article unread');
-}
+console.log('reset the stage: everything back to unread');
+click('#badge-all-items');
+await settle(150);
+click('#btn-mark-all');
+await settle(20);
+click('#confirm-yes');
+await settle(80);
+ok(rowCount() === TOTAL - HIDDEN, 'back in the Newsfeed with every article unread');
 console.log('shareable folder/feed links (#folder/…, #feed/…)');
 click('.tree-item[data-scope="folder:tech"]');
 await settle(60);
@@ -1121,30 +1099,6 @@ console.log('Hacker News deep windows — Algolia\'s 1000-hit cap splits into da
   const sliced = hn.hnApiUrl({ minPoints: 150 }, { retentionDays: 60, now: NOW, fromSec: START, toSec: NOWS - 30 * 86400 });
   ok(sliced.includes('created_at_i%3C%3D'), 'range slicing encodes the closed upper bound');
 }
-console.log('recently-read: the view (and its mark-all) cover the 7-day window — not the whole read history');
-{
-  const domR2 = new JSDOM(html, { url: 'https://example.test/', runScripts: 'outside-only', pretendToBeVisual: true });
-  const wR2 = domR2.window;
-  wR2.fetch = window.fetch;
-  wR2.localStorage.setItem('ghrss:ver', '3');
-  wR2.localStorage.setItem('ghrss:read', JSON.stringify({ 'fixture-bbc-1': now - 10 * 864e5, 'fixture-bbc-2': now - 60e3 }));
-  wR2.eval(appSrc);
-  await settle(1200);
-  wR2.document.querySelector('#btn-more').dispatchEvent(new wR2.MouseEvent('click', { bubbles: true }));
-  wR2.document.querySelector('#status-items [data-status="recently-read"]').dispatchEvent(new wR2.MouseEvent('click', { bubbles: true }));
-  await settle(80);
-  const rowsR2 = [...wR2.document.querySelectorAll('#list .row')];
-  ok(rowsR2.length === 1 && /Market swing/.test(rowsR2[0].textContent), 'the view lists only articles read within the last 7 days (the 10-day-old read is gone)');
-  ok(wR2.document.querySelector('#scope-count').textContent === '1 recently read', 'the count chip matches the windowed view');
-  wR2.document.querySelector('#btn-mark-all').dispatchEvent(new wR2.MouseEvent('click', { bubbles: true }));
-  await settle(30);
-  wR2.document.querySelector('#confirm-yes').dispatchEvent(new wR2.MouseEvent('click', { bubbles: true }));
-  await settle(80);
-  const lsR2 = JSON.parse(wR2.localStorage.getItem('ghrss:read') || '{}');
-  ok(lsR2['fixture-bbc-2'] === undefined, 'the recent read was restored to unread');
-  ok(typeof lsR2['fixture-bbc-1'] === 'number', 'the 10-day-old read STAYS read — no more whole-history nuke');
-  domR2.window.close();
-}
 console.log('regression: marking with caught-up (badgeless) feeds in the tree must not freeze the counters');
 {
   const dom10 = new JSDOM(html, { url: 'https://example.test/', runScripts: 'outside-only', pretendToBeVisual: true });
@@ -1222,41 +1176,6 @@ console.log('mark-all round trip: mass read clears un-read guards, mass unread r
   ok(rowByTitle7(/^Election update$/).classList.contains('unread'), '…and the row shows unread');
   dom7.window.close();
 }
-console.log('bulk mark: the same guard rules as mark-all (explicit, filter-proof, undo-able)');
-{
-  const dom8 = new JSDOM(html, { url: 'https://example.test/', runScripts: 'outside-only', pretendToBeVisual: true });
-  const w8 = dom8.window;
-  const cfg8 = { ...config, filters: [...config.filters, { id: 'test-markread', name: 'mr', feeds: ['fixture-bbc'], include: { title: ['Election'] }, actions: { markRead: true } }] };
-  w8.fetch = async (url) => {
-    const p = String(url).split('?')[0];
-    if (p === 'config.json') return { ok: true, status: 200, json: async () => structuredClone(cfg8) };
-    if (p === 'data/index.json') return { ok: true, status: 200, json: async () => structuredClone(index) };
-    if (p === 'data/all-feeds.json') return { ok: true, status: 200, json: async () => structuredClone(allFeeds) };
-    return { ok: false, status: 404, statusText: 'Not Found', json: async () => { throw new Error('404'); } };
-  };
-  w8.eval(appSrc);
-  await settle(1200);
-  const badge8 = () => Number(w8.document.querySelector('#badge-all-items').textContent);
-  w8.document.querySelector('#btn-more').dispatchEvent(new w8.MouseEvent('click', { bubbles: true }));
-  await settle(20);
-  w8.document.querySelector('#status-items [data-status="all"]').dispatchEvent(new w8.MouseEvent('click', { bubbles: true }));
-  await settle(20);
-  w8.document.querySelector('#btn-more').dispatchEvent(new w8.MouseEvent('click', { bubbles: true }));
-  await settle(20);
-  w8.document.querySelector('#menu-select-mode').dispatchEvent(new w8.MouseEvent('click', { bubbles: true }));
-  await settle(80);
-  const election8 = [...w8.document.querySelectorAll('#list .row')].find((r) => /Election update/.test(r.querySelector('.row-title').textContent));
-  election8.querySelector('.row-check').dispatchEvent(new w8.MouseEvent('click', { bubbles: true }));
-  await settle(30);
-  w8.document.querySelector('#bulk-unread').dispatchEvent(new w8.MouseEvent('click', { bubbles: true }));
-  await settle(120);
-  const guard8 = JSON.parse(w8.localStorage.getItem('ghrss:userUnread') || '{}');
-  ok(guard8['fixture-bbc-0'], 'bulk un-read arms the guard for a filter-owned article');
-  w8.document.querySelector('#menu-refresh').dispatchEvent(new w8.MouseEvent('click', { bubbles: true }));
-  await settle(600);
-  ok(badge8() === TOTAL - HIDDEN, 'the bulk un-read survives the filter re-running');
-  dom8.window.close();
-}
 console.log('mark-all button visibility: only with news to read, unread-restore only after a real clear');
 {
   const emptyFix = { 'fixture-hn': FIX['fixture-hn'], 'fixture-empty': { title: 'Empty Feed', site: 'https://empty.test', folder: 'tech', articles: [] } };
@@ -1281,6 +1200,13 @@ console.log('mark-all button visibility: only with news to read, unread-restore 
   wE.document.querySelector('.tree-item[data-scope="feed:fixture-empty"]').dispatchEvent(new wE.MouseEvent('click', { bubbles: true }));
   await settle(80);
   ok(wrapE().classList.contains('hidden'), 'a scope with no articles at all hides the button (nothing to read, nothing to restore)');
+  wE.document.querySelector('#scope-info').dispatchEvent(new wE.MouseEvent('click', { bubbles: true }));
+  await settle(20);
+  ok(!wE.document.querySelector('#feed-modal').classList.contains('hidden'), 'the info modal opens for an empty feed too');
+  ok(wE.document.querySelector('#feed-modal-body').textContent.includes('Never'), 'Last post reads "Never" for a feed with no posts');
+  wE.document.querySelector('#feed-modal-close').dispatchEvent(new wE.MouseEvent('click', { bubbles: true }));
+  await settle(20);
+  ok(wE.document.querySelector('#feed-modal').classList.contains('hidden'), 'the modal closes');
   wE.document.querySelector('.tree-item[data-scope="all"]').dispatchEvent(new wE.MouseEvent('click', { bubbles: true }));
   await settle(80);
   wE.document.querySelector('#badge-all-items').dispatchEvent(new wE.MouseEvent('click', { bubbles: true }));
@@ -1438,7 +1364,7 @@ console.log('mark-as-unread: the publication window (from N ago / since a date)'
   await settle(300);
   ok(wU.document.querySelector('#toast-text').textContent.includes('No unread articles older than two days here'), 'mark-as-read counts by PUBLICATION age — the 0.98-day unread article is too new to match');
   ok(unreadRow('u-1d') === true, 'the day-old unread article survives mark-read-older-than-two-days (published < 2 days ago)');
-  console.log('publication clock: bulk mark-all-read, then from-a-day-ago, then from-a-week-ago');
+  console.log('publication clock: mark-all-read, then from-a-day-ago, then from-a-week-ago');
   wU.document.querySelector('#btn-mark-all').dispatchEvent(new wU.MouseEvent('click', { bubbles: true }));
   await settle(30);
   wU.document.querySelector('#confirm-yes').dispatchEvent(new wU.MouseEvent('click', { bubbles: true }));
@@ -1450,7 +1376,7 @@ console.log('mark-as-unread: the publication window (from N ago / since a date)'
   setAge(wU, 1);
   wU.document.querySelector('#mark-age-apply').dispatchEvent(new wU.MouseEvent('click', { bubbles: true }));
   await settle(300);
-  ok(wU.document.querySelector('#toast-text').textContent.includes('Marked 2 articles from a day ago as unread'), 'THE USER\u2019S CASE: freshly bulk-read, from-a-day-ago brings back ONLY the sub-day news');
+  ok(wU.document.querySelector('#toast-text').textContent.includes('Marked 2 articles from a day ago as unread'), 'THE USER\u2019S CASE: freshly marked-all-read, from-a-day-ago brings back ONLY the sub-day news');
   ok(unreadRow('u-fresh') === true && unreadRow('u-1d') === true, 'the fresh and 0.98-day articles are unread again');
   ok(unreadRow('u-3d') === false && unreadRow('u-10d') === false && unreadRow('u-40d') === false && unreadRow('u-55d') === false, 'everything published more than a day ago stays read');
   ok(Number(wU.document.querySelector('#badge-all-items').textContent) === 2, 'badge: 2 restored');
@@ -1470,62 +1396,6 @@ console.log('mark-as-unread: the publication window (from N ago / since a date)'
   ok(unreadRow('u-10d') === false && unreadRow('u-40d') === false && unreadRow('u-55d') === false, 'the week-plus articles stay read (outside the window)');
   ok(Number(wU.document.querySelector('#badge-all-items').textContent) === 3, 'badge: 3 restored');
   domU.window.close();
-}
-console.log('recently-read scope: the publication window inside the 7-day view');
-{
-  const D = 864e5;
-  const nowV = Date.now();
-  const art = (id, ageDays, title) => ({
-    id, title, link: `https://example.test/${id}`, date: nowV - ageDays * D,
-    author: null, summary: title, content: `<p>${title}</p>`, text: null, enclosures: [], fetchedAt: nowV,
-  });
-  const articles = [
-    art('v-a', 2, 'Read twelve hours ago'),
-    art('v-b', 0.98, 'Read three days ago'),
-    art('v-c', 20, 'Read six and a half days ago'),
-    art('v-d', 30, 'Read twelve days ago'),
-    art('v-e', 0.5, 'Never read'),
-  ];
-  const readSeed = {
-    'v-a': nowV - 12 * 3600e3,
-    'v-b': nowV - 3 * D,
-    'v-c': nowV - 6.5 * D,
-    'v-d': nowV - 12 * D, 
-  };
-  const idxV = { generatedAt: nowV, folders: [], feeds: { 'fixture-rr': { title: 'RR Feed', site: 'https://rr.test', folder: null, folders: [], count: articles.length, newest: articles[0].date, oldest: articles.at(-1).date } } };
-  const domV = new JSDOM(html, { url: 'https://example.test/', runScripts: 'outside-only', pretendToBeVisual: true });
-  const wV = domV.window;
-  wV.fetch = async (reqUrl) => {
-    const p = String(reqUrl).split('?')[0];
-    if (p === 'config.json') return { ok: true, status: 200, json: async () => structuredClone(config) };
-    if (p === 'data/index.json') return { ok: true, status: 200, json: async () => structuredClone(idxV) };
-    if (p === 'data/all-feeds.json') return { ok: true, status: 200, json: async () => structuredClone({ articles: articles.map((a) => ({ ...a, _feed: 'fixture-rr' })) }) };
-    return { ok: false, status: 404, statusText: 'Not Found', json: async () => { throw new Error('404'); } };
-  };
-  wV.localStorage.setItem('ghrss:ver', '3');
-  wV.localStorage.setItem('ghrss:read', JSON.stringify(readSeed));
-  wV.eval(appSrc);
-  await settle(1200);
-  wV.document.querySelector('#btn-more').dispatchEvent(new wV.MouseEvent('click', { bubbles: true }));
-  await settle(20);
-  wV.document.querySelector('#status-items [data-status="recently-read"]').dispatchEvent(new wV.MouseEvent('click', { bubbles: true }));
-  await settle(80);
-  ok(wV.document.querySelectorAll('#list .row').length === 3, 'the view lists exactly the reads from the last 7 days');
-  wV.document.querySelector('#btn-mark-all-split').dispatchEvent(new wV.MouseEvent('click', { bubbles: true }));
-  await settle(20);
-  ok(!wV.document.querySelector('#btn-mark-all-split').classList.contains('hidden'), 'age marking stays live in the Recently read view (a listed read can be any published age)');
-  ok(wV.document.querySelector('#mark-age-title').textContent === 'Mark as unread', 'the Recently read view offers the restore direction');
-  setAge(wV, 1);
-  await settle(20);
-  ok(wV.document.querySelector('#mark-age-count').textContent === 'Will mark 1 article', 'the preview counts publication age inside the 7-day view');
-  wV.document.querySelector('#mark-age-apply').dispatchEvent(new wV.MouseEvent('click', { bubbles: true }));
-  await settle(300);
-  ok(wV.document.querySelector('#toast-text').textContent.includes('Marked 1 article from a day ago as unread'), 'publication window inside the view: only v-b (0.98 d) restores, v-a (2 d) and v-c (20 d) do not');
-  ok(wV.document.querySelectorAll('#list .row').length === 2, 'the un-read article left the Recently read view');
-  const rowA = wV.document.querySelector('#list .row[data-id="v-a"]');
-  const rowC = wV.document.querySelector('#list .row[data-id="v-c"]');
-  ok(!!rowA && !rowA.classList.contains('unread') && !!rowC && !rowC.classList.contains('unread'), 'the two- and twenty-day-published reads stay read');
-  domV.window.close();
 }
 console.log('unread-side zero result: a caught-up scope whose reads all predate the window');
 {
@@ -1652,6 +1522,125 @@ console.log('author shown only when it differs from the feed title');
   await settle(80);
   ok(!wX.document.querySelector('.reader-sub').textContent.includes('by Tectone'), 'the reader drops the duplicate author too');
   domX.window.close();
+}
+console.log('filter actions: keepUnread guards its matches (verified from a cold empty profile — the private-browsing case)');
+{
+  const domK = new JSDOM(html, { url: 'https://example.test/', runScripts: 'outside-only', pretendToBeVisual: true });
+  const wK = domK.window;
+  const cfgK = { ...config, filters: [...config.filters,
+    { id: 'test-keepunread', name: 'kr', feeds: ['fixture-bbc'], include: { title: ['Climate'] }, actions: { keepUnread: true } },
+    { id: 'test-markread2', name: 'mr2', feeds: ['fixture-bbc'], include: { title: ['Election'] }, actions: { markRead: true } }] };
+  wK.fetch = async (url) => {
+    const p = String(url).split('?')[0];
+    if (p === 'config.json') return { ok: true, status: 200, json: async () => structuredClone(cfgK) };
+    if (p === 'data/index.json') return { ok: true, status: 200, json: async () => structuredClone(index) };
+    if (p === 'data/all-feeds.json') return { ok: true, status: 200, json: async () => structuredClone(allFeeds) };
+    return { ok: false, status: 404, statusText: 'Not Found', json: async () => { throw new Error('404'); } };
+  };
+  wK.eval(appSrc);
+  await settle(1200);
+  const badgeK = () => Number(wK.document.querySelector('#badge-all-items').textContent);
+  ok(badgeK() === TOTAL - HIDDEN - 1, 'the markRead filter auto-read its match; the keepUnread match stays unread');
+  const climate = [...wK.document.querySelectorAll('#list .row')].find((r) => /Climate summit/.test(r.querySelector('.row-title').textContent));
+  ok(!!climate && climate.classList.contains('unread'), 'the keepUnread-filtered article renders unread');
+  climate.dispatchEvent(new wK.MouseEvent('click', { bubbles: true }));
+  await settle(150);
+  ok(badgeK() === TOTAL - HIDDEN - 1, 'opening a keepUnread-guarded article does NOT mark it read');
+  ok(!!wK.document.querySelector('#list .row[data-id="fixture-bbc-1"]')?.classList.contains('unread'), 'the guarded row stays unread after open (reader open, row lingers)');
+  wK.document.querySelector('#reader-slot [data-act="collapse"]').dispatchEvent(new wK.MouseEvent('click', { bubbles: true }));
+  await settle(50);
+  domK.window.close();
+}
+console.log('feed information modal — the info icon beside the scope title');
+{
+  ok($('#scope-info').classList.contains('hidden'), 'no info icon in the Newsfeed scope');
+  click('.tree-item[data-scope="feed:fixture-bbc"]');
+  await settle(80);
+  ok(!$('#scope-info').classList.contains('hidden'), 'the info icon appears beside a feed\u2019s title');
+  ok($('#scope-title').textContent === 'BBC News', 'sanity: the feed scope is active');
+  click('#scope-info');
+  await settle(20);
+  ok(!$('#feed-modal').classList.contains('hidden'), 'clicking the icon opens the centered modal');
+  const fb = () => $('#feed-modal-body');
+  ok($('#feed-modal-title').textContent === 'BBC News', 'the modal names the feed');
+  ok(!fb().textContent.includes('Original title'), 'no Original-title row when the config did not rename the feed');
+  const webA = fb().querySelector('a[href="https://www.bbc.com/news"]');
+  ok(!!webA && webA.getAttribute('rel') === 'noopener noreferrer', 'the Website row links out safely (noopener)');
+  ok(!!fb().querySelector('a[href="https://bbc.test/rss"]'), 'the XML address row links the raw feed URL');
+  ok(fb().textContent.includes('News'), 'the Folder row names the feed\u2019s folder');
+  ok(/Last post/.test(fb().textContent) && /\d+[mh] ago/.test(fb().textContent), 'the Last post row shows a relative age');
+  ok(fb().textContent.includes('Success'), 'Last crawled reports the success state');
+  ok(fb().querySelector('.fi-pfp img')?.src === 'https://www.bbc.test/logo.png', 'a feed-provided image serves as the pfp');
+  ok(/\d+ articles · \d+ unread/.test(fb().textContent), 'the modal carries article and unread counts');
+  click('#feed-modal-close');
+  await settle(20);
+  ok($('#feed-modal').classList.contains('hidden'), 'the close button dismisses it');
+  click('#scope-info');
+  await settle(20);
+  $('#feed-modal').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  await settle(20);
+  ok($('#feed-modal').classList.contains('hidden'), 'clicking the backdrop dismisses it');
+  click('#scope-info');
+  await settle(20);
+  window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  await settle(20);
+  ok($('#feed-modal').classList.contains('hidden'), 'Escape dismisses it');
+  click('.tree-item[data-scope="feed:fixture-verge"]');
+  await settle(80);
+  click('#scope-info');
+  await settle(20);
+  ok(fb().textContent.includes('Original title') && fb().textContent.includes('The Verge (source self-title)'), 'the Original-title row appears when the config renamed the feed');
+  click('#feed-modal-close');
+  await settle(20);
+  click('.tree-item[data-scope="feed:fixture-junk"]');
+  await settle(80);
+  click('#scope-info');
+  await settle(20);
+  ok(fb().textContent.includes('Failed'), 'a failing feed reports the failed crawl state');
+  ok(fb().textContent.includes('HTTP 500'), 'the crawl error is surfaced');
+  ok(fb().textContent.includes('1h ago'), '…with the failed attempt\u2019s age');
+  click('#feed-modal-close');
+  await settle(20);
+  click('.tree-item[data-scope="all"]');
+  await settle(80);
+  ok($('#scope-info').classList.contains('hidden'), 'the info icon hides again outside feed scopes');
+}
+console.log('resizable divider between the list and article panes');
+{
+  const domD = new JSDOM(html, { url: 'https://example.test/', runScripts: 'outside-only', pretendToBeVisual: true });
+  const wD = domD.window;
+  wD.fetch = window.fetch;
+  wD.localStorage.setItem('ghrss:ver', '3');
+  wD.localStorage.setItem('ghrss:ui', JSON.stringify({ listW: 500 }));
+  wD.eval(appSrc);
+  await settle(1200);
+  const rootD = wD.document.documentElement;
+  const prop = (k) => rootD.style.getPropertyValue(k);
+  ok(prop('--list-w') === '500px', 'a saved split restores on boot');
+  ok(prop('--article-cap') === 'none', 'the 940px default cap lifts once a custom split exists');
+  const rz = wD.document.querySelector('#reader_resizer');
+  ok(!!rz, 'the resizer element exists');
+  ok(wD.document.querySelector('#list_pane').nextElementSibling === rz && rz.nextElementSibling === wD.document.querySelector('#article_pane'), 'it sits exactly between the list and article panes');
+  const drag = (from, to) => {
+    rz.dispatchEvent(new wD.MouseEvent('pointerdown', { bubbles: true, clientX: from }));
+    wD.document.dispatchEvent(new wD.MouseEvent('pointermove', { bubbles: true, clientX: to }));
+    wD.document.dispatchEvent(new wD.MouseEvent('pointerup', { bubbles: true, clientX: to }));
+  };
+  drag(500, 640);
+  await settle(20);
+  ok(prop('--list-w') === '640px', 'dragging moves the split');
+  ok(JSON.parse(wD.localStorage.getItem('ghrss:ui') || '{}').listW === 640, 'the split persists to localStorage on release');
+  drag(500, 10);
+  await settle(20);
+  ok(prop('--list-w') === '260px', 'the split clamps at the list-pane minimum (260px)');
+  drag(500, 5000);
+  await settle(20);
+  ok(prop('--list-w') === '704px', 'the split clamps so the article pane keeps at least 320px (jsdom viewport 1024)');
+  rz.dispatchEvent(new wD.MouseEvent('dblclick', { bubbles: true }));
+  await settle(20);
+  ok(prop('--list-w') === '' && prop('--article-cap') === '', 'double-click resets to the default 44/56 split');
+  ok(!('listW' in JSON.parse(wD.localStorage.getItem('ghrss:ui') || '{}')), 'the saved split is forgotten on reset');
+  domD.window.close();
 }
 console.log('');
 console.log(`${pass} passed, ${fail} failed`);

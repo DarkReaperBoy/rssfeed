@@ -48,9 +48,20 @@ Feeds that reference a folder that doesn't exist still render — they appear as
 
 ## `feeds`
 
-Every feed is an object in the `feeds` array. Four kinds are supported.
+Every feed is an object in the `feeds` array. Four kinds are supported. **Only the URL and the folder are ever required** — everything else the fetcher can derive, it derives.
 
 ### RSS / Atom / YouTube
+
+The minimal form — this is all most feeds need:
+
+```json
+{
+  "url": "https://www.youtube.com/feeds/videos.xml?channel_id=…",
+  "folder": "tech-news"
+}
+```
+
+The fetcher derives a stable id from the URL (YouTube feeds become `yt-<channel id>`), and pulls the display title, website link, and channel image straight from the feed. Anything you set in the config wins over what the feed says:
 
 ```json
 {
@@ -65,26 +76,23 @@ Every feed is an object in the `feeds` array. Four kinds are supported.
 
 | Option | Required | What it does |
 |---|---|---|
-| `id` | ✔ | Stable slug. The feed's data file and article identity are derived from it — renaming it later resets read state for that feed's articles. |
 | `url` | ✔ | The feed URL. For **YouTube channels**, use `https://www.youtube.com/feeds/videos.xml?channel_id=…` (the channel's RSS). |
-| `title` | — | Display name. Falls back to the feed's own title. |
-| `site` | — | The human site, used for the favicon and links. |
+| `id` | — | Stable slug, derived from the URL when omitted (`yt-<channel id>` for YouTube, host+path otherwise). The feed's data file and article identity are derived from it — changing it later resets read state for that feed's articles. |
+| `title` | — | Display name. Falls back to the feed's own `<title>`. When your title differs from the source's, the feed card shows the source's name as "Original title". |
+| `site` | — | The human website, used for the favicon and links. Falls back to the feed's own channel link. |
 | `folder` | — | One folder id. For multiple folders, use `folders: ["a", "b"]` instead. |
 | `enabled` | — | `false` pauses the feed: nothing is fetched, existing articles are kept until retention ages them out, and the sidebar shows it as disabled. |
 | `fullText` | — | Per-feed override of `settings.fullTextDefault`. |
 | `dropShorts` | — | Per-feed override of `settings.dropShorts` (YouTube only). |
 | `filter` | — | Per-feed word filter, applied **at fetch time** so junk never reaches the data files. See [Filter syntax](#filter-syntax); only `include`/`exclude` apply (no actions). |
 
-Removing a feed from the config deletes its data file on the next run.
+Removing a feed from the config deletes its data file on the next run — including stale files left behind by earlier ids or crashed runs.
 
 ### Hacker News
 
 ```json
 {
-  "id": "hacker-news",
   "type": "hackernews",
-  "title": "Hacker News",
-  "site": "https://news.ycombinator.com/",
   "folder": "tech-news",
   "minPoints": 150,
   "minComments": 100
@@ -97,15 +105,13 @@ Removing a feed from the config deletes its data file on the next run.
 | `minPoints` | Only stories with at least this many points. |
 | `minComments` | Only stories with at least this many comments. |
 
-With neither cap set, it follows the HN front page. With one or both set, it pulls everything within the retention window that clears the bar(s), paging past Algolia's response cap.
+With neither cap set, it follows the HN front page. With one or both set, it pulls everything within the retention window that clears the bar(s), paging past Algolia's response cap. Running **several** Hacker News feeds with different caps requires explicit `id`s to tell them apart.
 
 ### 4chan boards
 
 ```json
 {
-  "id": "g",
   "type": "4chan",
-  "title": "/g/ - Technology",
   "board": "g",
   "folder": "tech-news",
   "minReplies": 300
