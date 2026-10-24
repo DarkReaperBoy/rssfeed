@@ -614,7 +614,7 @@ function renderEmpty(visible) {
   if (visible.length) { el.classList.add('hidden'); el.innerHTML = ''; return; }
   el.classList.remove('hidden');
   if (!state.index) {
-    el.innerHTML = `<h3>${navigator.onLine ? 'No data yet' : 'You look offline'}</h3><p>${navigator.onLine ? `The hourly GitHub Action builds <code>data/</code>. Trigger it once: <strong>Actions → Fetch feeds &amp; publish → Run workflow</strong>, or wait for the next hour.` : 'Reconnect and reload — the last published data loads from cache when it arrives.'}</p>`;
+    el.innerHTML = `<h3>${navigator.onLine ? 'No data yet' : 'You look offline'}</h3><p>${navigator.onLine ? `The scheduled GitHub Action (every 15 minutes) builds <code>data/</code>. Trigger it once: <strong>Actions → Fetch feeds &amp; publish → Run workflow</strong>, or wait for the next run.` : 'Reconnect and reload — the last published data loads from cache when it arrives.'}</p>`;
     return;
   }
 
@@ -631,7 +631,7 @@ function renderEmpty(visible) {
   } else if (ui.status === 'unread') {
     el.innerHTML = `<h3>All caught up 🎉</h3><p>No unread articles here.</p><p class="empty-hint">Over-marked? The ✓ button and its ▾ menu offer <em>Mark as unread</em> — everything, or articles read within the last 1–30 days.</p>`;
   } else {
-    el.innerHTML = `<h3>Nothing here</h3><p>No articles in this view. New items arrive when the hourly fetch runs.</p>`;
+    el.innerHTML = `<h3>Nothing here</h3><p>No articles in this view. New items arrive when the fetch runs (every 15 minutes).</p>`;
   }
 }
 
