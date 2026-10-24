@@ -50,8 +50,7 @@ const csp = {};
   const actualHash = 'sha256-' + crypto.createHash('sha256').update(inlineScript).digest('base64');
   const declaredHash = (csp['script-src'].match(/'sha256-([A-Za-z0-9+/=]{44})'/) || [])[1] || '';
   ok(!!declaredHash, 'script-src carries a sha256 hash for the inline script');
-  ok(('sha256-' + declaredHash) === 'sha256-VJpyryj7d2dx+TeyBxqR+raBB2L3YuYHS6R1fagFUj8=',
-    `KNOWN-STALE (Phase-2 fix target): the declared hash is pinned as-is — it does NOT match the actual inline script (${actualHash})`);
+  ok(('sha256-' + declaredHash) === actualHash, `the declared CSP hash matches the actual inline script (${actualHash}) — a mismatch means the browser blocks the theme boot script`);
 }
 
 console.log('static contract: SVG symbol table');
