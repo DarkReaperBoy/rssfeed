@@ -25,6 +25,7 @@ console.log('static contract: document shell');
   await fs.access(path.join(ROOT, 'assets/app.js')).then(() => ok(true, 'assets/app.js exists'), () => ok(false, 'assets/app.js exists'));
   await fs.access(path.join(ROOT, 'assets/styles.css')).then(() => ok(true, 'assets/styles.css exists'), () => ok(false, 'assets/styles.css exists'));
   ok(!/\son\w+="[^"]*"/.test(html), 'no inline event handlers in the document shell');
+  ok(!html.includes('style="') && !appSrc.includes('style="'), 'no inline style attributes in the document or app sources (style-src carries no unsafe-inline)');
   ok(html.includes('<noscript>'), 'the noscript fallback exists');
 }
 
@@ -39,7 +40,7 @@ const csp = {};
   }
   ok(csp['default-src'] === "'none'", "default-src is 'none'");
   ok(csp['script-src'].includes("'self'"), "script-src allows 'self'");
-  ok(csp['style-src'].includes("'self'") && csp['style-src'].includes("'unsafe-inline'"), "style-src allows 'self' + inline style attributes");
+  ok(csp['style-src'] === "'self'", "style-src is 'self' only — no inline style attributes anywhere (every style lives in the stylesheet)");
   ok(csp['img-src'] === 'http: https: data:', 'img-src is http/https/data');
   ok(csp['connect-src'] === "'self'", "connect-src is 'self' only");
   ok(csp['media-src'] === 'http: https:', 'media-src is http/https');

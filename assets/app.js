@@ -472,7 +472,7 @@ function attachmentsHtml(a) {
     return kind && kind !== 'image' ? `${kind.toUpperCase()} · ${name}` : name;
   };
   return `<div class="reader-attachments">
-    ${enc.map((e) => `<a href="${href(e.url)}" target="_blank" rel="noopener noreferrer"><svg style="width:16px;height:16px"><use href="#i-external"/></svg>${esc(label(e))}</a>`).join('')}
+    ${enc.map((e) => `<a href="${href(e.url)}" target="_blank" rel="noopener noreferrer"><svg class="att-icon"><use href="#i-external"/></svg>${esc(label(e))}</a>`).join('')}
     ${imgs.map((e) => `<a href="${href(e.url)}" target="_blank" rel="noopener noreferrer">${safeHref(e.url) === '#' ? '' : `<img src="${href(e.url)}" alt="">`}${esc(label(e))}</a>`).join('')}
   </div>`;
 }
@@ -671,7 +671,7 @@ function upgradeEmbeds(root, articleLink) {
     if (/^https?:\/\/(www\.)?soundcloud\.com\/[^/?#]+\/[^/?#]+/.test(url)) {
       wrap.innerHTML = `<button class="embed-facade embed-audio" type="button" title="Play audio" aria-label="Play audio">▶ SoundCloud</button>`;
       wrap.querySelector('button').addEventListener('click', stop(() => {
-        wrap.innerHTML = `<iframe src="https://w.soundcloud.com/player/?url=${encodeURIComponent(url)}&visual=false" title="SoundCloud player" allow="encrypted-media" loading="lazy" style="height:166px"></iframe>`;
+        wrap.innerHTML = `<iframe class="embed-soundcloud" src="https://w.soundcloud.com/player/?url=${encodeURIComponent(url)}&visual=false" title="SoundCloud player" allow="encrypted-media" loading="lazy"></iframe>`;
       }), { once: true });
       a.replaceWith(wrap); continue;
     }

@@ -49,6 +49,58 @@ const attHrefs = $$('#reader-slot .reader-attachments a').map((a) => a.getAttrib
 attHrefs.some((h) => h && h !== '#' && !/^https?:/i.test(h)) ? bad(`reader attachment renders non-http href: ${attHrefs.join(', ')}`) : good(`all ${attHrefs.length} reader attachment hrefs are http(s) or the # degradation`);
 const imgAtt = $$('#reader-slot .reader-attachments a img').map((i) => i.getAttribute('src'));
 imgAtt.some((s) => s && !/^https?:/i.test(s)) ? bad(`attachment image non-http src: ${imgAtt.join(', ')}`) : good(`all ${imgAtt.length} attachment image srcs are http(s)`);
-console.log(problems ? `SECURITY GAPS: ${problems}` : 'client boundaries clean');
+console.log('poisoned inputs: hostile localStorage + hash + search never reach an HTML sink');
+{
+  const poisonArts = [
+    { id: 'p-1', title: '"><img src=x onerror=alert(1)> Quote attack', link: 'https://example.com/p1', date: now - 3600e3,
+      author: '<script>alert("author")</script>', summary: '"><svg onload=alert(2)>',
+      content: '<p>ok</p>', text: null, enclosures: [], fetchedAt: now },
+    { id: 'p-2', title: "'-quote & <b>bold</b> title", link: 'https://example.com/p2', date: now - 2 * 3600e3, author: null,
+      summary: 'plain', content: '<p>ok</p>', text: null, enclosures: [], fetchedAt: now },
+  ];
+  const cfgP = { settings: {}, folders: [], feeds: [{ id: 'pf', title: '"><b>Pois"on</b>', url: 'https://pf.test' }], filters: [] };
+  const idxP = { generatedAt: now, folders: [], feeds: { pf: { title: '"><b>Pois"on</b>', site: '', folder: null, folders: [], count: 2, newest: now, oldest: now - 2 * 3600e3 } } };
+  const domP = new JSDOM(html, { url: 'https://example.test/#article/%22%3E%3Cscript%3Ealert(3)%3C/script%3E', runScripts: 'outside-only', pretendToBeVisual: true });
+  const wP = domP.window;
+  wP.fetch = async (u) => {
+    const p = String(u).split('?')[0];
+    if (p === 'config.json') return { ok: true, status: 200, json: async () => structuredClone(cfgP) };
+    if (p === 'data/index.json') return { ok: true, status: 200, json: async () => structuredClone(idxP) };
+    if (p === 'data/all-feeds.json') return { ok: true, status: 200, json: async () => structuredClone({ articles: poisonArts.map((a) => ({ ...a, _feed: 'pf' })) }) };
+    return { ok: false, status: 404, statusText: 'NF', json: async () => { throw new Error('404'); } };
+  };
+  wP.localStorage.setItem('ghrss:theme', 'javascript:alert(4)');
+  wP.localStorage.setItem('ghrss:read', JSON.stringify({ '"><img src=x onerror=alert(5)>': 1, __proto__: 5 }));
+  wP.localStorage.setItem('ghrss:kept', JSON.stringify({ "<svg onload=alert(6)>": 2 }));
+  wP.localStorage.setItem('ghrss:ui', JSON.stringify({ status: '"><script>', sortDir: 'oldest', openFolders: { '<img>': true }, markAgeDays: 7 }));
+  const vcErrors = [];
+  wP.addEventListener('error', (e) => vcErrors.push(String(e.message)));
+  wP.eval(appSrc);
+  await new Promise((r) => setTimeout(r, 1100));
+  const $$P = (s) => [...wP.document.querySelectorAll(s)];
+  let problems2 = 0;
+  const bad2 = (msg) => { problems2++; console.log('  ✗ ' + msg); };
+  const good2 = (msg) => console.log('  ✓ ' + msg);
+  const jsHrefP = $$P('a[href^="javascript:"]');
+  jsHrefP.length ? bad2(`${jsHrefP.length} javascript: href(s) under poisoned inputs`) : good2('no javascript: hrefs under poisoned inputs');
+  const onAttr = $$P('[onerror], [onload], [onclick]');
+  onAttr.length ? bad2(`${onAttr.length} inline event attribute(s) rendered`) : good2('no inline event attributes rendered');
+  const strayScript = $$P('script:not([src])').filter((s) => s.textContent.includes('alert'));
+  strayScript.length ? bad2(`${strayScript.length} injected script node(s)`) : good2('no injected script nodes');
+  $$P('#list .row').length === 2 ? good2('both poisoned-title rows render as text') : bad2(`row count wrong: ${$$P('#list .row').length}`);
+  $$P('#list .row-title').every((t) => !t.querySelector('img, svg, script, b')) ? good2('hostile title markup renders as inert text') : bad2('hostile title markup became elements');
+  wP.document.querySelector('#search-open').dispatchEvent(new wP.MouseEvent('click', { bubbles: true }));
+  const si = wP.document.querySelector('#search-input');
+  si.value = '<img src=x onerror=alert(7)> "quoted" <script>alert(8)</script>';
+  si.dispatchEvent(new wP.Event('input', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 400));
+  const emptyHtml = wP.document.querySelector('#empty').innerHTML;
+  emptyHtml.includes('<img') || emptyHtml.includes('<script') ? bad2('hostile search query became markup in the empty state') : good2('hostile search query renders as escaped text');
+  wP.document.querySelector('#search-close').dispatchEvent(new wP.MouseEvent('click', { bubbles: true }));
+  wP.document.documentElement.dataset.theme !== 'javascript:alert(4)' ? good2('hostile theme value never reaches the DOM') : bad2('hostile theme leaked into dataset');
+  problems2 ? console.log(`POISONED-INPUT GAPS: ${problems2}`) : console.log('poisoned inputs all neutralized');
+  domP.window.close();
+  problems += problems2;
+}
 dom.window.close();
 process.exit(problems ? 1 : 0);

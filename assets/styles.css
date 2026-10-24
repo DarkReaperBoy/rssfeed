@@ -62,6 +62,12 @@ html[data-theme="auto"] { color-scheme: light dark; }
 
 * { box-sizing: border-box; }
 html, body { height: 100%; }
+.svg-sprite { display: none; }
+.noscript-fallback {
+  position: fixed; inset: 0; background: #fefefe; color: #1a2433;
+  display: flex; align-items: center; justify-content: center; text-align: center;
+  padding: 24px; font: 15px/1.6 system-ui, sans-serif; z-index: 999;
+}
 body {
   margin: 0;
   font: 14px/1.5 var(--font);
@@ -393,6 +399,7 @@ body.article-open #scroll-nav { display: flex; }
 .reader-attachments { margin-top: 14px; display: flex; flex-direction: column; gap: 6px; }
 .reader-attachments a { display: flex; gap: 8px; align-items: center; font-size: 13.5px; text-decoration: none; padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); }
 .reader-attachments a:hover { border-color: var(--accent); }
+.reader-attachments svg.att-icon { width: 16px; height: 16px; }
 .reader-attachments img { width: 34px; height: 34px; object-fit: cover; border-radius: 5px; }
 
 .embed { position: relative; margin: 14px 0; }
@@ -422,6 +429,7 @@ body.article-open #scroll-nav { display: flex; }
 }
 .embed-facade.embed-audio::after, .embed-facade.embed-audio::before { display: none; } 
 .embed iframe { width: 100%; aspect-ratio: 16 / 9; border: 0; border-radius: var(--radius); }
+.embed iframe.embed-soundcloud { height: 166px; aspect-ratio: auto; }
 
 
 #empty { padding: 60px 20px; text-align: center; color: var(--text-dim); margin: auto; }
