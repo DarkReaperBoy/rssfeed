@@ -239,3 +239,11 @@ Profiled with the **real published dataset** (61 feeds / 1 978 articles / 5 MB) 
 Every path is **flat at 2× data** (row click 24.4 ms, scope 70.5 ms — cost scales with rendered rows, not the dataset). Decomposition: the jsdom `renderList` cost is ~78% parse5 `innerHTML` (51.2 ms measured in isolation for 150 rows); all app computation is sub-millisecond at 3 956 articles (filter+sort 0.6 ms, row strings 0.1 ms, full-article scans 0.1 ms).
 
 Rejected (complexity > measured gain): in-place patching for scope transitions (24 ms real — imperceptible); incremental unread counters (full scan = 0.1 ms; state duplication loses); boot (network-bound, progressive rendering already in place); fetcher (conditional GET + 5-way concurrency, no N+1). Prior pass's optimizations re-verified effective at the same scale. Zero console output and zero page errors across the whole Chromium session.
+
+### Phase 5 — UI/UX & polish
+
+| Commit | Change | Verify |
+|---|---|---|
+| `1694d72` | **Empty-state copy said "hourly"** — the workflow runs every 15 minutes. Both stale copies corrected (no-data + nothing-here states) and pinned. | `npm run test:char` → "empty-state copy matches the real fetch schedule" |
+
+Real-Chromium walk against the current code + the real published dataset (19 screenshots, working notes): boot/reader/menus/modals/search/feed-view in light AND dark (via emulated `prefers-color-scheme` — theme is config/system-driven by design); mobile 390×844 (drawer + scrim + article-pane takeover + resizer hidden); 1120px stacking; refresh-failure keeps all data with an honest status line; caught-up empty state; WCAG AA contrast in both themes (worst case 4.65:1 light, 8.03:1 dark); focus-visible rings; aria labels/roles/haspopup/expanded/valuetext; tab order = DOM order with zero positive tabindex; touch targets via coarse-pointer CSS. VLM-flagged "text overlap" readings disproven by DOM geometry (0 rect intersections across 40 mobile rows; reader title within pane and wrapping; the mark-menu covering content is transient overlay by design). Cross-browser beyond Chromium verified by feature review (color-mix, :focus-visible, aspect-ratio, 100dvh, prefers-* — all baseline in current Firefox/Safari). **Zero console messages and zero page errors across every session of the walk.**
