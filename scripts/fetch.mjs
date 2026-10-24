@@ -18,7 +18,7 @@ const DEFAULT_RETENTION_DAYS = 60;
 const FETCH_CONCURRENCY = 5;       
 const parser = new Parser({
   headers: { 'User-Agent': UA, Accept: 'application/rss+xml, application/atom+xml, application/xml;q=0.9, */*;q=0.8' },
-  customFields: { item: [['media:group', 'mediaGroup'], ['media:content', 'mediaContent', { keepArray: true }], ['media:thumbnail', 'mediaThumbnail']] },
+  customFields: { item: [['media:group', 'mediaGroup'], ['media:content', 'mediaContent', { keepArray: true }], ['media:thumbnail', 'mediaThumbnail'], ['enclosure', 'enclosures', { keepArray: true }]] },
 });
 const sanitizeOpts = {
   allowedTags: [...new Set(sanitizeHtml.defaults.allowedTags.concat([
@@ -264,7 +264,8 @@ function pickEnclosures(item) {
     seen.add(url);
     out.push({ url, type: (type || '').split(';')[0].trim() });
   };
-  for (const e of item.enclosures || []) push(e.url, e.type);
+  for (const e of item.enclosures || []) push(e.url ?? e.$?.url, e.type ?? e.$?.type);
+  if (item.enclosure) push(item.enclosure.url, item.enclosure.type);
   for (const m of item.mediaContent || []) push(m.$?.url, m.$?.type);
   const thumb = item.mediaThumbnail?.$?.url;
   if (thumb) push(thumb, 'image/thumbnail');

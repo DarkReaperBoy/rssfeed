@@ -17,6 +17,13 @@ const rss1Real = () => {
 };
 let rss1Body = rss1Real();
 const rss2 = () => `<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel><title>Feed Two</title><link>https://example.test/two</link><image><url>https://example.test/two.png</url><title>Feed Two</title></image>${item(10, 'Other feed post')}</channel></rss>`;
+const hostileRss = () => `<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel><title>Hostile Feed</title><link>javascript:alert(1)</link><description>evil channel</description>
+<item><title>Script payload item</title><link>javascript:alert(document.domain)</link><guid>h-1</guid><description><![CDATA[<p>real text</p><script>alert(1)</script><img src=x onerror="alert(2)"><a href="javascript:alert(3)">evil link</a><iframe src="https://evil.example/embed"></iframe>]]></description></item>
+<item><title>${'T'.repeat(3000)}</title><link>https://example.test/long</link><guid>h-2</guid><enclosure url="data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==" type="image/png"/><enclosure url="javascript:alert(4)" type="audio/mpeg"/><enclosure url="https://ok.example/pic.jpg" type="image/jpeg"/><description>enclosure boundary test</description></item>
+<item><title>Duplicate guid one</title><link>https://example.test/dup1</link><guid>h-dup</guid><description>first</description></item>
+<item><title>Duplicate guid two</title><link>https://example.test/dup2</link><guid>h-dup</guid><description>second</description></item>
+</channel></rss>`;
+const brokenRss = '<?xml version="1.0"?><rss><channel><title>Broken</title><item><title>never closes';
 const server = http.createServer((req, res) => {
   const etag = '"v1"';
   if (req.url === '/feed1.xml') {
@@ -28,6 +35,12 @@ const server = http.createServer((req, res) => {
     feed2Hits++;
     res.writeHead(200, { 'Content-Type': 'application/rss+xml; charset=utf-8' });
     res.end(rss2());
+  } else if (req.url === '/feed3.xml') {
+    res.writeHead(200, { 'Content-Type': 'application/rss+xml; charset=utf-8' });
+    res.end(hostileRss());
+  } else if (req.url === '/feed4.xml') {
+    res.writeHead(200, { 'Content-Type': 'application/rss+xml; charset=utf-8' });
+    res.end(brokenRss);
   } else { res.writeHead(404); res.end(); }
 });
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
@@ -89,6 +102,12 @@ const server2 = http.createServer((req, res) => {
     feed2Hits++;
     res.writeHead(200, { 'Content-Type': 'application/rss+xml; charset=utf-8' });
     res.end(rss2());
+  } else if (req.url === '/feed3.xml') {
+    res.writeHead(200, { 'Content-Type': 'application/rss+xml; charset=utf-8' });
+    res.end(hostileRss());
+  } else if (req.url === '/feed4.xml') {
+    res.writeHead(200, { 'Content-Type': 'application/rss+xml; charset=utf-8' });
+    res.end(brokenRss);
   } else { res.writeHead(404); res.end(); }
 });
 await new Promise((r) => server2.listen(port, '127.0.0.1', r));
@@ -210,6 +229,47 @@ out = await run();
   const one9 = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/feeds/renamed-one.json'), 'utf8'));
   ok(one9.articles.length === 3, 'the un-banned article returns with the retained set (3 again)');
   ok(one9.articles.every((a) => a.autoRead === undefined && a.keepUnread === undefined && a.highlight === undefined), 'removing the filters clears every stale flag');
+}
+console.log('run 10: adversarial ingest — hostile payloads neutralized at every boundary');
+fs.writeFileSync(path.join(SANDBOX, 'config.json'), JSON.stringify({
+  settings: { retentionDays: 30, fullTextDefault: false },
+  feeds: [{ id: 'three', title: 'Hostile Feed', url: `http://127.0.0.1:${port}/feed3.xml` }],
+}, null, 2));
+await new Promise((r) => setTimeout(r, 1100));
+out = await run();
+{
+  const three = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/feeds/three.json'), 'utf8'));
+  const allTen = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/all-feeds.json'), 'utf8'));
+  const idxTen = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/index.json'), 'utf8'));
+  ok(three.articles.length === 3, `four hostile items with duplicate guids collapse to three stored (${three.articles.length})`);
+  const scriptItem = three.articles.find((a) => a.title === 'Script payload item');
+  ok(!!scriptItem, 'the hostile item survives as data');
+  ok(scriptItem.link === '', 'a javascript: item link degrades to empty (never an executable href)');
+  ok(!/<script/i.test(scriptItem.content) && !/onerror/i.test(scriptItem.content), 'script tags and onerror attributes are stripped from stored content');
+  ok(!/href="javascript:/i.test(scriptItem.content), 'no javascript: href survives in stored content');
+  ok(!/<iframe[^>]+evil\.example/.test(scriptItem.content) && scriptItem.content.includes('data-blocked-embed'), 'an off-allowlist iframe becomes the blocked-embed marker, never a live frame');
+  const longItem = three.articles.find((a) => /^T{300}$/.test(a.title));
+  ok(!!longItem, `the 3000-char title is capped to 300 (${three.articles.find((a) => a.title.length > 300)?.title.length || 'none over'})`);
+  const encItem = three.articles.find((a) => a.title.length === 300);
+  ok(!!encItem && encItem.enclosures.length === 1 && encItem.enclosures[0].url === 'https://ok.example/pic.jpg', `RSS <enclosure> reaches the data: only the http(s) one survives, data: and javascript: dropped (${JSON.stringify(encItem?.enclosures)})`);
+  ok(idxTen.feeds.three.site === '', 'a javascript: channel link never becomes the feed site');
+  ok(allTen.articles.length === 3 && allTen.articles.every((a) => a._feed === 'three'), 'all-feeds.json carries the cleaned set');
+  const dupTitles = three.articles.filter((a) => /^Duplicate guid (one|two)$/.test(a.title));
+  ok(dupTitles.length === 1, `same-guid items merge into one stored article (${dupTitles.map((a) => a.title).join('/')})`);
+}
+console.log('run 11: malformed XML — parse failure keeps the retained set');
+fs.writeFileSync(path.join(SANDBOX, 'config.json'), JSON.stringify({
+  settings: { retentionDays: 30, fullTextDefault: false },
+  feeds: [{ id: 'three', title: 'Hostile Feed', url: `http://127.0.0.1:${port}/feed4.xml` }],
+}, null, 2));
+await new Promise((r) => setTimeout(r, 1100));
+out = await run();
+{
+  const three = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/feeds/three.json'), 'utf8'));
+  const idxEleven = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/index.json'), 'utf8'));
+  ok(/PARSE FAILED/.test(out), 'the malformed feed reports a parse failure');
+  ok(three.articles.length === 3, 'the parse failure keeps the previous cleaned set (3)');
+  ok(idxEleven.feeds.three.status.ok === false && /Parse error/.test(idxEleven.feeds.three.status.error || ''), 'the crawl status records the parse error');
 }
 console.log('id-migration matchers (unit)');
 {

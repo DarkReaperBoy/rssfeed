@@ -28,5 +28,7 @@ jobs:
         run: npm run test:sec
       - name: Static document contract suite
         run: npm run test:static
+      - name: Chaos suite (rapid-interaction error sweep)
+        run: npm run test:chaos
       - name: Fetcher e2e (id stability, conditional GET, backend filters)
         run: npm run test:e2e
