@@ -176,6 +176,9 @@ const linkify = (text) => text.replace(/https?:\/\/[^\s<]+/gi, (u0) => {
   const trail = u0.slice(u.length);
   return `<a href="${attr}">${attr}</a>${trail}`;
 });
+export function pickTitle(item) {
+  return stripTags(item.title || '').slice(0, 300) || '(untitled)';
+}
 export function pickContent(item) {
   let raw = item['content:encoded'] || item.content || item.description || item.summary || item.contentSnippet || '';
   if (!raw && item.mediaGroup) {
@@ -622,7 +625,7 @@ async function main() {
     let shortsDropped = 0;
     let filterDropped = 0;
     for (const item of parsed.items || []) {
-      const title = stripTags(item.title || '(untitled)') || '(untitled)';
+      const title = pickTitle(item);
       const isHttpUrl = (u) => typeof u === 'string' && /^https?:\/\//i.test(u.replace(/[\s\u0000-\u001f]+/g, ''));
       const link = isHttpUrl(item.link) ? item.link : (isHttpUrl(item.guid) ? item.guid : '');
       const content = pickContent(item);

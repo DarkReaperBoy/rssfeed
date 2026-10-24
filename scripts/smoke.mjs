@@ -1031,6 +1031,19 @@ console.log('fetch.mjs pure helpers (entity decode, linkify, ids, matchers)');
   ok(fetchMod.feedFilterDrop({ title: 't', content: '', author: 'alice', link: 'https://example.com/x' }, { include: bAliased }) === false, 'aliased fields match');
   ok(fetchMod.feedFilterDrop({ title: 't', content: '', author: 'bob', link: 'https://other.dev/' }, { include: bAliased }) === true, 'aliased-field miss drops');
 }
+console.log('RSS titles are capped at ingest (like 4chan/HN titles)');
+{
+  const fetchMod = await import('./fetch.mjs');
+  ok(typeof fetchMod.pickTitle === 'function', 'pickTitle is exported');
+  if (typeof fetchMod.pickTitle === 'function') {
+    ok(fetchMod.pickTitle({ title: 'Normal title' }) === 'Normal title', 'a normal title passes through untouched');
+    ok(fetchMod.pickTitle({}) === '(untitled)', 'a missing title falls back to (untitled)');
+    ok(fetchMod.pickTitle({ title: '   ' }) === '(untitled)', 'a whitespace-only title falls back to (untitled)');
+    ok(fetchMod.pickTitle({ title: '<b>XSS</b> attempt' }) === 'XSS attempt', 'title markup is flattened');
+    const long = fetchMod.pickTitle({ title: 'T'.repeat(3000) });
+    ok(long.length === 300, `a 3000-char title is capped to 300 (got ${long.length})`);
+  }
+}
 console.log('server sanitizer: iframe allowlist mirrors the client (SoundCloud embeds)');
 {
   const fetchMod = await import('./fetch.mjs');
