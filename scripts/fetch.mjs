@@ -391,6 +391,23 @@ async function fetchChanCatalog(board, ifModifiedSince) {
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return { json: await res.json(), lastModified: res.headers.get('last-modified') || null };
 }
+export function channelKeyOf(url) {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.replace(/^www\./i, '');
+    if (!/(^|\.)youtube\.com$/i.test(host)) return null;
+    const cid = u.searchParams.get('channel_id') || u.searchParams.get('user') || u.searchParams.get('playlist_id');
+    return cid ? String(cid).toLowerCase() : null;
+  } catch { return null; }
+}
+export function findPrevIdFor(feed, prevFeedMeta) {
+  const ck = feed.url ? channelKeyOf(feed.url) : null;
+  for (const [oldId, m] of Object.entries(prevFeedMeta || {})) {
+    if (ck && typeof m?.site === 'string' && m.site.toLowerCase().includes(ck)) return oldId;
+    if (feed.url && m?.xml === feed.url) return oldId;
+  }
+  return null;
+}
 async function main() {
   const config = await loadJson(path.join(ROOT, 'config.json'), null);
   if (!config) {
@@ -425,11 +442,24 @@ async function main() {
   const processFeed = async (feed) => {
     currentFeedIds.add(feed.id);
     const file = path.join(FEEDS_DIR, `${feed.id}.json`);
-    const prev = await loadJson(file, { articles: [] });
+    let prev = await loadJson(file, { articles: [] });
+    let prevStatus = prevFeedMeta[feed.id]?.status || {};
+    let prevMeta = prevFeedMeta[feed.id] || null;
+    if (!(prev.articles || []).length) {
+      const adoptId = findPrevIdFor(feed, prevFeedMeta);
+      if (adoptId) {
+        const adopted = await loadJson(path.join(FEEDS_DIR, `${adoptId}.json`), { articles: [] });
+        if ((adopted.articles || []).length) {
+          prev = adopted;
+          prevStatus = { ...prevStatus, ...(prevFeedMeta[adoptId]?.status || {}) };
+          prevMeta = prevFeedMeta[adoptId] || prevMeta;
+          console.log(`[${feed.id}] adopted ${adopted.articles.length} articles from previous id "${adoptId}"`);
+        }
+      }
+    }
     const prevById = new Map((prev.articles || []).map((a) => [a.id, a]));
     const prevIdByKey = new Map();
     for (const a of prev.articles || []) prevIdByKey.set(a.link ? `l:${a.link}` : `t:${a.title}`, a.id);
-    const prevStatus = prevFeedMeta[feed.id]?.status || {};
     const status = {
       ok: true,
       lastAttempt: now,
@@ -443,7 +473,7 @@ async function main() {
       const kept = purgePrev(prev);
       await fs.writeFile(file, JSON.stringify({ articles: kept }));
       index.feeds[feed.id] = {
-        ...summarizeFeed({ ...feed, ...feedMetaFor(feed, prevFeedMeta[feed.id]) }, kept),
+        ...summarizeFeed({ ...feed, ...feedMetaFor(feed, prevMeta) }, kept),
         status: {
           ok: false,
           disabled: true,
@@ -490,7 +520,7 @@ async function main() {
         status.error = err.message;
         status.consecutiveFailures = (prevStatus.consecutiveFailures || 0) + 1;
         await fs.writeFile(file, JSON.stringify({ articles: prev.articles || [] }));
-        index.feeds[feed.id] = { ...summarizeFeed({ ...effFeed, ...feedMetaFor(effFeed, prevFeedMeta[feed.id]) }, prev.articles || []), status };
+        index.feeds[feed.id] = { ...summarizeFeed({ ...effFeed, ...feedMetaFor(effFeed, prevMeta) }, prev.articles || []), status };
         written.set(feed.id, prev.articles || []);
         console.error(`[${feed.id}] FETCH FAILED: ${err.message} — keeping ${(prev.articles || []).length} threads`);
         return;
@@ -504,7 +534,7 @@ async function main() {
         const keptAll = (prev.articles || []).filter((a) => !(feedBlocks && feedFilterDrop(a, feedBlocks)));
         const kept = cap ? keptAll.slice(0, cap) : keptAll;
         await fs.writeFile(file, JSON.stringify({ articles: kept }));
-        index.feeds[feed.id] = { ...summarizeFeed({ ...effFeed, ...feedMetaFor(effFeed, prevFeedMeta[feed.id]) }, kept), status };
+        index.feeds[feed.id] = { ...summarizeFeed({ ...effFeed, ...feedMetaFor(effFeed, prevMeta) }, kept), status };
         written.set(feed.id, kept);
         console.log(`[${feed.id}] /${board}/: not modified — keeping ${kept.length} live threads`);
         return;
@@ -527,7 +557,7 @@ async function main() {
       }
       const kept = cap ? articles.slice(0, cap) : articles;
       await fs.writeFile(file, JSON.stringify({ articles: kept }));
-      index.feeds[feed.id] = { ...summarizeFeed({ ...effFeed, ...feedMetaFor(effFeed, prevFeedMeta[feed.id]) }, kept), status };
+      index.feeds[feed.id] = { ...summarizeFeed({ ...effFeed, ...feedMetaFor(effFeed, prevMeta) }, kept), status };
       written.set(feed.id, kept);
       console.log(`[${feed.id}] /${board}/: ${kept.length} live threads${skipped ? ` (skipped ${skipped} below the reply/word filters)` : ''}${filtered ? ` (dropped ${filtered} by word filter)` : ''}${cap ? ` (capped at ${cap})` : ''}`);
       return;
@@ -555,7 +585,7 @@ async function main() {
         status.consecutiveFailures = (prevStatus.consecutiveFailures || 0) + 1;
         const keptFail = [...(prev.articles || [])].filter((a) => now - a.date < retainMs);
         await fs.writeFile(file, JSON.stringify({ articles: keptFail }));
-        index.feeds[feed.id] = { ...summarizeFeed({ ...effFeed, ...feedMetaFor(effFeed, prevFeedMeta[feed.id]) }, keptFail), status };
+        index.feeds[feed.id] = { ...summarizeFeed({ ...effFeed, ...feedMetaFor(effFeed, prevMeta) }, keptFail), status };
         written.set(feed.id, keptFail);
         console.error(`[${feed.id}] FETCH FAILED: ${err.message} — keeping ${keptFail.length} stories from last ${retentionDays} days`);
         return;
@@ -564,7 +594,7 @@ async function main() {
       status.lastSuccess = now;
       status.consecutiveFailures = 0;
       status.error = null;
-      const fmeta = feedMetaFor(feed, prevFeedMeta[feed.id]);
+      const fmeta = feedMetaFor(feed, prevMeta);
       const articles = [];
       let filtered = 0;
       for (const hit of hits) {
@@ -603,7 +633,7 @@ async function main() {
           feedBlocks: compileFeedFilter(feed),
         });
         await fs.writeFile(file, JSON.stringify({ articles: kept }));
-        index.feeds[feed.id] = { ...summarizeFeed({ ...feed, ...feedMetaFor(feed, prevFeedMeta[feed.id]) }, kept), status };
+        index.feeds[feed.id] = { ...summarizeFeed({ ...feed, ...feedMetaFor(feed, prevMeta) }, kept), status };
         written.set(feed.id, kept);
         console.log(`[${feed.id}] not modified — keeping ${kept.length} articles`);
         return;
@@ -622,7 +652,7 @@ async function main() {
       const kept = [...(prev.articles || [])].filter((a) => now - a.date < retainMs);
       await fs.writeFile(file, JSON.stringify({ articles: kept }));
       index.feeds[feed.id] = {
-        ...summarizeFeed({ ...feed, ...feedMetaFor(feed, prevFeedMeta[feed.id]) }, kept),
+        ...summarizeFeed({ ...feed, ...feedMetaFor(feed, prevMeta) }, kept),
         status,
       };
       written.set(feed.id, kept);
@@ -640,7 +670,7 @@ async function main() {
       let kept = [...(prev.articles || [])].filter((a) => now - a.date < retainMs);
       await fs.writeFile(file, JSON.stringify({ articles: kept }));
       index.feeds[feed.id] = {
-        ...summarizeFeed({ ...feed, ...feedMetaFor(feed, prevFeedMeta[feed.id]) }, kept),
+        ...summarizeFeed({ ...feed, ...feedMetaFor(feed, prevMeta) }, kept),
         status,
       };
       written.set(feed.id, kept);
@@ -651,7 +681,7 @@ async function main() {
     status.lastSuccess = now;
     status.consecutiveFailures = 0;
     status.error = null;
-    const fmeta = feedMetaFor(feed, prevFeedMeta[feed.id], parsed);
+    const fmeta = feedMetaFor(feed, prevMeta, parsed);
     const wantText = feed.fullText ?? fullTextDefault;
     let textBudget = wantText ? TEXT_EXTRACT_BUDGET : 0;
     const ytShorts = isYouTubeFeed(feed.url) && (feed.dropShorts ?? dropShortsDefault);

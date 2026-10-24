@@ -136,6 +136,38 @@ const idx5 = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/index.json'), '
 ok(!(idTwo in idx5.feeds), 'the removed feed leaves the index');
 const all5 = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/all-feeds.json'), 'utf8'));
 ok(all5.articles.length > 0 && all5.articles.every((a) => a._feed === idOne), 'the removed feed leaves all-feeds.json entirely');
+console.log('run 6: renaming a feed id adopts the previous data (lossless id migration)');
+fs.writeFileSync(path.join(SANDBOX, 'config.json'), JSON.stringify({
+  settings: { retentionDays: 30, fullTextDefault: false },
+  feeds: [{ id: 'renamed-one', url: `http://127.0.0.1:${port}/feed1.xml` }],
+}, null, 2));
+await new Promise((r) => setTimeout(r, 1100));
+out = await run();
+ok(/adopted 3 articles from previous id/.test(out), 'the run logs the adoption');
+ok(fs.existsSync(path.join(SANDBOX, 'data/feeds/renamed-one.json')), 'the renamed id owns the data file now');
+const one6 = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/feeds/renamed-one.json'), 'utf8'));
+ok(one6.articles.length === 3, `the renamed id kept all 3 articles (${one6.articles.length})`);
+ok(one6.articles.find((a) => a.title === 'First post (EDITED TITLE)').id === first1.id, '…with identical article ids (read state survives the rename)');
+ok(!fs.existsSync(path.join(SANDBOX, 'data/feeds/127-0-0-1-feed1.json')), 'the pre-rename file is wiped');
+const idx6 = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/index.json'), 'utf8'));
+ok(!('127-0-0-1-feed1' in idx6.feeds) && 'renamed-one' in idx6.feeds, 'the index carries only the new id');
+ok(idx6.feeds['renamed-one'].status.ok === true, 'the adopted status keeps the crawl healthy');
+console.log('id-migration matchers (unit)');
+{
+  const { pathToFileURL } = await import('node:url');
+  const { channelKeyOf, findPrevIdFor } = await import(pathToFileURL(path.join(ROOT, 'scripts/fetch.mjs')).href);
+  ok(channelKeyOf('https://www.youtube.com/feeds/videos.xml?channel_id=UCAbC') === 'ucabc', 'channelKeyOf extracts a lowercase channel id');
+  ok(channelKeyOf('https://example.com/feed.xml') === null, 'non-YouTube urls have no channel key');
+  const fakePrev = {
+    'yt-ucabc': { site: 'https://www.youtube.com/channel/UCAbC', xml: 'https://www.youtube.com/feeds/videos.xml?channel_id=UCAbC' },
+    'old-xml': { site: '', xml: 'https://example.com/feed.xml' },
+    'unrelated': { site: 'https://other.test', xml: 'https://other.test/rss' },
+  };
+  ok(findPrevIdFor({ url: 'https://www.youtube.com/feeds/videos.xml?channel_id=UCAbC' }, fakePrev) === 'yt-ucabc', 'a YouTube feed matches its predecessor via the channel id in the old site URL');
+  ok(findPrevIdFor({ url: 'https://example.com/feed.xml' }, fakePrev) === 'old-xml', 'an exact xml match adopts too');
+  ok(findPrevIdFor({ url: 'https://nowhere.test/x' }, fakePrev) === null, 'no false adoptions');
+  ok(findPrevIdFor({ url: 'https://www.youtube.com/feeds/videos.xml?channel_id=UCXYZ' }, fakePrev) === null, 'a different channel never adopts');
+}
 server2.close();
 fs.rmSync(SANDBOX, { recursive: true, force: true });
 console.log(`${pass} passed, ${fail} failed`);
