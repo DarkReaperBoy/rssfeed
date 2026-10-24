@@ -811,21 +811,23 @@ function sanitizeReaderDom(root) {
   });
 }
 
-let forceAllowed = false; 
-function patchRow(id) {
-
+let forceAllowed = false;
+const rowEl = (id) => {
   const safe = (window.CSS && CSS.escape) ? CSS.escape(id) : String(id).replace(/"/g, '\\"');
-  const rowEl = $(`.row[data-id="${safe}"]`);
-  const a = rowEl ? findArticle(id) : null;
-  if (!rowEl || !a) return false;
-  rowEl.classList.toggle('unread', !isRead(a));
-  const t = rowEl.querySelector('[data-act="toggle-read"]');
+  return $(`.row[data-id="${safe}"]`);
+};
+function patchRow(id) {
+  const row = rowEl(id);
+  const a = row ? findArticle(id) : null;
+  if (!row || !a) return false;
+  row.classList.toggle('unread', !isRead(a));
+  const t = row.querySelector('[data-act="toggle-read"]');
   if (t) {
     t.title = isRead(a) ? 'Mark as unread' : 'Mark as read';
     const u = t.querySelector('use');
     if (u) u.setAttribute('href', isRead(a) ? '#i-read' : '#i-unread');
   }
-  const k = rowEl.querySelector('[data-act="keep"]');
+  const k = row.querySelector('[data-act="keep"]');
   if (k) {
     k.title = isKept(a) ? 'Stop keeping unread' : 'Keep unread';
     k.setAttribute('aria-pressed', String(isKept(a)));
@@ -1234,13 +1236,18 @@ function clearHashArticle() {
 function openArticle(id) {
   const a = findArticle(id);
   if (!a || a._f?.hidden) return false;
-
-  if (state.expandedId) state.keepVisible.add(state.expandedId);
+  if (state.expandedId) {
+    state.keepVisible.add(state.expandedId);
+    if (state.expandedId !== id) { const prevRow = rowEl(state.expandedId); if (prevRow) prevRow.classList.remove('expanded'); }
+  }
   state.expandedId = id;
-  renderList();
-  listScrollTo(id);
+  const row = rowEl(id);
+  if (row) { row.classList.add('expanded'); listScrollTo(id); }
+  else { renderList(); listScrollTo(id); }
+  renderReaderPane(state.visible);
   if (ui.autoScroll) { const ap = $('#article_pane'); if (ap) ap.scrollTop = 0; }
   if (!isRead(a) && !isKept(a) && !a._f?.keepUnread) markRead(a.id, true);
+  updateTitleCounter();
   return true;
 }
 function closeArticle(keep = true) {
@@ -1352,11 +1359,10 @@ function onListClick(e) {
   openViaHash(id); 
 }
 function listScrollTo(id) {
-  const safe = (window.CSS && CSS.escape) ? CSS.escape(id) : String(id).replace(/"/g, '\\"');
-  let el = $(`.row[data-id="${safe}"]`);
+  let el = rowEl(id);
   if (!el) { 
     const i = state.visible.findIndex((a) => a.id === id);
-    if (i >= 0) { renderUpTo(i + 1); el = $(`.row[data-id="${safe}"]`); }
+    if (i >= 0) { renderUpTo(i + 1); el = rowEl(id); }
   }
   if (el) el.scrollIntoView?.({ block: 'nearest' });
 }
