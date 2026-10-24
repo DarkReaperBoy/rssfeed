@@ -26,5 +26,7 @@ jobs:
         run: npm run test:char
       - name: Client boundary security suite
         run: npm run test:sec
+      - name: Static document contract suite
+        run: npm run test:static
       - name: Fetcher e2e (id stability, conditional GET, backend filters)
         run: npm run test:e2e

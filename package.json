@@ -10,9 +10,10 @@
     "serve": "python3 -m http.server 8080",
     "test:ui": "node scripts/smoke.mjs",
     "test:char": "node scripts/characterization.mjs",
+    "test:sec": "node scripts/sec.mjs",
+    "test:static": "node scripts/static.mjs",
     "test:e2e": "node scripts/e2e-fetch.mjs",
-    "test": "npm run test:ui && npm run test:char && npm run test:sec && npm run test:e2e",
-    "test:sec": "node scripts/sec.mjs"
+    "test": "npm run test:ui && npm run test:char && npm run test:sec && npm run test:static && npm run test:e2e"
   },
   "dependencies": {
     "@mozilla/readability": "^0.6.0",
