@@ -57,6 +57,9 @@ jobs:
       - name: Characterization suite (known-behavior pins)
         if: env.SKIP_FETCH != 'true'
         run: npm run test:char
+      - name: Client boundary security suite
+        if: env.SKIP_FETCH != 'true'
+        run: npm run test:sec
       - name: Fetcher e2e (id stability, conditional GET)
         if: env.SKIP_FETCH != 'true'
         run: npm run test:e2e
