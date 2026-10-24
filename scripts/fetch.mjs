@@ -478,8 +478,6 @@ async function main() {
         maxReplies: Number(feed.maxReplies) || 0,
         minImages: Number(feed.minImages) || 0,
         maxImages: Number(feed.maxImages) || 0,
-        includeSticky: !!feed.includeSticky,
-        includeClosed: !!feed.includeClosed,
       };
       const articles = [];
       let skipped = 0;

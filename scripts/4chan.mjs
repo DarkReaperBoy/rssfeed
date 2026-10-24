@@ -19,7 +19,6 @@ export function stripChanHtml(html) {
     .trim();
 }
 
-// Catalog JSON = array of pages, each page has `threads`. Flatten, drop junk.
 export function chanThreadsFromCatalog(catalog) {
   const out = [];
   for (const page of Array.isArray(catalog) ? catalog : []) {
@@ -28,29 +27,20 @@ export function chanThreadsFromCatalog(catalog) {
   return out;
 }
 
-// Per-board reply/image window + liveness rules (all optional in the feed config):
-//   minReplies / maxReplies, minImages / maxImages — count window
-//   includeSticky / includeClosed — stickies & closed threads are skipped by
-//   default (page-1 sticky is the board rules post, not content)
 export function chanThreadPasses(t, o = {}) {
   if (!t || !t.no) return false;
+  if (t.sticky) return false;
   const reps = Number(t.replies) || 0;
   const imgs = Number(t.images) || 0;
   if (o.minReplies > 0 && reps < o.minReplies) return false;
   if (o.maxReplies > 0 && reps > o.maxReplies) return false;
   if (o.minImages > 0 && imgs < o.minImages) return false;
   if (o.maxImages > 0 && imgs > o.maxImages) return false;
-  if (t.sticky && !o.includeSticky) return false;
-  if (t.closed && !o.includeClosed) return false;
   return true;
 }
 
 const cdn = (board, tail) => `https://i.4cdn.org/${board}/${tail}`;
 
-// One catalog thread → one reader article. Content comes back UNSANITIZED —
-// fetch.mjs runs it through the same sanitize-html pipeline as RSS bodies.
-// Thread numbers never change, so sha1(link) is a stable deep-link id (same
-// random-looking 16-hex scheme as RSS articles).
 export function chanThreadToArticle(t, { board, worksafe = true, now = Date.now() } = {}) {
   const host = worksafe ? 'boards.4channel.org' : 'boards.4chan.org';
   const link = `https://${host}/${board}/thread/${t.no}`;
@@ -62,20 +52,12 @@ export function chanThreadToArticle(t, { board, worksafe = true, now = Date.now(
   const images = Number(t.images) || 0;
   const parts = [];
   if (t.tim && t.ext) {
-    // small square thumb in the body, linking to the full OP image
     parts.push(`<p><a href="${cdn(board, `${t.tim}${t.ext}`)}"><img src="${cdn(board, `${t.tim}s.jpg`)}" alt="OP image"></a></p>`);
   }
   if (t.com) {
-    // Fix up OP-comment markup for a static reader: quotelinks arrive as
-    // RELATIVE hrefs (#p123 / /board/thread/123#p456) that would 404 off the
-    // Pages site, and greentext arrives as <span class="quote"> — which the
-    // sanitizer strips (no class attrs survive). Rewrite quotelinks to the
-    // real thread URLs and greentext lines to <blockquote> so they keep their
-    // signature styling in the reader.
     const com = String(t.com)
       .replace(/href="#p(\d+)"/g, `href="${link}#p$1"`)
       .replace(/href="\/([a-z0-9]+)\/thread\/(\d+)(#[^"]*)?"/gi, 'href="https://boards.4chan.org/$1/thread/$2$3"');
-    // One line per <br>: whole-line greentext becomes a blockquote, the rest paragraphs.
     for (const ln of com.split(/<br\s*\/?>/i)) {
       const gt = /^<span class="quote">([\s\S]*?)<\/span>$/.exec(ln.trim());
       if (gt) parts.push(`<blockquote>${gt[1]}</blockquote>`);

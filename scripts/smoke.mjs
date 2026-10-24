@@ -654,6 +654,80 @@ console.log('Recently read: mark-all is the honest mass un-read, never a backlog
   await settle(80);
   ok(rowCount() === TOTAL - HIDDEN, 'back in the Newsfeed with every article unread');
 }
+console.log('shareable folder/feed links (#folder/…, #feed/…)');
+click('.tree-item[data-scope="folder:tech"]');
+await settle(60);
+ok(window.location.hash === '#folder/Technology', 'clicking a folder puts #folder/<name> in the URL');
+ok(rowCount() === 15, 'the folder link scopes the list to its feeds');
+ok($$('#list .row .feed-name').every((n) => ['Hacker News', 'The Verge'].includes(n.textContent)), 'only the folder\u2019s feeds are listed');
+click('.tree-item[data-scope="feed:fixture-verge"]');
+await settle(60);
+ok(window.location.hash === '#feed/The%20Verge', 'clicking a feed puts #feed/<title> in the URL');
+ok(rowCount() === 5, 'the feed link scopes the list to that feed');
+window.location.hash = '#feed/hacker-news';
+window.dispatchEvent(new window.Event('hashchange'));
+await settle(60);
+ok(rowCount() === 10, 'slug form (#feed/hacker-news) resolves the same feed');
+window.location.hash = '#feed/hacker%20news';
+window.dispatchEvent(new window.Event('hashchange'));
+await settle(60);
+ok(rowCount() === 10, 'lowercase-with-space form resolves the same feed');
+window.location.hash = '#folder/nope';
+window.dispatchEvent(new window.Event('hashchange'));
+await settle(60);
+ok(!window.location.hash, 'an unknown folder link clears the hash');
+ok(!$('#toast').classList.contains('hidden'), 'an unknown folder link explains itself');
+window.location.hash = '#folder/technology';
+window.dispatchEvent(new window.Event('hashchange'));
+await settle(60);
+ok(rowCount() === 15, 'lowercase folder name still resolves');
+click('.tree-item[data-scope="all"]');
+await settle(60);
+ok(!window.location.hash, 'returning to the Newsfeed clears the hash');
+ok(rowCount() === TOTAL - HIDDEN, 'the Newsfeed lists everything again');
+console.log('boot with #folder/… and #feed/… in the URL');
+{
+  const domF = new JSDOM(html, { url: 'https://example.test/#folder/Technology', runScripts: 'outside-only', pretendToBeVisual: true });
+  const wF = domF.window;
+  wF.fetch = window.fetch;
+  wF.eval(appSrc);
+  await settle(1200);
+  ok(wF.location.hash === '#folder/Technology', 'the folder hash survives boot');
+  ok(!!wF.document.querySelector('.tree-item[data-scope="folder:tech"].active'), 'the folder row is marked active from the URL');
+  ok(wF.document.querySelectorAll('#list .row').length === 15, 'booting on a folder link lists only that folder');
+  domF.window.close();
+}
+{
+  const domG = new JSDOM(html, { url: 'https://example.test/#feed/The%20Verge', runScripts: 'outside-only', pretendToBeVisual: true });
+  const wG = domG.window;
+  wG.fetch = window.fetch;
+  wG.eval(appSrc);
+  await settle(1200);
+  ok(wG.location.hash === '#feed/The%20Verge', 'the feed hash survives boot');
+  ok(wG.document.querySelectorAll('#list .row').length === 5, 'booting on a feed link lists only that feed');
+  ok(!!wG.document.querySelector('.tree-item[data-scope="feed:fixture-verge"].active'), 'the feed row is marked active from the URL');
+  domG.window.close();
+}
+{
+  const domH = new JSDOM(html, { url: 'https://example.test/#feed/theverge', runScripts: 'outside-only', pretendToBeVisual: true });
+  const wH = domH.window;
+  wH.fetch = window.fetch;
+  wH.eval(appSrc);
+  await settle(1200);
+  ok(wH.document.querySelectorAll('#list .row').length === 5, 'booting on the no-space slug form resolves the feed too');
+  domH.window.close();
+}
+{
+  const domI = new JSDOM(html, { url: 'https://example.test/#folder/Bogus', runScripts: 'outside-only', pretendToBeVisual: true });
+  const wI = domI.window;
+  wI.fetch = window.fetch;
+  wI.eval(appSrc);
+  await settle(1200);
+  ok(!wI.location.hash, 'booting on an unknown folder link clears the hash');
+  ok(!wI.document.querySelector('#toast').classList.contains('hidden'), 'booting on an unknown folder link explains itself');
+  ok(wI.document.querySelectorAll('#list .row').length === TOTAL - HIDDEN, 'the reader falls back to the Newsfeed');
+  domI.window.close();
+}
 console.log('refresh/restore: boot with #article/<id> in the URL');
 {
   const dom2 = new JSDOM(html, { url: 'https://example.test/#article/fixture-hn-3', runScripts: 'outside-only', pretendToBeVisual: true });
@@ -887,9 +961,9 @@ console.log('4chan catalog → articles (4chan.mjs)');
   const threads = chan.chanThreadsFromCatalog(catalog);
   ok(threads.length === 6, 'catalog pages flatten (junk pages tolerated)');
   const passes = (opts) => threads.filter((x) => chan.chanThreadPasses(x, opts)).map((x) => x.no);
-  ok(JSON.stringify(passes({ minReplies: 300 })) === '[104,105,106]', 'minReplies window; sticky + closed skipped by default');
-  ok(JSON.stringify(passes({ minReplies: 300, includeSticky: true })) === '[102,104,105,106]', 'includeSticky opt-in');
-  ok(JSON.stringify(passes({ minReplies: 300, maxReplies: 500 })) === '[105]', 'maxReplies caps the window');
+  ok(JSON.stringify(passes({ minReplies: 300 })) === '[103,104,105,106]', 'minReplies window; closed threads included, stickies always skipped');
+  ok(JSON.stringify(passes({ minReplies: 300, includeSticky: true, includeClosed: false })) === '[103,104,105,106]', 'legacy sticky/closed options ignored: closed always in, sticky always out');
+  ok(JSON.stringify(passes({ minReplies: 300, maxReplies: 500 })) === '[103,105]', 'maxReplies caps the window (closed threads count too)');
   ok(JSON.stringify(passes({ minReplies: 300, minImages: 5 })) === '[104]', 'minImages window');
   const a = chan.chanThreadToArticle(threads[3], { board: 'g', worksafe: true, now: 1746000000000 });
   ok(a.link === 'https://boards.4channel.org/g/thread/104', 'worksafe boards link to 4channel.org');

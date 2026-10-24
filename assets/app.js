@@ -1177,6 +1177,32 @@ const hashArticleId = () => {
 
   try { return decodeURIComponent(h.slice(HASH_PREFIX.length)); } catch { return h.slice(HASH_PREFIX.length); }
 };
+const canonHashKey = (s) => String(s || '').toLowerCase().trim().replace(/[^\p{L}\p{N}]+/gu, '');
+function scopeHashFor(scope) {
+  if (scope.startsWith('folder:')) {
+    const f = folderDefs().find((x) => x.id === scope.slice(7));
+    return f ? '#folder/' + encodeURIComponent(f.name || f.id) : '';
+  }
+  if (scope.startsWith('feed:')) {
+    const t = feedTitle(scope.slice(5));
+    return t ? '#feed/' + encodeURIComponent(t) : '';
+  }
+  return '';
+}
+function hashScope() {
+  const m = /^#(folder|feed)\/(.+)$/i.exec(location.hash || '');
+  if (!m) return null;
+  let name;
+  try { name = decodeURIComponent(m[2]); } catch { name = m[2]; }
+  const key = canonHashKey(name);
+  if (!key) return null;
+  if (m[1].toLowerCase() === 'folder') {
+    const f = folderDefs().find((x) => key === canonHashKey(x.name) || key === canonHashKey(x.id));
+    return f ? 'folder:' + f.id : null;
+  }
+  const id = Object.keys(state.index?.feeds || {}).find((x) => key === canonHashKey(x) || key === canonHashKey(feedTitle(x)));
+  return id ? 'feed:' + id : null;
+}
 function setHashArticle(id) {
   const target = HASH_PREFIX + encodeURIComponent(id);
   if ((location.hash || '') === target) return; 
@@ -1189,9 +1215,21 @@ function setHashArticle(id) {
   }
   syncFromHash();
 }
+function pushScopeHash(scope) {
+  const target = scopeHashFor(scope);
+  const want = location.pathname + location.search + target;
+  if (location.pathname + location.search + (location.hash || '') === want) return;
+  try {
+    history.pushState(null, '', want);
+  } catch {
+    if (target) location.hash = target;
+  }
+}
 function clearHashArticle() {
-  if (!location.hash) return;
-  try { history.replaceState(null, '', location.pathname + location.search); } catch { location.hash = ''; }
+  const target = scopeHashFor(state.scope);
+  const want = location.pathname + location.search + target;
+  if (location.pathname + location.search + (location.hash || '') === want) return;
+  try { history.replaceState(null, '', want); } catch { if (target) location.hash = target; }
 }
 function openArticle(id) {
   const a = findArticle(id);
@@ -1216,6 +1254,28 @@ function openViaHash(id) {
   else setHashArticle(id);                     
 }
 function closeViaHash() { clearHashArticle(); closeArticle(true); }
+function applyScopeHash(notify = true) {
+  if (!/^#(folder|feed)\//i.test(location.hash || '')) return false;
+  const scope = hashScope();
+  if (!scope) {
+    if (/^#feed\//i.test(location.hash) && !state.index) return true;
+    try { history.replaceState(null, '', location.pathname + location.search); } catch {}
+    if (notify) showToast('That folder or feed link does not match anything in this reader');
+    return true;
+  }
+  if (state.scope === scope) {
+    if (state.expandedId) closeArticle(true);
+    return true;
+  }
+  state.scope = scope;
+  state.expandedId = null;
+  state.keepVisible.clear();
+  document.body.classList.remove('sidebar-open');
+  $('#scrim').classList.add('hidden');
+  renderAll();
+  ensureLoadedForScope();
+  return true;
+}
 function syncFromHash(notify = true) {
   const id = hashArticleId();
   if (id) {
@@ -1224,7 +1284,7 @@ function syncFromHash(notify = true) {
       clearHashArticle();
       if (notify) showToast('That article is no longer available (filtered or past the retention window)');
     }
-  } else closeArticle(true); 
+  } else if (!applyScopeHash(notify)) closeArticle(true); 
 }
 
 function dispatchAct(act, id) {
@@ -1378,7 +1438,7 @@ function bindEvents() {
     const scopeBtn = e.target.closest('[data-scope]');
     if (scopeBtn) {
       state.scope = scopeBtn.dataset.scope;
-      clearHashArticle();
+      pushScopeHash(state.scope);
       state.expandedId = null;
       state.keepVisible.clear();
       document.body.classList.remove('sidebar-open');
@@ -1797,6 +1857,7 @@ async function boot() {
   } catch {
     state.index = null;
   }
+  applyScopeHash();
   syncControls();
   renderAll();
   flashUpdated();

@@ -2,10 +2,7 @@
   "settings": {
     "siteName": "My RSSFeed",
     "theme": "auto",
-    "view": "list",
     "retentionDays": 60,
-    "markReadOnOpen": true,
-    "markReadAfterSeconds": 0,
     "refreshMinutes": 5,
     "fullTextDefault": false,
     "dropShorts": true
