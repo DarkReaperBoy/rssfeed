@@ -207,28 +207,13 @@ async function loadMany(ids, onChange, force = false) {
   if (n > 0) await Promise.all(Array.from({ length: n }, worker));
   if (onChange) onChange();
 }
-function feedIdsInScope() {
-  const feeds = state.index?.feeds || {};
-  if (state.scope.startsWith('feed:')) return [state.scope.slice(5)];
-  if (state.scope.startsWith('folder:')) {
-    const fid = state.scope.slice(7);
-    return Object.keys(feeds).filter((id) => {
-      const m = feeds[id];
-      if (Array.isArray(m.folders)) return m.folders.includes(fid);
-      return m.folder === fid;
-    });
-  }
-  return Object.keys(feeds);
-}
-
 function scopeFeedIds(scope) {
   if (scope.startsWith('feed:')) return [scope.slice(5)];
   if (scope.startsWith('folder:')) {
     const fid = scope.slice(7);
     return Object.keys(state.index?.feeds || {}).filter((id) => feedMeta(id).folders.includes(fid));
   }
-  if (scope === 'all') return Object.keys(state.index?.feeds || {});
-  return feedIdsInScope();
+  return Object.keys(state.index?.feeds || {});
 }
 async function loadAllFeeds(onChange) {
 
@@ -296,7 +281,7 @@ function computeVisible() {
   const out = [];
   const searchGroups = compileSearch(state.search);
 
-  const feedIds = searchGroups ? Object.keys(state.index?.feeds || {}) : feedIdsInScope();
+  const feedIds = searchGroups ? Object.keys(state.index?.feeds || {}) : scopeFeedIds(state.scope);
   for (const feedId of feedIds) {
     const cutoff = searchGroups ? 0 : folderCutoff(feedId);
     for (const a of state.feeds.get(feedId) || []) {
@@ -633,11 +618,11 @@ function renderEmpty(visible) {
     return;
   }
 
-  if (feedIdsInScope().some((id) => !state.settled.has(id))) {
+  if (scopeFeedIds(state.scope).some((id) => !state.settled.has(id))) {
     el.innerHTML = `<h3>Loading articles…</h3><p>Fetching this view's feeds — articles appear as they arrive.</p>`;
     return;
   }
-  if (feedIdsInScope().some((id) => state.failed.has(id))) {
+  if (scopeFeedIds(state.scope).some((id) => state.failed.has(id))) {
     el.innerHTML = `<h3>Couldn't load articles</h3><p>Some feeds didn't arrive${navigator.onLine ? '' : ' — you look offline'}, so this view can't be trusted yet. Your read state is safe.</p><p><button class="tool-btn tool-primary" data-retry>Try again</button></p>`;
     return;
   }
@@ -826,7 +811,7 @@ function describeCutoff(olderDays = 0, forUnread = false) {
 function dataStartsAt() {
   const feedsMeta = state.index?.feeds || {};
   let min = Infinity;
-  for (const id of feedIdsInScope()) {
+  for (const id of scopeFeedIds(state.scope)) {
     const o = feedsMeta[id]?.oldest;
     if (typeof o === 'number' && o > 0 && o < min) min = o;
   }
@@ -888,24 +873,13 @@ function markAllAsReadInScope() {
   }
 }
 
-function scopeUnreadCount(scope) {
-
-  let n = 0;
-  for (const feedId of scopeFeedIds(scope)) {
-    for (const a of state.feeds.get(feedId) || []) {
-      if (isRead(a)) continue;
-      n++;
-    }
-  }
-  return n;
-}
 function allReadInScope() {
-  const ids = feedIdsInScope();
+  const ids = scopeFeedIds(state.scope);
 
   if (!state.index?.feeds || !ids.length) return false;
   if (ids.some((id) => !state.settled.has(id))) return false; 
   if (ids.some((id) => state.failed.has(id))) return false;
-  return scopeUnreadCount(state.scope) === 0;
+  return scopeArticleStats(state.scope).unread === 0;
 }
 function collectScopeReadIds(scope, cutoff = 0) {
   const ids = [];
@@ -1196,7 +1170,6 @@ function dispatchAct(act, id) {
     const slot = $('#reader-slot');
     if (slot && state.expandedId === id) syncReaderControls(slot, a);
   }
-  else if (act === 'open-original') {  }
   else if (act === 'collapse') closeViaHash(); 
   else if (act === 'prev' || act === 'next') {
     const i = state.visible.indexOf(a);
