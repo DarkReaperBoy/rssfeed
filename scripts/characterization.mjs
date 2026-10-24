@@ -127,20 +127,29 @@ console.log('characterization: cross-tab storage sync re-renders, filter guards 
   ok(hasRow('c-a') && [...w.document.querySelectorAll('#list .row')].find((r) => r.dataset.id === 'c-a')?.classList.contains('unread'), 'KNOWN: the filter-read article flips back to UNREAD after the sync (read map replaced wholesale; filters do not re-run on storage events)');
   dom.window.close();
 }
-console.log('characterization: date pickers reject pre-2000 years and empty values');
+console.log('characterization: the mark-age slider remembers the last dragged value');
 {
   const { dom, w } = await bootDom({});
+  const open = async () => { w.document.querySelector('#btn-mark-all-split').dispatchEvent(new w.MouseEvent('click', { bubbles: true })); await settle(30); };
+  await open();
+  const s = w.document.querySelector('#mark-age-slider');
+  s.value = '1';
+  s.dispatchEvent(new w.Event('input', { bubbles: true }));
+  s.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await settle(30);
+  ok(w.document.querySelector('#mark-age-count').textContent === 'Will mark 1 article', 'the preview counts publication age (one 30-hour-old unread article)');
   w.document.querySelector('#btn-mark-all-split').dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
   await settle(30);
-  const dp = w.document.querySelector('#mark-date-read');
-  dp.value = '1994-01-01';
-  dp.dispatchEvent(new w.Event('change', { bubbles: true }));
-  await settle(400);
-  ok(!w.document.querySelector('#mark-menu').classList.contains('hidden'), 'a pre-2000 date is a no-op (menu stays open)');
-  dp.value = '';
-  dp.dispatchEvent(new w.Event('change', { bubbles: true }));
-  await settle(400);
-  ok(!w.document.querySelector('#mark-menu').classList.contains('hidden'), 'an empty date is a no-op (menu stays open)');
+  await open();
+  ok(Number(w.document.querySelector('#mark-age-slider').value) === 1, 'reopening shows the last dragged value (drag-release persists without applying)');
+  ok(w.document.querySelector('#mark-age-value').textContent === '1 day', 'the sentence reflects it');
+  for (let i = 0; i < 31; i++) {
+    s.value = String(1 + (i % 30));
+    s.dispatchEvent(new w.Event('input', { bubbles: true }));
+  }
+  await settle(30);
+  ok(w.document.querySelector('#mark-age-value').textContent === '1 day', 'rapid drag spam settles on the final value');
+  ok(w.document.querySelector('#mark-age-count').textContent === 'Will mark 1 article', 'the preview follows the spam (the 30-hour-old article)');
   dom.window.close();
 }
 console.log('characterization: double-clicking the confirm button lands the action exactly once');

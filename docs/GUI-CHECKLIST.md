@@ -23,10 +23,10 @@ Run against a local static serve of the working tree with generated fixture data
 
 ## Mark operations
 - [ ] ✓ button marks all read in the current scope (confirm dialog); Undo toast restores exactly.
-- [ ] When caught up, the SAME button flips to "Mark all as unread" (confirm); groups in the ▾ menu flip too.
-- [ ] ▾ menu presets: day/two/week/month — both directions; toasts name the window and count.
-- [ ] "Before…"/"Since…" date pickers: pick a date, action lands; empty/pre-2000 pick is a no-op; menu stays open.
-- [ ] Today scope: age presets hidden, pickers remain.
+- [ ] When caught up, the SAME button flips to "Mark all as unread" (confirm); the ▾ menu flips direction too — only ONE direction is ever offered.
+- [ ] ▾ menu age slider: 1–30 days; sentence, value, count preview, and apply button all name the current direction; dragging or arrow keys update the preview live; the last-used value persists across opens.
+- [ ] Apply closes the menu, marks exactly the previewed set, and offers Undo.
+- [ ] Today scope: the ▾ split button hides (age marking is structurally dead there); it returns in every other scope.
 - [ ] Sidebar badge tick (hover shows ✓): marks that feed/folder/all; works from inside any scope; Undo works.
 - [ ] Bulk select mode: checkboxes; row click selects; bulk read/unread with Undo; clear; exit mode.
 - [ ] Rapid triple-click on a confirm: lands once.

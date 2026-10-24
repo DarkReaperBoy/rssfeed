@@ -89,26 +89,14 @@ try {
                 <button id="btn-mark-all-split" class="btn-heading btn-split" title="More mark actions" aria-label="More mark actions" aria-haspopup="menu" aria-expanded="false"><svg><use href="#i-chevron-down"/></svg></button>
               </div>
               <div id="mark-menu" class="dropdown dropdown-mark hidden">
-                <div id="mark-group-read">
-                  <div class="mark-label">Mark as read</div>
-                  <button class="dropdown-item" data-mark="read" data-older="1">Older than a day</button>
-                  <button class="dropdown-item" data-mark="read" data-older="2">Older than two days</button>
-                  <button class="dropdown-item" data-mark="read" data-older="7">Older than a week</button>
-                  <button class="dropdown-item" data-mark="read" data-older="31">Older than a month</button>
-                  <div class="dropdown-item mark-custom" data-custom="read">Before… <input type="date" id="mark-date-read" title="Mark articles published before this date as read"></div>
+                <div id="mark-age-block">
+                  <div class="mark-label" id="mark-age-title">Mark as read</div>
+                  <div class="mark-age-sentence"><span id="mark-age-desc">Articles older than</span> <span id="mark-age-value">7 days</span></div>
+                  <input type="range" id="mark-age-slider" class="mark-age-slider" min="1" max="30" step="1" value="7" aria-label="Age cutoff in days">
+                  <div class="mark-age-scale" aria-hidden="true"><span>1 day</span><span>1 week</span><span>2 weeks</span><span>30 days</span></div>
+                  <div class="mark-age-count" id="mark-age-count"></div>
+                  <button type="button" class="mark-age-apply" id="mark-age-apply">Mark as read</button>
                 </div>
-                <div id="mark-group-unread" class="hidden">
-                  <div class="mark-label">Mark as unread</div>
-                  <button class="dropdown-item" data-mark="unread" data-older="1">From a day ago</button>
-                  <button class="dropdown-item" data-mark="unread" data-older="2">From two days ago</button>
-                  <button class="dropdown-item" data-mark="unread" data-older="7">From a week ago</button>
-                  <button class="dropdown-item" data-mark="unread" data-older="31">From a month ago</button>
-                  <div class="dropdown-item mark-custom" data-custom="unread">Since… <input type="date" id="mark-date-unread" title="Mark articles published since this date as unread"></div>
-                </div>
-                <button id="mark-alt-toggle" class="mark-alt-toggle" type="button" aria-expanded="false">
-                  <span id="mark-alt-label">Mark as unread by time</span>
-                  <svg class="chev"><use href="#i-chevron"/></svg>
-                </button>
               </div>
             </div>
             <div id="search-wrap">

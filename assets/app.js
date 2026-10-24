@@ -40,13 +40,13 @@ const state = {
 const CONFIG_KEYS = ['theme', 'density', 'showFavicons',
   'absoluteDates', 'fontSize', 'sideFavicons', 'compactSidebar', 'countersClickable',
   'titleCounter', 'showToday', 'updatedOnly', 'dimRead', 'sortAZ', 'autoScroll'];
-const USER_KEYS = ['status', 'sortDir', 'showFiltered', 'openFolders', 'sidebarW'];
+const USER_KEYS = ['status', 'sortDir', 'showFiltered', 'openFolders', 'sidebarW', 'markAgeDays'];
 
 const savedUi = loadObj(LS_UI); 
 const ui = Object.assign({
   theme: 'auto', status: 'unread',
   showFiltered: false, openFolders: {},
-  density: 'comfort', sortDir: 'oldest',
+  density: 'comfort', sortDir: 'oldest', markAgeDays: 7,
   updatedOnly: false, dimRead: false, sortAZ: false,
   showFavicons: true,
   bulkSelect: false, autoScroll: true, absoluteDates: false, fontSize: '14.5px',
@@ -913,11 +913,10 @@ function collectScopeIds(scope, cutoff = 0) {
   return ids;
 }
 
-const OLDER_LABELS = { 1: 'a day', 2: 'two days', 7: 'a week', 31: 'a month' };
-const cutoffFrom = (olderDays = 0, beforeTs = 0) => (beforeTs > 0 ? beforeTs : olderDays > 0 ? Date.now() - olderDays * 864e5 : 0);
-function describeCutoff(olderDays = 0, beforeTs = 0, forUnread = false) {
+const OLDER_LABELS = { 1: 'a day', 2: 'two days', 7: 'a week' };
+const cutoffFrom = (olderDays = 0) => (olderDays > 0 ? Date.now() - olderDays * 864e5 : 0);
+function describeCutoff(olderDays = 0, forUnread = false) {
   const label = OLDER_LABELS[olderDays] || (olderDays > 0 ? `${olderDays} days` : '');
-  if (beforeTs > 0) return ` ${forUnread ? 'since' : 'before'} ${new Date(beforeTs).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`;
   return olderDays > 0 ? (forUnread ? ` from ${label} ago` : ` older than ${label}`) : '';
 }
 
@@ -949,12 +948,12 @@ function viewHiddenExtra(ids) {
   }
   return null;
 }
-function markScopeRead(scope, olderDays = 0, beforeTs = 0) {
-  const what = describeCutoff(olderDays, beforeTs);
-  const cutoff = cutoffFrom(olderDays, beforeTs);
+function markScopeRead(scope, olderDays = 0) {
+  const what = describeCutoff(olderDays);
+  const cutoff = cutoffFrom(olderDays);
   const ids = collectScopeIds(scope, cutoff);
   if (!ids.length) {
-    showToast(olderDays || beforeTs ? `No unread articles${what} here${boundaryHint(cutoff)}` : 'Nothing to mark — everything here is read');
+    showToast(olderDays ? `No unread articles${what} here${boundaryHint(cutoff)}` : 'Nothing to mark — everything here is read');
     return;
   }
   const snapshot = ids.map((id) => ({ id, ts: state.read[id], guard: state.userUnread[id] || 0 }));
@@ -1032,12 +1031,12 @@ function collectScopeReadIds(scope, cutoff = 0) {
   }
   return ids;
 }
-function markScopeUnread(scope, olderDays = 0, beforeTs = 0) {
-  const what = describeCutoff(olderDays, beforeTs, true);
-  const cutoff = cutoffFrom(olderDays, beforeTs);
+function markScopeUnread(scope, olderDays = 0) {
+  const what = describeCutoff(olderDays, true);
+  const cutoff = cutoffFrom(olderDays);
   const ids = collectScopeReadIds(scope, cutoff);
   if (!ids.length) {
-    showToast(olderDays || beforeTs ? `No read articles${what} here${boundaryHint(cutoff)}` : 'Nothing to restore — no read articles here');
+    showToast(olderDays ? `No read articles${what} here${boundaryHint(cutoff)}` : 'Nothing to restore — no read articles here');
     return;
   }
   const snapshot = ids.map((id) => ({ id, ts: state.read[id], guard: state.userUnread[id] || 0 }));
@@ -1079,12 +1078,51 @@ function scopeArticleStats(scope) {
   }
   return { unread, read, total };
 }
+let markAge = { dates: [], unread: false };
+function buildMarkAge(unread) {
+  const ids = unread ? collectScopeReadIds(state.scope, 0) : collectScopeIds(state.scope, 0);
+  const dates = [];
+  for (const id of ids) {
+    const a = findArticle(id);
+    if (a && a.date > 0) dates.push(a.date);
+  }
+  dates.sort((x, y) => x - y);
+  markAge = { dates, unread };
+}
+function ageCountFor(days) {
+  const cutoff = cutoffFrom(days);
+  const d = markAge.dates;
+  let lo = 0, hi = d.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (d[mid] < cutoff) lo = mid + 1; else hi = mid;
+  }
+  return markAge.unread ? d.length - lo : lo;
+}
+function updateAgeUi(days) {
+  const s = $('#mark-age-slider');
+  const v = $('#mark-age-value');
+  const c = $('#mark-age-count');
+  if (!s || !v || !c) return;
+  const label = `${days} ${days === 1 ? 'day' : 'days'}`;
+  v.textContent = label;
+  s.setAttribute('aria-valuetext', label);
+  const n = ageCountFor(days);
+  c.textContent = n > 0 ? `Will mark ${n} article${n === 1 ? '' : 's'}` : 'Nothing to mark here';
+}
+function syncAgeDirection(caughtUp) {
+  const t = $('#mark-age-title');
+  const d = $('#mark-age-desc');
+  const ap = $('#mark-age-apply');
+  if (!t || !d || !ap) return;
+  t.textContent = caughtUp ? 'Mark as unread' : 'Mark as read';
+  d.textContent = caughtUp ? 'Read articles from the last' : 'Articles older than';
+  ap.textContent = caughtUp ? 'Mark as unread' : 'Mark as read';
+}
 function syncMarkButtons(forceReset = false) {
   const wrap = $('.btn-group-markread');
   const btn = $('#btn-mark-all');
   if (!btn || !wrap) return;
-  const deadPresets = state.scope === 'today';
-  $$('#mark-menu .dropdown-item[data-older]').forEach((b) => b.classList.toggle('hidden', deadPresets));
   const stats = scopeArticleStats(state.scope);
   const caughtUp = stats.unread === 0 && stats.read > 0 && allReadInScope();
   const show = stats.unread > 0 || caughtUp;
@@ -1098,21 +1136,24 @@ function syncMarkButtons(forceReset = false) {
   const use = btn.querySelector('use');
   if (use) use.setAttribute('href', caughtUp ? '#i-unread' : '#i-read');
   const split = $('#btn-mark-all-split');
-  if (split) split.title = caughtUp ? 'Mark as unread — more options' : 'Mark as read — more options';
-
-  const menuOpen = !forceReset && !$('#mark-menu')?.classList.contains('hidden');
-  if (!menuOpen) {
-    const gRead = $('#mark-group-read');
-    const gUnread = $('#mark-group-unread');
-    if (gRead) gRead.classList.toggle('hidden', caughtUp);
-    if (gUnread) gUnread.classList.toggle('hidden', !caughtUp);
-    const alt = $('#mark-alt-toggle');
-    if (alt) {
-      alt.setAttribute('aria-expanded', 'false');
-      alt.classList.remove('open');
-      const lbl = $('#mark-alt-label');
-      if (lbl) lbl.textContent = caughtUp ? 'Mark as read by age' : 'Mark as unread by time';
-    }
+  const ageDead = state.scope === 'today';
+  if (split) {
+    split.classList.toggle('hidden', ageDead);
+    if (ageDead) $('#mark-menu')?.classList.add('hidden');
+    split.title = caughtUp ? 'Mark as unread — more options' : 'Mark as read — more options';
+  }
+  const menu = $('#mark-menu');
+  if (!menu || menu.classList.contains('hidden')) return;
+  if (forceReset) {
+    syncAgeDirection(caughtUp);
+    buildMarkAge(caughtUp);
+    const days = Math.min(30, Math.max(1, Math.round(Number(ui.markAgeDays) || 7)));
+    const s = $('#mark-age-slider');
+    if (s) s.value = String(days);
+    updateAgeUi(days);
+  } else {
+    buildMarkAge(markAge.unread);
+    updateAgeUi(Math.min(30, Math.max(1, Number($('#mark-age-slider')?.value) || 1)));
   }
 }
 
@@ -1526,16 +1567,7 @@ function bindEvents() {
     syncMenuAria();
   });
 
-  $('#mark-alt-toggle')?.addEventListener('click', () => {
-    const alt = $('#mark-alt-toggle');
-    const open = alt.classList.toggle('open');
-    alt.setAttribute('aria-expanded', String(open));
-    const caughtUp = allReadInScope();
-    const g = caughtUp ? $('#mark-group-read') : $('#mark-group-unread');
-    if (g) g.classList.toggle('hidden', !open);
-  });
-
-  const applyMark = async (fn, olderDays, beforeTs) => {
+  const applyMark = async (fn, olderDays) => {
     const load = ensureLoadedForScope(state.scope);
     const slow = setTimeout(() => showToast('Still loading this view — marking what has arrived so far', undefined, undefined, true), 1500);
     try {
@@ -1543,35 +1575,21 @@ function bindEvents() {
     } finally {
       clearTimeout(slow);
     }
-    fn(state.scope, olderDays, beforeTs);
+    fn(state.scope, olderDays);
   };
-  $('#mark-menu').addEventListener('click', (e) => {
-    if (e.target.tagName === 'INPUT') return; 
-    const custom = e.target.closest('[data-custom]');
-    if (custom) { 
-      const inp = custom.querySelector('input');
-      if (inp) { inp.focus(); try { inp.showPicker?.(); } catch {} }
-      return;
-    }
-    const item = e.target.closest('[data-older]');
-    if (!item) return;
-    $('#mark-menu').classList.add('hidden');
-    applyMark(item.dataset.mark === 'unread' ? markScopeUnread : markScopeRead, Number(item.dataset.older) || 0, 0);
+  $('#mark-age-slider').addEventListener('input', () => {
+    updateAgeUi(Math.min(30, Math.max(1, Number($('#mark-age-slider').value) || 1)));
   });
-  let datePickTimer = null; 
-
-  const onMarkDate = (mode) => (e) => {
-    clearTimeout(datePickTimer);
-    const val = e.target.value || '';
-    const ts = Date.parse(`${val}T00:00:00`); 
-    if (!val || Number.isNaN(ts) || new Date(ts).getFullYear() < 2000) return; 
-    datePickTimer = setTimeout(() => {
-      $('#mark-menu').classList.add('hidden');
-      applyMark(mode === 'unread' ? markScopeUnread : markScopeRead, 0, ts);
-    }, 250);
-  };
-  $('#mark-date-read').addEventListener('change', onMarkDate('read'));
-  $('#mark-date-unread').addEventListener('change', onMarkDate('unread'));
+  $('#mark-age-slider').addEventListener('change', () => {
+    ui.markAgeDays = Math.min(30, Math.max(1, Number($('#mark-age-slider').value) || 1));
+    saveUi();
+  });
+  $('#mark-age-apply').addEventListener('click', () => {
+    const days = Math.min(30, Math.max(1, Number($('#mark-age-slider').value) || 1));
+    $('#mark-menu').classList.add('hidden');
+    syncMenuAria();
+    applyMark(markAge.unread ? markScopeUnread : markScopeRead, days);
+  });
   $('#sort-items').addEventListener('click', (e) => {
     const item = e.target.closest('[data-sort]');
     if (!item) return;
