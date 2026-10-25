@@ -541,6 +541,7 @@ async function main() {
       cfgHidden += r.hidden;
       return r.list;
     };
+    const keepRetained = () => cList((prev.articles || []).filter((a) => !feedFilterDrop(a, feedBlocks)));
     if (feed.enabled === false) {
       const kept = purgePrev(prev, { feedBlocks, cf: cList });
       await fs.writeFile(file, JSON.stringify({ articles: kept }));
@@ -565,7 +566,7 @@ async function main() {
       const meta = boards?.find((b) => b.board === board) || null;
       if (!board) {
         failures++;
-        const keptErr = cList((prev.articles || []).filter((a) => !feedFilterDrop(a, feedBlocks))).filter(inWindow);
+        const keptErr = keepRetained().filter(inWindow);
         await fs.writeFile(file, JSON.stringify({ articles: keptErr }));
         index.feeds[feed.id] = { ...summarizeFeed({ ...feed, site: feed.site || 'https://boards.4channel.org' }, keptErr), status: { ...status, ok: false, error: '4chan feed needs a "board"' } };
         written.set(feed.id, keptErr);
@@ -574,7 +575,7 @@ async function main() {
       }
       if (boards && !meta) {
         failures++;
-        const keptErr = cList((prev.articles || []).filter((a) => !feedFilterDrop(a, feedBlocks))).filter(inWindow);
+        const keptErr = keepRetained().filter(inWindow);
         await fs.writeFile(file, JSON.stringify({ articles: keptErr }));
         index.feeds[feed.id] = { ...summarizeFeed({ ...feed, site: feed.site || 'https://boards.4channel.org' }, keptErr), status: { ...status, ok: false, error: `unknown board /${board}/` } };
         written.set(feed.id, keptErr);
@@ -592,7 +593,7 @@ async function main() {
         status.ok = false;
         status.error = err.message;
         status.consecutiveFailures = (prevStatus.consecutiveFailures || 0) + 1;
-        const keptFail = cList((prev.articles || []).filter((a) => !feedFilterDrop(a, feedBlocks))).filter(inWindow);
+        const keptFail = keepRetained().filter(inWindow);
         await fs.writeFile(file, JSON.stringify({ articles: keptFail }));
         index.feeds[feed.id] = { ...summarizeFeed({ ...effFeed, ...feedMetaFor(effFeed, prevMeta) }, keptFail), status };
         written.set(feed.id, keptFail);
@@ -605,7 +606,7 @@ async function main() {
       status.error = null;
       status.lastModified = res.lastModified || prevStatus.lastModified || null;
       if (res.notModified) {
-        const keptAll = cList((prev.articles || []).filter((a) => !feedFilterDrop(a, feedBlocks))).filter(inWindow);
+        const keptAll = keepRetained().filter(inWindow);
         const kept = cap ? keptAll.slice(0, cap) : keptAll;
         await fs.writeFile(file, JSON.stringify({ articles: kept }));
         index.feeds[feed.id] = { ...summarizeFeed({ ...effFeed, ...feedMetaFor(effFeed, prevMeta) }, kept), status };
@@ -660,7 +661,7 @@ async function main() {
         status.ok = false;
         status.error = err.message;
         status.consecutiveFailures = (prevStatus.consecutiveFailures || 0) + 1;
-        const keptFail = cList([...(prev.articles || [])].filter((a) => !feedFilterDrop(a, feedBlocks))).filter(inWindow);
+        const keptFail = keepRetained().filter(inWindow);
         await fs.writeFile(file, JSON.stringify({ articles: keptFail }));
         index.feeds[feed.id] = { ...summarizeFeed({ ...effFeed, ...feedMetaFor(effFeed, prevMeta) }, keptFail), status };
         written.set(feed.id, keptFail);
@@ -685,7 +686,7 @@ async function main() {
         articles.push(a);
       }
       const byId = new Map();
-      const prevList = cList((prev.articles || []).filter((a) => !feedFilterDrop(a, feedBlocks)));
+      const prevList = keepRetained();
       for (const a of [...prevList, ...articles]) byId.set(a.id, a);
       const merged = [...byId.values()].sort((a, b) => b.date - a.date).filter(inWindow);
       await fs.writeFile(file, JSON.stringify({ articles: merged }));
@@ -730,7 +731,7 @@ async function main() {
       status.ok = false;
       status.error = err.message;
       status.consecutiveFailures = (prevStatus.consecutiveFailures || 0) + 1;
-      const kept = cList([...(prev.articles || [])].filter((a) => !feedFilterDrop(a, feedBlocks))).filter(inWindow);
+      const kept = keepRetained().filter(inWindow);
       await fs.writeFile(file, JSON.stringify({ articles: kept }));
       index.feeds[feed.id] = {
         ...summarizeFeed({ ...feed, ...feedMetaFor(feed, prevMeta) }, kept),
@@ -748,7 +749,7 @@ async function main() {
       status.ok = false;
       status.error = `Parse error: ${err.message}`;
       status.consecutiveFailures = (prevStatus.consecutiveFailures || 0) + 1;
-      let kept = cList([...(prev.articles || [])].filter((a) => !feedFilterDrop(a, feedBlocks))).filter(inWindow);
+      let kept = keepRetained().filter(inWindow);
       await fs.writeFile(file, JSON.stringify({ articles: kept }));
       index.feeds[feed.id] = {
         ...summarizeFeed({ ...feed, ...feedMetaFor(feed, prevMeta) }, kept),
