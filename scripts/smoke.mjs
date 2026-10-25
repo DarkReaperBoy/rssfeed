@@ -647,7 +647,7 @@ console.log('YouTube chapter timestamps become seekable links (Inoreader parity)
   tsAll()[3].dispatchEvent(new wY.MouseEvent('click', { bubbles: true, cancelable: true }));
   await settle(60);
   const ifr = bodyY().querySelector('.embed[data-self="1"] iframe');
-  ok(!!ifr && ifr.src === `https://www.youtube-nocookie.com/embed/${vid}?autoplay=1&start=400`, 'the 6:40 click starts the embed at 400s (autoplay from that point)');
+  ok(!!ifr && ifr.src === `https://www.youtube-nocookie.com/embed/${vid}?autoplay=1&enablejsapi=1&start=400`, 'the 6:40 click starts the embed at 400s (autoplay from that point)');
   ok(!bodyY().querySelector('.embed[data-self="1"] .embed-facade'), 'the facade is gone once the player mounts');
   console.log('a second timestamp seeks the live player in place (no remount)');
   const sent = [];

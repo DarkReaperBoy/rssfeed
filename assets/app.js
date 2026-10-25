@@ -636,7 +636,7 @@ function renderEmpty(visible) {
 }
 
 function mountYtEmbed(wrap, id, startSec) {
-  wrap.innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/${id}?autoplay=1${startSec > 0 ? `&start=${startSec}` : ''}" title="YouTube video" allow="accelerometer; autoplay; encrypted-media; picture-in-picture" allowfullscreen loading="lazy"></iframe>`;
+  wrap.innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/${id}?autoplay=1&enablejsapi=1${startSec > 0 ? `&start=${startSec}` : ''}" title="YouTube video" allow="accelerometer; autoplay; encrypted-media; picture-in-picture" allowfullscreen loading="lazy"></iframe>`;
 }
 function upgradeEmbeds(root, articleLink) {
   if (!root) return;
