@@ -102,5 +102,61 @@ console.log('poisoned inputs: hostile localStorage + hash + search never reach a
   domP.window.close();
   problems += problems2;
 }
+console.log('poisoned timestamps: hostile YouTube descriptions never steer the seek links');
+{
+  const vid = 'dQw4w9WgXcQ';
+  const watch = `https://www.youtube.com/watch?v=${vid}`;
+  const tsArts = [
+    { id: 't-1', title: 'Hostile chapters', link: watch, date: now - 3600e3, author: null, summary: 's',
+      content: '<p>"><img src=x onerror=alert(1)> before 1:07 and <a href="javascript:alert(2)" title="evil 2:04">evil link</a> and plain 3:41 end</p>', text: null, enclosures: [], fetchedAt: now },
+    { id: 't-2', title: 'Timestamp-lookalike payloads', link: watch, date: now - 2 * 3600e3, author: null, summary: 's',
+      content: '<p>href="javascript:alert(3)" 0:00 &lt;img src=x onerror=alert(4)&gt; 1:00&nbsp;end</p>', text: null, enclosures: [], fetchedAt: now },
+  ];
+  const idxT = { generatedAt: now, folders: [], feeds: { tf: { title: 'Ts Feed', site: '', folder: null, folders: [], count: tsArts.length, newest: now, oldest: now - 2 * 3600e3 } } };
+  const domT = new JSDOM(html, { url: 'https://example.test/', runScripts: 'outside-only', pretendToBeVisual: true });
+  const wT = domT.window;
+  wT.fetch = async (u) => {
+    const p = String(u).split('?')[0];
+    if (p === 'config.json') return { ok: true, status: 200, json: async () => structuredClone(config) };
+    if (p === 'data/index.json') return { ok: true, status: 200, json: async () => structuredClone(idxT) };
+    if (p === 'data/all-feeds.json') return { ok: true, status: 200, json: async () => structuredClone({ articles: tsArts.map((a) => ({ ...a, _feed: 'tf' })) }) };
+    return { ok: false, status: 404, statusText: 'NF', json: async () => { throw new Error('404'); } };
+  };
+  wT.eval(appSrc);
+  await new Promise((r) => setTimeout(r, 1100));
+  const $$T = (s) => [...wT.document.querySelectorAll(s)];
+  const row = $$T('#list .row').find((r) => r.dataset.id === 't-1');
+  row.dispatchEvent(new wT.MouseEvent('click', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 200));
+  let problems3 = 0;
+  const bad3 = (msg) => { problems3++; console.log('  ✗ ' + msg); };
+  const good3 = (msg) => console.log('  ✓ ' + msg);
+  const tsLinks = $$T('#reader-slot .reader-body a.ts');
+  tsLinks.length === 2 ? good3(`exactly the two clean timestamps linkified (${tsLinks.length})`) : bad3(`expected 2 timestamp links, found ${tsLinks.length}`);
+  tsLinks.every((a) => new RegExp(`^https://www\\.youtube\\.com/watch\\?v=${vid}&t=\\d+s$`).test(a.href))
+    ? good3('every timestamp href is exactly the article video plus a numeric t param')
+    : bad3(`stray timestamp href: ${tsLinks.map((a) => a.href).join(' ')}`);
+  tsLinks.every((a) => /^\d+$/.test(a.dataset.t)) ? good3('data-t values are pure digits') : bad3('non-numeric data-t');
+  const jsTs = tsLinks.filter((a) => a.getAttribute('href').startsWith('javascript:'));
+  jsTs.length ? bad3(`${jsTs.length} javascript: timestamp link(s)`) : good3('no javascript: timestamp links');
+  const onAttrT = $$T('#reader-slot .reader-body [onerror], #reader-slot .reader-body [onload]');
+  onAttrT.length ? bad3(`${onAttrT.length} event attribute(s) in the reader body`) : good3('no event attributes in the reader body');
+  const evilLinks = $$T('#reader-slot .reader-body a');
+  evilLinks.filter((a) => (a.getAttribute('href') || '').startsWith('javascript:')).length ? bad3('the hostile javascript: link survived') : good3('the hostile javascript: link was neutralized before render');
+  wT.document.querySelector('#reader-slot [data-act="collapse"]').dispatchEvent(new wT.MouseEvent('click', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 100));
+  const row2 = $$T('#list .row').find((r) => r.dataset.id === 't-2');
+  row2.dispatchEvent(new wT.MouseEvent('click', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 200));
+  const tsLinks2 = $$T('#reader-slot .reader-body a.ts');
+  tsLinks2.length === 2 && tsLinks2.every((a) => new RegExp(`^https://www\\.youtube\\.com/watch\\?v=${vid}&t=\\d+s$`).test(a.href))
+    ? good3('attribute-lookalike hostile text still yields only clean seek links')
+    : bad3(`t-2 produced stray links: ${tsLinks2.map((a) => a.href).join(' ')}`);
+  wT.document.querySelector('#reader-slot [data-act="collapse"]').dispatchEvent(new wT.MouseEvent('click', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 100));
+  problems3 ? console.log(`POISONED-TIMESTAMP GAPS: ${problems3}`) : console.log('hostile timestamp descriptions neutralized');
+  domT.window.close();
+  problems += problems3;
+}
 dom.window.close();
 process.exit(problems ? 1 : 0);
