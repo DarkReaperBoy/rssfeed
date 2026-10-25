@@ -26,7 +26,6 @@ const FIX = {
   'chaos-a': { title: 'Chaos A', site: 'https://a.test', folder: 'fold1', articles: mkArticles('chaos-a', 30) },
   'chaos-b': { title: 'Chaos B', site: 'https://b.test', folder: 'fold2', articles: mkArticles('chaos-b', 25) },
 };
-const TOTAL = 55;
 const config = {
   settings: { siteName: 'Chaos', theme: 'auto', refreshMinutes: 60 },
   folders: [{ id: 'fold1', name: 'Fold One' }, { id: 'fold2', name: 'Fold Two' }],

@@ -275,7 +275,6 @@ function pickEnclosures(item) {
     const t = (mg['media:thumbnail'] || [])[0]?.$?.url;
     if (t) push(t, 'image/thumbnail');
   }
-  for (const l of item.links || []) if (l.rel === 'enclosure') push(l.href, l.type);
   return out;
 }
 async function loadJson(file, fallback) {
