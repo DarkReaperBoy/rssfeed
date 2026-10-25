@@ -10,6 +10,10 @@ const now = Date.now();
 let feed1Hits = 0;
 let feed2Hits = 0;
 let retitle = false;
+let ftEtag = '"ft1"';
+let ftFeedHits = 0;
+let art1Hits = 0;
+let art2Hits = 0;
 const item = (i, t, extra = '') => `<item><title>${t}</title><link>https://example.test/a/${i}</link><guid>https://example.test/a/${i}</guid><pubDate>${new Date(now - i * 3600e3).toUTCString()}</pubDate><description>Body of ${t}${extra}</description></item>`;
 const rss1Real = () => {
   const undated = '<item><title>Undated post</title><link>https://example.test/a/3</link><guid>https://example.test/a/3</guid><description>No date here</description></item>';
@@ -24,6 +28,10 @@ const hostileRss = () => `<?xml version="1.0" encoding="UTF-8"?><rss version="2.
 <item><title>Duplicate guid two</title><link>https://example.test/dup2</link><guid>h-dup</guid><description>second</description></item>
 </channel></rss>`;
 const brokenRss = '<?xml version="1.0"?><rss><channel><title>Broken</title><item><title>never closes';
+const ftItem = (i, link, desc) => `<item><title>FT story ${i}</title><link>${link}</link><guid>ft-${i}</guid><pubDate>${new Date(now - i * 3600e3).toUTCString()}</pubDate><description>${desc}</description></item>`;
+const ftRss = () => `<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel><title>FT Feed</title><link>https://example.test/ft</link>${ftItem(1, `http://127.0.0.1:${port}/article1.html`, 'short teaser one')}${ftItem(2, `http://127.0.0.1:${port}/article2.html`, 'short teaser two')}${ftItem(3, `http://127.0.0.1:${port}/article3.html`, 'short teaser three')}${ftItem(4, `http://127.0.0.1:${port}/article4.html`, 'X'.repeat(420))}</channel></rss>`;
+const article1Html = `<!doctype html><html><head><title>FT Article One</title></head><body><article><h1>FT Article One</h1><p>This is the extracted body of article one. It carries the READABILITY_MARKER_PHRASE deep inside a paragraph so the pipeline can prove the text landed. Around it sit more sentences with ordinary words so the extractor sees enough content to keep the page. The quick brown fox jumps over the lazy dog again and again while the reader keeps counting words toward the extraction threshold.</p><p>A second paragraph with more plain prose ensures the result comfortably clears the one hundred twenty character minimum imposed on extracted text.</p><script>EVIL_SCRIPT_BODY()</script></article></body></html>`;
+const article2Html = '<!doctype html><html><head><title>FT Two</title></head><body><p>tiny</p></body></html>';
 let chanMode = 'ok';
 const CHAN_LM = 'Mon, 01 Jan 2024 00:00:00 GMT';
 const chanCatalog = () => JSON.stringify([{ threads: [
@@ -130,6 +138,19 @@ const server2 = http.createServer((req, res) => {
   } else if (req.url === '/feed4.xml') {
     res.writeHead(200, { 'Content-Type': 'application/rss+xml; charset=utf-8' });
     res.end(brokenRss);
+  } else if (req.url === '/ftfeed.xml') {
+    ftFeedHits++;
+    if (req.headers['if-none-match'] === ftEtag) { res.writeHead(304); res.end(); return; }
+    res.writeHead(200, { 'Content-Type': 'application/rss+xml; charset=utf-8', ETag: ftEtag });
+    res.end(ftRss());
+  } else if (req.url === '/article1.html') {
+    art1Hits++;
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(article1Html);
+  } else if (req.url === '/article2.html') {
+    art2Hits++;
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(article2Html);
   } else if (chanRoutes(req, res)) { /* served */ }
   else { res.writeHead(404); res.end(); }
 });
@@ -334,6 +355,72 @@ console.log('run 12: 4chan feeds — retention trims on EVERY write path (succes
   ok(/FETCH FAILED/.test(out), 'the catalog failed');
   ok(readChang().articles.length === 1 && readChang().articles[0].title === 'Fresh thread', `failure path: retained data stays retention-trimmed (${readChang().articles.length})`);
   chanMode = 'ok';
+}
+console.log('run 13: feeds.opml import — merge with config, folder nesting, url dedup');
+{
+  fs.writeFileSync(path.join(SANDBOX, 'feeds.opml'), `<?xml version="1.0" encoding="UTF-8"?>
+<opml version="2.0">
+  <head><title>subs</title></head>
+  <body>
+    <outline text="Tech" title="Tech">
+      <outline type="rss" text="Feed One" xmlUrl="http://127.0.0.1:${port}/feed1.xml" htmlUrl="https://opml.example/one"/>
+      <outline type="rss" text="Custom Two" xmlUrl="http://127.0.0.1:${port}/feed2.xml"/>
+    </outline>
+    <outline type="rss" text="Duplicate Of Two" xmlUrl="http://127.0.0.1:${port}/feed2.xml"/>
+  </body>
+</opml>`);
+  fs.writeFileSync(path.join(SANDBOX, 'config.json'), JSON.stringify({
+    settings: { retentionDays: 30, fullTextDefault: false },
+    folders: [{ id: 'f-config', name: 'From Config' }],
+    feeds: [{ id: 'cfg-one', url: `http://127.0.0.1:${port}/feed1.xml`, folder: 'f-config' }],
+  }, null, 2));
+  await new Promise((r) => setTimeout(r, 1100));
+  out = await run();
+  ok(/feeds\.opml: imported 3 feeds in 1 folders \(merged with config\.json: 2 feeds total\)/.test(out), 'the run logs the OPML merge');
+  const idx13 = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/index.json'), 'utf8'));
+  ok(fs.existsSync(path.join(SANDBOX, 'data/feeds/cfg-one.json')), 'the config-owned id wins for the shared feed (cfg-one.json exists)');
+  ok(fs.existsSync(path.join(SANDBOX, 'data/feeds/custom-two.json')), 'an OPML-only feed joins under its derived id (custom-two.json exists)');
+  ok(Object.keys(idx13.feeds).length === 2, `exactly two feeds ship (url dedup dropped the duplicate outline) (${Object.keys(idx13.feeds).length})`);
+  ok(idx13.feeds['cfg-one'].title === 'Feed One', 'the OPML title survives when the config names no title');
+  ok(idx13.feeds['cfg-one'].folder === 'f-config', 'the config folder wins over the OPML folder for the merged feed');
+  ok(idx13.feeds['cfg-one'].site === 'https://opml.example/one', 'the OPML htmlUrl becomes the feed site');
+  ok(idx13.feeds['custom-two'].title === 'Custom Two' && idx13.feeds['custom-two'].folder === 'tech', 'an OPML-only feed lands in its nested OPML folder');
+  ok(idx13.folders.map((f) => f.id).join(',') === 'tech,f-config', 'both the OPML folder and the config folder ship in the index');
+  const cfgOne13 = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/feeds/cfg-one.json'), 'utf8'));
+  ok(cfgOne13.articles.length === 3 && JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/feeds/custom-two.json'), 'utf8')).articles.length === 1, 'both merged feeds carry their articles');
+  ok(cfgOne13.articles.find((a) => /First post/.test(a.title))?.id === first1.id, 'article ids are unchanged by the OPML merge (read state and deep links survive)');
+}
+console.log('run 14: full-text extraction — extract once, reuse across runs, respect the feed-is-long-enough skip');
+{
+  fs.rmSync(path.join(SANDBOX, 'feeds.opml'), { force: true });
+  fs.writeFileSync(path.join(SANDBOX, 'config.json'), JSON.stringify({
+    settings: { retentionDays: 30, fullTextDefault: true },
+    feeds: [{ id: 'ft', url: `http://127.0.0.1:${port}/ftfeed.xml` }],
+  }, null, 2));
+  await new Promise((r) => setTimeout(r, 1100));
+  out = await run();
+  ok(/extracted text: FT story 1/.test(out), 'the run logs the one successful extraction');
+  const ft = () => JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/feeds/ft.json'), 'utf8'));
+  ok(ft().articles.length === 4, 'all four items stored');
+  const a1 = () => ft().articles.find((a) => a.title === 'FT story 1');
+  ok(a1()?.text?.includes('READABILITY_MARKER_PHRASE'), 'the readable page text landed in a.text');
+  ok(!a1()?.text?.includes('EVIL_SCRIPT_BODY'), 'script bodies never reach the extracted text');
+  ok(ft().articles.find((a) => a.title === 'FT story 2')?.text === null, 'a too-thin page yields no text (the 120-char floor)');
+  ok(ft().articles.find((a) => a.title === 'FT story 3')?.text === null, 'a 404 page yields no text (extraction failure is non-fatal)');
+  ok(ft().articles.find((a) => a.title === 'FT story 4')?.text === null, 'a feed description over 400 chars skips extraction entirely');
+  ok(ft().articles.find((a) => a.title === 'FT story 4')?.content?.includes('X'.repeat(420)), 'the long feed description is still stored as content');
+  ok(art1Hits === 1 && art2Hits === 1, 'each page fetched exactly once on the cold run');
+  await new Promise((r) => setTimeout(r, 1100));
+  out = await run();
+  ok(ftFeedHits === 2 && /not modified/.test(out), 'the second run is a conditional 304');
+  ok(art1Hits === 1, 'the 304 path re-extracts nothing');
+  ok(a1()?.text?.includes('READABILITY_MARKER_PHRASE'), 'the stored text survives the 304 run');
+  ftEtag = '"ft2"';
+  await new Promise((r) => setTimeout(r, 1100));
+  out = await run();
+  ok(ftFeedHits === 3 && !/not modified/.test(out), 'the third run re-parses the feed (new etag)');
+  ok(art1Hits === 1 && art2Hits === 2, 'an item with stored text is never re-fetched; a textless item retries its page');
+  ok(a1()?.text?.includes('READABILITY_MARKER_PHRASE'), 'the reused text is still intact after the re-parse');
 }
 console.log('id-migration matchers (unit)');
 {
