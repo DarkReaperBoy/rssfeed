@@ -6,6 +6,71 @@ Run everything with `npm test`.
 
 ---
 
+## Hardening pass 3 (baseline `main @ 6b73c85`)
+
+Six suites, **669 assertions + sec/chaos verdicts**: `test:ui` (495), `test:char` (34), `test:sec` (client boundary + poisoned-timestamp probe), `test:static` (33), `test:chaos` (5 verdicts), `test:e2e` (102).
+
+### Feature (user-requested, landed before the phases)
+
+| Commit | Change | Verify |
+|---|---|---|
+| `7f790b0` | **YouTube chapter timestamps are clickable and seek the inline player** (Inoreader parity). Render-time linkify pass over reader-body text nodes — `0:00`, `1:07`, `1:02:03` (boundary guards; no digit/colon-adjacent matches; text inside anchors/code/pre untouched, so no nested anchors). Plain left-click mounts the player at `?start=SECONDS` or seeks the running iframe via the IFrame-API command protocol (postMessage — no external script, CSP unchanged). Ctrl/middle-click opens the timestamped watch URL in a new tab; non-YouTube articles never linkify; hrefs derive from the article's own link (no new hardcoded hosts). Smoke grew 471→495 assertions. | `npm run test:ui` → the Inoreader-parity section |
+
+### Phase 0 — Recon (read-only)
+
+Full independent re-read of every tracked file; map/journeys/risk register in the working notes. Findings that drove later phases: the hourly-cron copy drift (R1, Phase 2) and the missing `enablejsapi` on mounted embeds (found in Phase 7's real-Chromium walk).
+
+### Phase 1 — Safety net
+
+| Commit | Change | Verify |
+|---|---|---|
+| `fa4f862` | **e2e runs 13–14 — permanent pins for the two unpinned critical journeys.** OPML import: config-override merge, nested folder creation, url dedup, id stability across the merge. Full-text extraction against a local HTTP server: text lands with script bodies stripped, the 120-char floor, non-fatal 404s, the 400-char feed-description skip, and the stored-text reuse invariant across 304 and re-parse runs. | `npm run test:e2e` (76→102) |
+
+### Phase 2 — Correctness (one atomic fix per iteration)
+
+| Commit | Change | Verify |
+|---|---|---|
+| `9546e07` | **Fetch cadence copy still said "every 15 minutes"** after the owner's 6b73c85 moved the cron to hourly (the inverse of pass 2's `1694d72`). Both empty-state copies + two README claims corrected; new static pin couples the workflow cron to app/README copy so the next schedule change fails the suite until the copy follows. | `npm run test:char` + `test:static` (30→33) |
+| `9b3a872` | Sweep evidence (test-only): 30 rapid timestamp clicks over a playing embed all become seeks with zero remounts; a foreign video link in the same description renders its own facade while seeks still target the article's own embed. All lenses swept (logic/race/async/rejections/error-swallow/memory) — one cosmetic finding reviewed and accepted (control chars inside http(s) links survive to storage; scheme validation unaffected). | `npm run test:ui` (495) |
+
+### Phase 3 — Prune & refactor (behavior-preserving)
+
+| Commit | Change | Verify |
+|---|---|---|
+| `2ade371` | Dead code, both verified unreachable: `TOTAL` in chaos.mjs (never read); `pickEnclosures`' `item.links` loop (rss-parser never populates that field — probed with an Atom feed carrying `rel=enclosure` links). Dependencies re-checked: `npm outdated` empty, 0 vulnerabilities. | `npm test` |
+| `5d85e5d` | Duplication: the "retained set minus word filter, through config filter" expression repeated at eight write-path sites became one `keepRetained()` closure per feed. | `npm run test:e2e` (every failure/304/merge path pinned) |
+
+### Phase 4 — Performance (measured, not guessed)
+
+Profiled in jsdom at 55 feeds / 4042 articles (mirrors the live dataset). Plain open 45.8 ms, `j` 48.3 ms (pass-2 post-optimization ballpark). **All candidates rejected with measurement**: the timestamp linkify delta is ~0 ms at a pathological 100-chapter scale (526.0 ms YT open vs 553.9 ms for the same-size non-YT body — the delta is within noise); the seek path is O(1); mount reuses the pre-existing facade path (242 vs 430 ms samples of the identical `mountYtEmbed` — jsdom iframe-creation artifacts). The big-body reader render remains the known jsdom parse5 artifact from pass 2. No optimization commits.
+
+### Phase 5 — UI/UX & polish
+
+| Commit | Change | Verify |
+|---|---|---|
+| `a62106d` | Doc completeness: the twelve live appearance keys (`density`, `showFavicons`, `absoluteDates`, `fontSize`, `sideFavicons`, `compactSidebar`, `countersClickable`, `titleCounter`, `updatedOnly`, `dimRead`, `sortAZ`, `autoScroll`) documented in CONFIGURATION.md — the only way to set them since the settings modal was removed. | Read the settings table against `CONFIG_KEYS` |
+
+Timestamp links inherit the app's link system (accent color, focus-visible, both themes by construction); keyboard Enter on a focused timestamp triggers the same seek path.
+
+### Phase 6 — Security
+
+| Commit | Change | Verify |
+|---|---|---|
+| `9201931` | Poisoned-timestamp probe: hostile markup around timestamps stripped, `javascript:` links beside timestamps neutralized, hostile anchors never gain nested links, every generated href is exactly the article video plus a numeric `t`, `data-t` pure digits, attribute-lookalike hostile text yields only clean links. Boundary audit re-verified (CSP unchanged, no secrets, postMessage payload inert, no auth/CSRF surface). | `npm run test:sec` |
+
+### Phase 7 — Full verification + the one bug only a real browser could catch
+
+| Commit | Change | Verify |
+|---|---|---|
+| `d8c5352` | **`enablejsapi=1` was missing from mounted embed URLs** — without it YouTube's player silently ignores every postMessage command (seekTo included). Found by the real-Chromium walk: before the fix the player would not even ACK the `listening` handshake; after it, full `initialDelivery`/`infoDelivery` with currentTime/duration/playerState flows. jsdom could not catch this — it proves our code sends the message, not that the player honors it. | Real-Chromium walk below; smoke src pin updated |
+
+- `npm test`: **669 assertions, zero failures**, from a clean `npm ci`.
+- Real-Chromium walk (fixture data served locally): boot (badge/title/oldest-first), reading flow (open/read/hash/expanded), `j`/`k`/`Escape`, F5 mid-read reopens the same article, back/forward history, mark-all + confirm + Undo + caught-up empty state, badge tick, global search (plain + `title:` operator semantics), system dark mode, mobile 390×844 (drawer + scrim + article-pane takeover), and the timestamp feature end-to-end: 10 links with exact hrefs, accent-colored, keyboard-focusable, facade → real embed mounts under the unchanged CSP with zero console output and zero CSP violations.
+- Live seek **motion** is not observable from this sandbox (YouTube's backend auth-blocks media playback for the datacenter IP — `videoData.errorCode "auth"`; `playVideo` itself has no effect here, identically for the official IFrame API script, which uses this same wire protocol). The command path is verified to the wire, and the documented prerequisite for it (`enablejsapi=1`) is present and pinned.
+- Console across the entire walk: **zero messages, zero errors**.
+
+---
+
 ## Hardening pass 2 (baseline `main @ e22f323`)
 
 Six suites, **601 assertions + chaos verdicts**: `test:ui` (471), `test:char` (30), `test:sec` (client boundary), `test:static` (29, new), `test:chaos` (5 verdicts, new), `test:e2e` (76).
