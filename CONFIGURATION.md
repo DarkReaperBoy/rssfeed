@@ -26,6 +26,23 @@ Changes take effect on the next workflow run (push to `main` or the scheduled ru
 | `fullTextDefault` | `false` | When `true`, the fetcher visits each article's page and extracts the full text instead of keeping the feed's teaser. Per-feed override: `fullText` on the feed. |
 | `dropShorts` | `true` | When `true`, YouTube Shorts are dropped from YouTube feeds. Per-feed override: `dropShorts` on the feed. |
 
+The `settings` block also accepts appearance keys that used to live in the removed settings modal — every one of them is read once at load:
+
+| Option | Default | What it does |
+|---|---|---|
+| `density` | `"comfort"` | Row height in the article list: `"comfort"`, `"compact"`, or `"ultra"`. |
+| `showFavicons` | `true` | Show favicons beside feed names in the article list. |
+| `absoluteDates` | `false` | Show full dates and times instead of relative ages. |
+| `fontSize` | `"14.5px"` | Article-title font size in the list (any CSS length). |
+| `sideFavicons` | `true` | Show favicons in the sidebar. |
+| `compactSidebar` | `false` | Collapse the sidebar to a narrow icon rail. |
+| `countersClickable` | `true` | Sidebar unread badges act as one-click mark-as-read ticks. |
+| `titleCounter` | `true` | The browser-tab title carries the `(N)` unread prefix. |
+| `updatedOnly` | `false` | The sidebar lists only feeds (and folders) with unread articles. |
+| `dimRead` | `false` | Dim caught-up feeds and folders in the sidebar. |
+| `sortAZ` | `false` | Sort sidebar folders and feeds alphabetically. |
+| `autoScroll` | `true` | Opening an article scrolls the reader pane to the top. |
+
 Two things are intentionally **not** configurable anymore:
 
 - **Marking articles read when you open them** — always on; it's the app's core behavior.
