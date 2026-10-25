@@ -613,6 +613,8 @@ console.log('YouTube chapter timestamps become seekable links (Inoreader parity)
       content: '<p>clock 24:61, ratio a1:07, v1.2.3, 1:2, and 1:2345 must all stay plain</p>', text: null, enclosures: [], fetchedAt: now },
     { id: 'yts-3', title: 'Link-wrapped timestamps', link: watch, date: now - 3 * 3600e3, author: null, summary: 's',
       content: '<p><a href="https://example.test/x">inside 1:07 stays</a> — outside 2:04 links</p>', text: null, enclosures: [], fetchedAt: now },
+    { id: 'yts-4', title: 'Rapid fire', link: 'https://www.youtube.com/watch?v=aaaaaaaaaaa', date: now - 4 * 3600e3, author: null, summary: 's',
+      content: '<p>also watch <a href="https://www.youtube.com/watch?v=bbbbbbbbbbb">https://www.youtube.com/watch?v=bbbbbbbbbbb</a><br>0:00 start<br>1:00 one<br>2:00 two<br>3:00 three</p>', text: null, enclosures: [], fetchedAt: now },
   ];
   const idxY = { generatedAt: now, folders: [], feeds: { 'fixture-yt': { title: 'Yt Chapters', site: 'https://y.test', folder: null, folders: [], count: ytArts.length, newest: now - 3600e3, oldest: now - 3 * 3600e3 } } };
   const domY = new JSDOM(html, { url: 'https://example.test/', runScripts: 'outside-only', pretendToBeVisual: true });
@@ -671,6 +673,27 @@ console.log('YouTube chapter timestamps become seekable links (Inoreader parity)
   ok(wY.document.querySelectorAll('#reader-slot .reader-body a.ts').length === 1, 'only the timestamp OUTSIDE the existing link was wrapped');
   const plain = wY.document.querySelector('#reader-slot .reader-body a:not(.ts)');
   ok(!!plain && plain.textContent.includes('1:07') && !plain.querySelector('a'), 'the time inside an existing link stayed plain text (no nested anchors)');
+  wY.document.querySelector('#reader-slot [data-act="collapse"]').dispatchEvent(new wY.MouseEvent('click', { bubbles: true }));
+  await settle(50);
+  console.log('rapid timestamp spam + a competing video link in the description');
+  rowY('yts-4').dispatchEvent(new wY.MouseEvent('click', { bubbles: true }));
+  await settle(80);
+  ok(wY.document.querySelectorAll('#reader-slot .reader-body .embed').length === 2, 'the description\'s foreign video link ALSO became a facade (plus the article\'s own)');
+  ok(!!wY.document.querySelector('#reader-slot .reader-body .embed[data-self="1"]'), 'the article\'s own embed is marked apart from the foreign one');
+  const rapidAnchors = [...wY.document.querySelectorAll('#reader-slot .reader-body a.ts')];
+  ok(rapidAnchors.length === 4, `the four chapter times linkified (${rapidAnchors.length})`);
+  const sentRapid = [];
+  const selfWrap = wY.document.querySelector('#reader-slot .reader-body .embed[data-self="1"]');
+  selfWrap.querySelector('button').dispatchEvent(new wY.MouseEvent('click', { bubbles: true }));
+  await settle(50);
+  const rapidIfr = selfWrap.querySelector('iframe');
+  ok(!!rapidIfr && rapidIfr.src.includes('/embed/aaaaaaaaaaa'), 'playing the article video mounts the self embed');
+  rapidIfr.contentWindow.postMessage = (m) => sentRapid.push(m);
+  for (let i = 0; i < 30; i++) rapidAnchors[i % rapidAnchors.length].dispatchEvent(new wY.MouseEvent('click', { bubbles: true, cancelable: true }));
+  await settle(150);
+  ok(sentRapid.length === 30 && sentRapid.every((m) => m.includes('"func":"seekTo"')), `30 rapid timestamp clicks all became seeks (${sentRapid.length})`);
+  ok(selfWrap.querySelector('iframe') === rapidIfr, 'the spam never remounted the player');
+  ok(wY.document.querySelectorAll('#reader-slot .reader-body .embed').length === 2, 'both embeds stay exactly as they were');
   domY.window.close();
 }
 console.log('search is global — it crosses the current feed/folder scope');
