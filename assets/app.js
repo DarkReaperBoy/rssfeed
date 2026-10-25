@@ -594,7 +594,7 @@ function renderReaderPane(visible) {
 
       const tpl = document.createElement('template');
       tpl.innerHTML = readerHtml(open);
-      tpl.content.querySelectorAll('.reader-body').forEach((el) => { sanitizeReaderDom(el); upgradeEmbeds(el, open.link); });
+      tpl.content.querySelectorAll('.reader-body').forEach((el) => { sanitizeReaderDom(el); upgradeEmbeds(el, open.link); linkifyTimestamps(el, open.link); });
       slot.replaceChildren(tpl.content);
       slot.classList.remove('hidden');
       document.body.classList.add('article-open');
@@ -635,6 +635,9 @@ function renderEmpty(visible) {
   }
 }
 
+function mountYtEmbed(wrap, id, startSec) {
+  wrap.innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/${id}?autoplay=1${startSec > 0 ? `&start=${startSec}` : ''}" title="YouTube video" allow="accelerometer; autoplay; encrypted-media; picture-in-picture" allowfullscreen loading="lazy"></iframe>`;
+}
 function upgradeEmbeds(root, articleLink) {
   if (!root) return;
   const vimeo = (url) => { const m = url.match(/vimeo\.com\/(\d+)/); return m ? m[1] : null; };
@@ -653,9 +656,10 @@ function upgradeEmbeds(root, articleLink) {
     const stop = (fn) => (ev) => { ev.stopPropagation(); fn(); };
     const id = ytId(url);
     if (id) {
+      if (url === articleLink) wrap.dataset.self = '1';
       wrap.innerHTML = `<button class="embed-facade" type="button" title="Play video" aria-label="Play video"><img loading="lazy" src="https://i.ytimg.com/vi/${id}/hqdefault.jpg" alt=""></button>`;
       wrap.querySelector('button').addEventListener('click', stop(() => {
-        wrap.innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/${id}?autoplay=1" title="YouTube video" allow="accelerometer; autoplay; encrypted-media; picture-in-picture" allowfullscreen loading="lazy"></iframe>`;
+        mountYtEmbed(wrap, id, 0);
       }), { once: true });
       a.replaceWith(wrap); continue;
     }
@@ -677,6 +681,43 @@ function upgradeEmbeds(root, articleLink) {
     }
     if (audioRe.test(url)) { const el = document.createElement('audio'); el.controls = true; el.preload = 'none'; el.src = url; wrap.appendChild(el); a.replaceWith(wrap); continue; }
     if (videoRe.test(url)) { const el = document.createElement('video'); el.controls = true; el.preload = 'none'; el.src = url; wrap.appendChild(el); a.replaceWith(wrap); continue; }
+  }
+}
+
+const TS_RE = /(^|[^\d:])(?:(\d{1,3}):)?([0-5]?\d):([0-5]\d)(?![\d:])/gm;
+function linkifyTimestamps(root, articleLink) {
+  if (!root || !ytId(articleLink)) return;
+  let base;
+  try { base = new URL(articleLink); } catch { return; }
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode: (n) => (!n.nodeValue || !n.nodeValue.trim() || (n.parentElement && n.parentElement.closest('a, code, pre')) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+  });
+  const nodes = [];
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) nodes.push(n);
+  for (const n of nodes) {
+    const matches = [...n.nodeValue.matchAll(TS_RE)];
+    if (!matches.length) continue;
+    const frag = document.createDocumentFragment();
+    let last = 0;
+    for (const m of matches) {
+      const pre = m[1];
+      const start = m.index + pre.length;
+      const tsText = m[0].slice(pre.length);
+      const sec = Number(m[2] || 0) * 3600 + Number(m[3]) * 60 + Number(m[4]);
+      if (start > last) frag.appendChild(document.createTextNode(n.nodeValue.slice(last, start)));
+      const aEl = document.createElement('a');
+      aEl.className = 'ts';
+      aEl.dataset.t = String(sec);
+      try { base.searchParams.set('t', `${sec}s`); aEl.href = base.href; } catch { return; }
+      aEl.target = '_blank';
+      aEl.rel = 'noopener noreferrer';
+      aEl.title = 'Jump to this point';
+      aEl.textContent = tsText;
+      frag.appendChild(aEl);
+      last = start + tsText.length;
+    }
+    if (last < n.nodeValue.length) frag.appendChild(document.createTextNode(n.nodeValue.slice(last)));
+    n.replaceWith(frag);
   }
 }
 
@@ -1240,6 +1281,24 @@ function bindEvents() {
     if (!actBtn) return;
     e.stopPropagation();
     dispatchAct(actBtn.dataset.act, state.expandedId);
+  });
+  $('#reader-slot').addEventListener('click', (e) => {
+    const ts = e.target.closest ? e.target.closest('a.ts') : null;
+    if (!ts || e.defaultPrevented) return;
+    if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+    const wrap = ts.closest('.reader-body')?.querySelector('.embed[data-self="1"]');
+    const open = state.expandedId ? findArticle(state.expandedId) : null;
+    const vid = open ? ytId(open.link) : null;
+    if (!wrap || !vid) return;
+    e.preventDefault();
+    const sec = Number(ts.dataset.t) || 0;
+    const ifr = wrap.querySelector('iframe');
+    if (ifr) {
+      try { ifr.contentWindow?.postMessage?.(JSON.stringify({ event: 'command', func: 'seekTo', args: [sec, true] }), '*'); } catch {}
+    } else {
+      mountYtEmbed(wrap, vid, sec);
+    }
+    wrap.scrollIntoView?.({ block: 'nearest' });
   });
   $('#scroll-up').addEventListener('click', () => {
     const btn = $('#reader-slot [data-act="prev"]');

@@ -24,6 +24,7 @@ config.json ──► GitHub Action (every 15 min) ──► data/*.json on the 
 - **Filters, server-side** — rules that hide, highlight, auto-mark-read, or keep-unread matching articles at fetch time, scoped to specific feeds or folders, matching on title, content, subject, capcode, author, or link with plain words or regex. Hidden articles never reach the browser; the other actions ship as per-article flags.
 - **Full text extraction** — optionally fetch and store the article's own text instead of the feed's teaser.
 - **Beyond RSS** — YouTube channel feeds (Shorts dropped by default), Hacker News by points/comments, and 4chan boards by reply count.
+- **Clickable video timestamps** — chapter times in YouTube descriptions (`6:40 And then there's Chainguard`) become links: a plain click starts the inline player at that moment, seeks it if it's already playing, and Ctrl/middle-click opens YouTube at that point in a new tab.
 - **Resizable reading layout** — drag the divider between the list and the article to suit your screen (double-click resets it); the sidebar resizes too.
 - **Shareable links** — every view has a URL (see below).
 - **Keyboard shortcuts** — `j`/`k` to move through articles, `m` to toggle read, `o`/`v` to open the original, `s` to keep unread, `/` to search, `Esc` to dismiss.

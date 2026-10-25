@@ -20,6 +20,7 @@ Run against a local static serve of the working tree with generated fixture data
 - [ ] Refresh mid-read (F5 with reader open): same article reopens from the hash, stays read.
 - [ ] Back/forward through opened articles: reader follows; rapid back-forward spam stays consistent.
 - [ ] Long article: scroll inside the reader; sticky toolbar; scroll-nav buttons appear only with an article open.
+- [ ] YouTube article with chaptered description: every `0:00`-style timestamp is a link; a plain click starts the inline player at that time (or seeks it in place while it plays); Ctrl/middle-click opens YouTube at the timestamp in a new tab; times inside existing links and times in non-YouTube articles stay plain text.
 
 ## Mark operations
 - [ ] ✓ button marks all read in the current scope (confirm dialog); Undo toast restores exactly.

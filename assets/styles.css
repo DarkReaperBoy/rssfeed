@@ -396,6 +396,7 @@ body.article-open #scroll-nav { display: flex; }
 .reader-body table { border-collapse: collapse; margin: 12px 0; }
 .reader-body td, .reader-body th { border: 1px solid var(--border); padding: 4px 8px; }
 .reader-body audio { width: 100%; margin: 8px 0; }
+.reader-body a.ts { font-variant-numeric: tabular-nums; }
 .reader-attachments { margin-top: 14px; display: flex; flex-direction: column; gap: 6px; }
 .reader-attachments a { display: flex; gap: 8px; align-items: center; font-size: 13.5px; text-decoration: none; padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); }
 .reader-attachments a:hover { border-color: var(--accent); }

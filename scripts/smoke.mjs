@@ -601,6 +601,78 @@ console.log('hostile feed links never become URLs');
   click($('#reader-slot [data-act="collapse"]'));
   await settle(50);
 }
+console.log('YouTube chapter timestamps become seekable links (Inoreader parity)');
+{
+  const vid = 'dQw4w9WgXcQ';
+  const watch = `https://www.youtube.com/watch?v=${vid}`;
+  const ytArts = [
+    { id: 'yts-1', title: 'The Linux video with chapters', link: watch, date: now - 3600e3, author: 'Chan', summary: 's',
+      content: '<p>Chapters:<br>0:00 The Hacker News post<br>1:07 Some brief context<br>2:04 The bugs in question<br>6:40 And then there\'s Chainguard<br>8:43 Why talk about this on a Linux channel?<br>10:03 The other half of the title<br>14:55 Outtakes<br>1:02:03 Hour-form chapter</p>',
+      text: null, enclosures: [], fetchedAt: now },
+    { id: 'yts-2', title: 'Not a video', link: 'https://example.test/plain', date: now - 2 * 3600e3, author: null, summary: 's',
+      content: '<p>clock 24:61, ratio a1:07, v1.2.3, 1:2, and 1:2345 must all stay plain</p>', text: null, enclosures: [], fetchedAt: now },
+    { id: 'yts-3', title: 'Link-wrapped timestamps', link: watch, date: now - 3 * 3600e3, author: null, summary: 's',
+      content: '<p><a href="https://example.test/x">inside 1:07 stays</a> — outside 2:04 links</p>', text: null, enclosures: [], fetchedAt: now },
+  ];
+  const idxY = { generatedAt: now, folders: [], feeds: { 'fixture-yt': { title: 'Yt Chapters', site: 'https://y.test', folder: null, folders: [], count: ytArts.length, newest: now - 3600e3, oldest: now - 3 * 3600e3 } } };
+  const domY = new JSDOM(html, { url: 'https://example.test/', runScripts: 'outside-only', pretendToBeVisual: true });
+  const wY = domY.window;
+  wY.fetch = async (u) => {
+    const p = String(u).split('?')[0];
+    if (p === 'config.json') return { ok: true, status: 200, json: async () => structuredClone(config) };
+    if (p === 'data/index.json') return { ok: true, status: 200, json: async () => structuredClone(idxY) };
+    if (p === 'data/all-feeds.json') return { ok: true, status: 200, json: async () => structuredClone({ articles: ytArts.map((a) => ({ ...a, _feed: 'fixture-yt' })) }) };
+    return { ok: false, status: 404, statusText: 'Not Found', json: async () => { throw new Error('404'); } };
+  };
+  wY.eval(appSrc);
+  await settle(1200);
+  const rowY = (id) => [...wY.document.querySelectorAll('#list .row')].find((r) => r.dataset.id === id);
+  const bodyY = () => wY.document.querySelector('#reader-slot .reader-body');
+  const tsAll = () => [...bodyY().querySelectorAll('a.ts')];
+  rowY('yts-1').dispatchEvent(new wY.MouseEvent('click', { bubbles: true }));
+  await settle(80);
+  ok(tsAll().length === 8, `every chapter timestamp became a link (${tsAll().length})`);
+  ok(tsAll().every((a) => a.getAttribute('target') === '_blank' && a.getAttribute('rel') === 'noopener noreferrer'), 'timestamp links open safely (target _blank + noopener)');
+  ok(tsAll().map((a) => a.dataset.t).join(',') === '0,67,124,400,523,603,895,3723', `seconds are computed from M:SS and H:MM:SS forms (${tsAll().map((a) => a.dataset.t).join(',')})`);
+  ok(tsAll().every((a) => a.href === `${watch}&t=${a.dataset.t}s`), 'each href points at the same video at that second');
+  ok(tsAll()[1].textContent === '1:07' && tsAll()[7].textContent === '1:02:03', 'the visible link text stays the raw timestamp');
+  ok(tsAll().every((a) => a.title === 'Jump to this point'), 'each timestamp carries its jump title');
+  const facade = bodyY().querySelector('.embed[data-self="1"] .embed-facade');
+  ok(!!facade, 'the article video itself renders as the click-to-play facade');
+  ok(facade.querySelector('img').src === `https://i.ytimg.com/vi/${vid}/hqdefault.jpg`, 'the facade uses the video thumbnail');
+  ok(!bodyY().querySelector('.embed:not([data-self="1"])'), 'no other embed was created in this article');
+  console.log('plain left-click on a timestamp mounts the player at that second');
+  tsAll()[3].dispatchEvent(new wY.MouseEvent('click', { bubbles: true, cancelable: true }));
+  await settle(60);
+  const ifr = bodyY().querySelector('.embed[data-self="1"] iframe');
+  ok(!!ifr && ifr.src === `https://www.youtube-nocookie.com/embed/${vid}?autoplay=1&start=400`, 'the 6:40 click starts the embed at 400s (autoplay from that point)');
+  ok(!bodyY().querySelector('.embed[data-self="1"] .embed-facade'), 'the facade is gone once the player mounts');
+  console.log('a second timestamp seeks the live player in place (no remount)');
+  const sent = [];
+  ifr.contentWindow.postMessage = (m) => sent.push(m);
+  tsAll()[7].dispatchEvent(new wY.MouseEvent('click', { bubbles: true, cancelable: true }));
+  await settle(60);
+  ok(sent.length === 1 && sent[0].includes('"func":"seekTo"') && sent[0].includes('3723'), 'the 1:02:03 click posts a seekTo(3723) to the running player');
+  ok(bodyY().querySelector('.embed[data-self="1"] iframe') === ifr, 'the iframe was not remounted (a seek, not a reload)');
+  console.log('modified clicks keep the native open-in-new-tab behavior');
+  const evCtrl = new wY.MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true });
+  tsAll()[2].dispatchEvent(evCtrl);
+  await settle(60);
+  ok(!evCtrl.defaultPrevented && sent.length === 1, 'Ctrl-click is not intercepted (the browser opens the timestamped YouTube URL)');
+  wY.document.querySelector('#reader-slot [data-act="collapse"]').dispatchEvent(new wY.MouseEvent('click', { bubbles: true }));
+  await settle(50);
+  rowY('yts-2').dispatchEvent(new wY.MouseEvent('click', { bubbles: true }));
+  await settle(80);
+  ok(!wY.document.querySelector('#reader-slot .reader-body a.ts'), 'a non-YouTube article never linkifies its times');
+  wY.document.querySelector('#reader-slot [data-act="collapse"]').dispatchEvent(new wY.MouseEvent('click', { bubbles: true }));
+  await settle(50);
+  rowY('yts-3').dispatchEvent(new wY.MouseEvent('click', { bubbles: true }));
+  await settle(80);
+  ok(wY.document.querySelectorAll('#reader-slot .reader-body a.ts').length === 1, 'only the timestamp OUTSIDE the existing link was wrapped');
+  const plain = wY.document.querySelector('#reader-slot .reader-body a:not(.ts)');
+  ok(!!plain && plain.textContent.includes('1:07') && !plain.querySelector('a'), 'the time inside an existing link stayed plain text (no nested anchors)');
+  domY.window.close();
+}
 console.log('search is global — it crosses the current feed/folder scope');
 {
   click('.tree-item[data-scope="feed:fixture-bbc"]');
