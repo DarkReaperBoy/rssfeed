@@ -186,7 +186,7 @@ console.log('characterization: empty-state copy matches the real fetch schedule'
 {
   const { dom, w } = await bootDom({ idx: null, artsList: [] });
   ok(w.document.querySelector('#empty h3')?.textContent === 'No data yet', 'the no-data state names itself');
-  ok(/every 15 minutes/.test(w.document.querySelector('#empty').textContent), 'the no-data copy states the real fetch cadence (every 15 minutes)');
+  ok(/every hour/.test(w.document.querySelector('#empty').textContent), 'the no-data copy states the real fetch cadence (every hour)');
   dom.window.close();
   const { dom: dom3, w: w3 } = await bootDom({ artsList: [] });
   w3.document.querySelector('#btn-more').dispatchEvent(new w3.MouseEvent('click', { bubbles: true }));
@@ -194,7 +194,7 @@ console.log('characterization: empty-state copy matches the real fetch schedule'
   w3.document.querySelector('#status-items [data-status="all"]').dispatchEvent(new w3.MouseEvent('click', { bubbles: true }));
   await settle(100);
   ok(w3.document.querySelector('#empty h3')?.textContent === 'Nothing here', 'the nothing-here state names itself');
-  ok(/every 15 minutes/.test(w3.document.querySelector('#empty').textContent), 'the nothing-here copy states the real fetch cadence (every 15 minutes)');
+  ok(/every hour/.test(w3.document.querySelector('#empty').textContent), 'the nothing-here copy states the real fetch cadence (every hour)');
   dom3.window.close();
 }
 console.log('');

@@ -5,7 +5,7 @@ A serverless RSS reader that lives entirely on GitHub Pages. A GitHub Actions wo
 ## How it works
 
 ```
-config.json ──► GitHub Action (every 15 min) ──► data/*.json on the gh-pages branch
+config.json ──► GitHub Action (hourly) ──► data/*.json on the gh-pages branch
                                                         │
                                              GitHub Pages serves it all
                                                         │
@@ -48,7 +48,7 @@ Name matching is forgiving: `#folder/japslop`, `#folder/Japslop`, and `#folder/j
 1. **Fork or clone this repo.**
 2. **Edit `config.json`** — set a site name, add folders, and paste in the feeds you follow. See [CONFIGURATION.md](CONFIGURATION.md) for every option.
 3. **Enable GitHub Pages** — Settings → Pages → Source: `gh-pages` branch. (The workflow creates and maintains this branch for you.)
-4. **Run the workflow** — Actions → "Fetch feeds & publish" → Run workflow. The first run publishes the site; from then on the workflow checks in every 15 minutes and fetches whenever the published data is more than 40 minutes old (and on every push to `main`).
+4. **Run the workflow** — Actions → "Fetch feeds & publish" → Run workflow. The first run publishes the site; from then on the workflow checks in every hour and fetches whenever the published data is more than 40 minutes old (and on every push to `main`).
 
 That's it — your reader is live at `https://<you>.github.io/rssfeed/`.
 

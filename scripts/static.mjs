@@ -107,6 +107,16 @@ console.log('static contract: stylesheet liveness');
   ok(orphanCssIds.length === 0, `no dead id selectors in styles.css (orphans: ${orphanCssIds.join(', ') || 'none'})`);
 }
 
+console.log('static contract: fetch cadence copy matches the workflow schedule');
+{
+  const wf = await fs.readFile(path.join(ROOT, '.github/workflows/fetch.yml'), 'utf8');
+  const cron = wf.match(/cron:\s*'([^']+)'/)?.[1] || '';
+  ok(cron === '0 * * * *', `the fetch workflow runs hourly (cron: ${cron}) — changing the schedule requires updating the app/README cadence copy in the same commit`);
+  ok(!/every 15 minutes|every 15 min\b/.test(appSrc) && /every hour/.test(appSrc), 'the app empty-state copy names the hourly cadence');
+  const readme = await fs.readFile(path.join(ROOT, 'README.md'), 'utf8');
+  ok(!/every 15 minutes|every 15 min\b/.test(readme) && /every hour/.test(readme), 'the README names the hourly cadence');
+}
+
 console.log('');
 console.log(`${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
