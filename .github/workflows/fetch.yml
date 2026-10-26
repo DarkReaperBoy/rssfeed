@@ -1,15 +1,19 @@
 name: Fetch feeds & publish
+
 on:
   schedule:
-    - cron: '0 * * * *'  
-  workflow_dispatch:        
+    - cron: '23 * * * *'
+  workflow_dispatch:
   push:
-    branches: [main]        
+    branches: [main]
+
 permissions:
   contents: write
+
 concurrency:
   group: fetch-feeds
   cancel-in-progress: false
+
 jobs:
   fetch-and-publish:
     runs-on: ubuntu-latest
@@ -31,9 +35,11 @@ jobs:
           else
             echo "No published data found (or unreadable) — running a full fetch."
           fi
+
       - name: Checkout
         if: env.SKIP_FETCH != 'true'
         uses: actions/checkout@v4
+
       - name: Fetch previous data (retention accumulation)
         if: env.SKIP_FETCH != 'true'
         run: |
@@ -42,18 +48,22 @@ jobs:
             git checkout origin/gh-pages -- data 2>/dev/null || true
           fi
           ls data 2>/dev/null || echo "no previous data (first run)"
+
       - name: Setup Node
         if: env.SKIP_FETCH != 'true'
         uses: actions/setup-node@v4
         with:
-          node-version: 22 
+          node-version: 22
           cache: npm
+
       - name: Install deps
         if: env.SKIP_FETCH != 'true'
         run: npm ci
+
       - name: Fetch feeds
         if: env.SKIP_FETCH != 'true'
         run: npm run fetch
+
       - name: Assemble site
         if: env.SKIP_FETCH != 'true'
         run: |
@@ -66,6 +76,7 @@ jobs:
           touch _site/.nojekyll
           ASSET_SHA=$( { sha256sum _site/index.html; find _site/assets -type f -print0 | sort -z | xargs -0 sha256sum; } | sha256sum | cut -c1-10 )
           sed -i -E "s/(\?v=)[^\"]*/\1$ASSET_SHA/g" _site/index.html
+
       - name: Publish to gh-pages branch
         if: env.SKIP_FETCH != 'true'
         env:
