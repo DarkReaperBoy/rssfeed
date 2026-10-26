@@ -2,6 +2,7 @@ name: Fetch feeds & publish
 
 on:
   schedule:
+    # Runs at minute 23 of every hour to avoid top-of-the-hour queue gridlock
     - cron: '23 * * * *'
   workflow_dispatch:
   push:
@@ -9,6 +10,7 @@ on:
 
 permissions:
   contents: write
+  actions: write # Required by keepalive-workflow to interact with the Actions API
 
 concurrency:
   group: fetch-feeds
@@ -90,3 +92,12 @@ jobs:
           git commit -m "chore: refresh feed data"
           git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git push --force origin gh-pages
+
+      # Resets GitHub's 60-day inactivity countdown automatically
+      - name: Keep workflow active indefinitely
+        uses: gautamkrishnar/keepalive-workflow@v2
+        with:
+          committer_username: 'github-actions[bot]'
+          committer_email: '41898282+github-actions[bot]@users.noreply.github.com'
+          commit_message: 'chore(ci): keepalive ping'
+          time_elapsed: 45
