@@ -2,7 +2,7 @@ name: Fetch feeds & publish
 
 on:
   schedule:
-    # Runs at minute 23 of every hour to bypass top/half-hour runner congestion
+    # Runs at minute 23 of every hour to avoid top-of-the-hour queue gridlock
     - cron: '23 * * * *'
   workflow_dispatch:
   push:
@@ -10,7 +10,6 @@ on:
 
 permissions:
   contents: write
-  actions: write # Required by keepalive-workflow to interact with the Actions API
 
 concurrency:
   group: fetch-feeds
@@ -31,7 +30,6 @@ jobs:
           if [ -n "$TS" ] && [ "$TS" -gt 0 ] 2>/dev/null; then
             AGE=$(( ($(date -u +%s%3N) - TS) / 60000 ))
             echo "Published data age: ${AGE} min"
-            # 50m threshold handles normal 5-15 min GitHub runner delays without skipping runs
             if [ "$AGE" -lt 50 ]; then
               echo "Data is fresh (<50 min) — nothing to do."
               echo "SKIP_FETCH=true" >> "$GITHUB_ENV"
@@ -41,8 +39,9 @@ jobs:
           fi
 
       - name: Checkout
-        if: env.SKIP_FETCH != 'true'
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Fetch previous data (retention accumulation)
         if: env.SKIP_FETCH != 'true'
@@ -95,11 +94,25 @@ jobs:
           git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git push --force origin gh-pages
 
-      # Resets GitHub's 60-day inactivity countdown automatically
-      - name: Keep workflow active indefinitely
-        uses: gautamkrishnar/keepalive-workflow@v2
-        with:
-          committer_username: 'github-actions[bot]'
-          committer_email: '41898282+github-actions[bot]@users.noreply.github.com'
-          commit_message: 'chore(ci): keepalive ping'
-          time_elapsed: 45
+      # Resets GitHub's 60-day inactivity timer if no commits occurred in 45 days
+      - name: Keep repository active
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git fetch origin main --depth=1
+          LAST_COMMIT_TS=$(git log -1 --format=%ct origin/main)
+          NOW_TS=$(date +%s)
+          DAYS_SINCE=$(( (NOW_TS - LAST_COMMIT_TS) / 86400 ))
+          echo "Days since last commit on main: ${DAYS_SINCE}"
+
+          if [ "$DAYS_SINCE" -ge 45 ]; then
+            echo "Approaching 60-day inactivity limit. Pushing a keepalive commit..."
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git checkout main
+            git commit --allow-empty -m "chore(ci): keepalive heartbeat [skip ci]"
+            git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+            git push origin main
+          else
+            echo "Repository is active. No keepalive commit needed."
+          fi
