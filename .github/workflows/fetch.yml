@@ -2,7 +2,7 @@ name: Fetch feeds & publish
 
 on:
   schedule:
-    # Runs at minute 23 of every hour to avoid top-of-the-hour queue gridlock
+    # Runs at minute 23 of every hour to bypass top/half-hour runner congestion
     - cron: '23 * * * *'
   workflow_dispatch:
   push:
@@ -27,11 +27,13 @@ jobs:
           set -e
           TS=$(curl -fsSL --max-time 20 -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/gh-pages/data/index.json" 2>/dev/null \
             | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const t=JSON.parse(s).generatedAt;console.log(Number(t)||"")}catch{console.log("")}})' || true)
+          
           if [ -n "$TS" ] && [ "$TS" -gt 0 ] 2>/dev/null; then
             AGE=$(( ($(date -u +%s%3N) - TS) / 60000 ))
             echo "Published data age: ${AGE} min"
-            if [ "$AGE" -lt 40 ]; then
-              echo "Data is fresh (<40 min) — nothing to do."
+            # 50m threshold handles normal 5-15 min GitHub runner delays without skipping runs
+            if [ "$AGE" -lt 50 ]; then
+              echo "Data is fresh (<50 min) — nothing to do."
               echo "SKIP_FETCH=true" >> "$GITHUB_ENV"
             fi
           else
