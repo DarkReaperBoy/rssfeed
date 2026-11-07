@@ -1,0 +1,543 @@
+{
+  "settings": {
+    "siteName": "My RSSFeed",
+    "theme": "auto",
+    "retentionDays": 60,
+    "refreshMinutes": 5,
+    "fullTextDefault": false,
+    "dropShorts": true
+  },
+  "folders": [
+    {
+      "id": "ai-news",
+      "name": "AI News"
+    },
+    {
+      "id": "amerislop",
+      "name": "Amerislop"
+    },
+    {
+      "id": "gaming-news",
+      "name": "Gaming News"
+    },
+    {
+      "id": "japslop",
+      "name": "Japslop"
+    },
+    {
+      "id": "linux-news",
+      "name": "Linux News"
+    },
+    {
+      "id": "tech-news",
+      "name": "Tech News"
+    }
+  ],
+  "feeds": [
+    {
+      "type": "hackernews",
+      "title": "Hacker News",
+      "folder": "tech-news",
+      "minPoints": 150,
+      "minComments": 100
+    },
+    {
+      "type": "4chan",
+      "board": "g",
+      "title": "/g/ - Technology",
+      "folder": "ai-news",
+      "minReplies": 70,
+      "site": "https://boards.4channel.org/g/#catalog/reply-count",
+      "filter": {
+        "exclude": [
+          {
+            "subject": [
+              "/\\?/"
+            ]
+          },
+          {
+            "capcode": [
+              "/^Mod$/"
+            ]
+          },
+          {
+            "subject": [
+              "/(\\/pcbg\\/|\\bpcbg\\b|pc building general)/i"
+            ]
+          },
+          {
+            "content": [
+              "/(\\/pcbg\\/|\\bpcbg\\b|pc building general)/i"
+            ]
+          },
+          {
+            "subject": [
+              "/\\bdesktop thread\\b/i"
+            ]
+          },
+          {
+            "content": [
+              "/\\bdesktop thread\\b/i"
+            ]
+          },
+          {
+            "subject": [
+              "/(\\(λ\\)|lisp general)/i"
+            ]
+          },
+          {
+            "content": [
+              "/(\\(λ\\)|lisp general)/i"
+            ]
+          },
+          {
+            "subject": [
+              "/(\\/bst\\/|\\bbattlestations?\\b)/i"
+            ]
+          },
+          {
+            "content": [
+              "/(\\/bst\\/|\\bbattlestations?\\b)/i"
+            ]
+          },
+          {
+            "subject": [
+              "/(\\/gedg\\/|\\bgedg\\b|game (and|&) engine development)/i"
+            ]
+          },
+          {
+            "content": [
+              "/(\\/gedg\\/|\\bgedg\\b|game (and|&) engine development)/i"
+            ]
+          },
+          {
+            "subject": [
+              "/(\\/ptg\\/|\\bptg\\b|private trackers general)/i"
+            ]
+          },
+          {
+            "content": [
+              "/(\\/ptg\\/|\\bptg\\b|private trackers general)/i"
+            ]
+          },
+          {
+            "subject": [
+              "/(\\/iemg\\/|\\biemg\\b|in-ear monitor general)/i"
+            ]
+          },
+          {
+            "content": [
+              "/(\\/iemg\\/|\\biemg\\b|in-ear monitor general)/i"
+            ]
+          },
+          {
+            "subject": [
+              "/(\\/pmpg\\/|\\bpmpg\\b|portable music player general)/i"
+            ]
+          },
+          {
+            "content": [
+              "/(\\/pmpg\\/|\\bpmpg\\b|portable music player general)/i"
+            ]
+          },
+          {
+            "subject": [
+              "/(\\/tpg\\/|\\btpg\\b|thinkpad general)/i"
+            ]
+          },
+          {
+            "content": [
+              "/(\\/tpg\\/|\\btpg\\b|thinkpad general)/i"
+            ]
+          },
+          {
+            "subject": [
+              "/(\\/csg\\/|\\bcsg\\b|chink shit general)/i"
+            ]
+          },
+          {
+            "content": [
+              "/(\\/csg\\/|\\bcsg\\b|chink shit general)/i"
+            ]
+          },
+          {
+            "subject": [
+              "/(\\/spg\\/|\\bspg\\b|smartphone general)/i"
+            ]
+          },
+          {
+            "content": [
+              "/(\\/spg\\/|\\bspg\\b|smartphone general)/i"
+            ]
+          },
+          {
+            "subject": [
+              "/(\\/hsg\\/|\\bhsg\\b|home server general)/i"
+            ]
+          },
+          {
+            "content": [
+              "/(\\/hsg\\/|\\bhsg\\b|home server general)/i"
+            ]
+          },
+          {
+            "subject": [
+              "/(\\/mkg\\/|\\bmkg\\b|mechanical keyboard general)/i"
+            ]
+          },
+          {
+            "content": [
+              "/(\\/mkg\\/|\\bmkg\\b|mechanical keyboard general)/i"
+            ]
+          },
+          {
+            "subject": [
+              "/(\\/fwt\\/|\\bfwt\\b|friendly windows thread)/i"
+            ]
+          },
+          {
+            "content": [
+              "/(\\/fwt\\/|\\bfwt\\b|friendly windows thread)/i"
+            ]
+          },
+          {
+            "subject": [
+              "/(\\/dpt\\/|\\bdpt\\b|daily programming thread)/i"
+            ]
+          },
+          {
+            "content": [
+              "/(\\/dpt\\/|\\bdpt\\b|daily programming thread)/i"
+            ]
+          },
+          {
+            "subject": [
+              "/(\\/wdg\\/|\\bwdg\\b|web development general)/i"
+            ]
+          },
+          {
+            "content": [
+              "/(\\/wdg\\/|\\bwdg\\b|web development general)/i"
+            ]
+          },
+          {
+            "subject": [
+              "/(\\/dmp\\/|\\bdmp\\b|digital music production)/i"
+            ]
+          },
+          {
+            "content": [
+              "/(\\/dmp\\/|\\bdmp\\b|digital music production)/i"
+            ]
+          },
+          {
+            "subject": [
+              "/(\\/twg\\/|\\btwg\\b|tech workers general)/i"
+            ]
+          },
+          {
+            "content": [
+              "/(\\/twg\\/|\\btwg\\b|tech workers general)/i"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCNJ1Ymd5yFuUPtn21xtRbbw",
+      "title": "AI Explained",
+      "folder": "ai-news"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCIgnGlGkVRhd4qNFcEwLL4A",
+      "title": "AI Tools Search",
+      "folder": "ai-news"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCiaQzXI5528Il6r2NNkrkJA",
+      "title": "Bit by Bit Tutorials",
+      "folder": "ai-news"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCgfe2ooZD3VJPB6aJAnuQng",
+      "title": "bycloud",
+      "folder": "ai-news"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCsRvxZErBo0ByyWUX_aVuvg",
+      "title": "Codacus",
+      "folder": "ai-news"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UC0QGKpICdIVWw8ZMVbWyuXA",
+      "title": "Eric Morrison",
+      "folder": "ai-news"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCbfYPyITQ-7l4upoX8nvctg",
+      "title": "Károly Zsolnai-Fehér",
+      "folder": "ai-news"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UC5Wz4fFacYuON6IKbhSa7Zw",
+      "title": "MattVideoProductions",
+      "folder": "ai-news"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCheYIjmmW62RQuvPPJGyBDQ",
+      "title": "MustacheAI",
+      "folder": "ai-news"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCtVGnOqPVtFM7K5Q-HXoPsQ",
+      "title": "No place like localhost",
+      "folder": "ai-news"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCOCahKBCEUuzDJawM7yN1dg",
+      "title": "Ominous Industries",
+      "folder": "ai-news"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UC55ODQSvARtgSyc8ThfiepQ",
+      "title": "Sam Witteveen",
+      "folder": "ai-news"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCT9qsTmZ0dItDHp22Pw_Ezg",
+      "title": "SchizoDev",
+      "folder": "ai-news"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCbRP3c757lWg9M-U7TyEkXA",
+      "title": "Theo - T3 Tools",
+      "folder": "ai-news"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCQeRaTukNYft1_6AZPACnog",
+      "title": "Asmongold TV",
+      "folder": "amerislop"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UC5wZGwqyPawfmzpve8aJ-hw",
+      "title": "Geopold",
+      "folder": "amerislop"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UC_iUeUzozCHEReJ-shKcCYA",
+      "title": "Internet Anarchist",
+      "folder": "amerislop"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCGSGPehp0RWfca-kENgBJ9Q",
+      "title": "Jreg",
+      "folder": "amerislop"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCX6OQ3DkcsbYNE6H8uQQuVA",
+      "title": "MrBeast",
+      "folder": "amerislop"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCxaaULLk6UCnRl5VKRc7G0A",
+      "title": "No Text To Speech",
+      "folder": "amerislop"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCq6VFHwMzcMXbuKyG7SQYIg",
+      "title": "penguinz0",
+      "folder": "amerislop"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCLWAobWS7uBHvqylbQEe_vQ",
+      "title": "Powdur",
+      "folder": "amerislop"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UC0aanx5rpr7D1M7KCFYzrLQ",
+      "title": "Shoe0nHead",
+      "folder": "amerislop"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCtMVHI3AJD4Qk4hcbZnI9ZQ",
+      "title": "SomeOrdinaryGamers",
+      "folder": "amerislop"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCPnSoX7NkOBcOX0Gfw_yjAw",
+      "title": "Tectone",
+      "folder": "amerislop"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCZIuYUzkmEXgSSXzReOmeLw",
+      "title": "WestJett",
+      "folder": "amerislop"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCoOq2zscvS3lkzoxlw1FdUw",
+      "title": "AndyPants Gaming",
+      "folder": "gaming-news"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UC3nPaf5MeeDTHA2JN7clidg",
+      "title": "Bellular News",
+      "folder": "gaming-news"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCHDxYLv8iovIbhrfl16CNyg",
+      "title": "GameLinked",
+      "folder": "gaming-news"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCPKhwe5ok7BLniu-WWVSrxw",
+      "title": "Legendary Drops",
+      "folder": "gaming-news"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCKv8Rrrdc9oxLJmdHItafLA",
+      "title": "ManlyBadassHero",
+      "folder": "gaming-news"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UC7_YxT-KID8kRbqZo7MyscQ",
+      "title": "Markiplier",
+      "folder": "gaming-news"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCRHXUZ0BxbkU2MYZgsuFgkQ",
+      "title": "The Spiffing Brit",
+      "folder": "gaming-news"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCHL9bfHTxCMi-7vfxQ-AYtg",
+      "title": "Abroad in Japan",
+      "folder": "japslop"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCMj4YareOFuEfxUBbncWF9w",
+      "title": "Sora The Troll",
+      "folder": "japslop"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UC3ETCazlHenpXEsrEJH-k5A",
+      "title": "The Anime Man",
+      "folder": "japslop"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCld68syR8Wi-GY_n4CaoJGA",
+      "title": "Brodie Robertson",
+      "folder": "linux-news"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCkK9UDm_ZNrq_rIXCz3xCGA",
+      "title": "Bryan Lunduke",
+      "folder": "linux-news"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCg6gPGh8HU2U01vaFCAsvmQ",
+      "title": "Chris Titus Tech",
+      "folder": "linux-news"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCIme1suHyN7cAGrTy8RBdhQ",
+      "title": "DASGeek",
+      "folder": "linux-news"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCWJUSpXVHTaHErtGWC5qPlQ",
+      "title": "Destination Linux",
+      "folder": "linux-news"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCVls1GmFKf6WlTraIb_IaJg",
+      "title": "DistroTube",
+      "folder": "linux-news"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCONH73CdRXUjlh3-DdLGCPw",
+      "title": "Niccolò Ve",
+      "folder": "linux-news"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCjqkNrQ8F3OhKSCfCgagWLg",
+      "title": "NixCon",
+      "folder": "linux-news"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCuGS5mN1_CpPzuOUAu2LluA",
+      "title": "nixhero",
+      "folder": "linux-news"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UC3yaWWA9FF9OBog5U9ml68A",
+      "title": "SavvyNik",
+      "folder": "linux-news"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UC5UAwBUum7CPN5buc-_N1Fw",
+      "title": "The Linux Experiment",
+      "folder": "linux-news"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCv1Kcz-CuGM6mxzL3B1_Eiw",
+      "title": "The Linux Gamer",
+      "folder": "linux-news"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCmyGZ0689ODyReHw3rsKLtQ",
+      "title": "TuxDigital",
+      "folder": "linux-news"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UC_zBdZ0_H_jn41FDRG7q4Tw",
+      "title": "Vimjoyer",
+      "folder": "linux-news"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCsBjURrPoezykLs9EqgamOA",
+      "title": "Fireship",
+      "folder": "tech-news"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UChIs72whgZI9w6d6FhwGGHA",
+      "title": "Gamers Nexus",
+      "folder": "tech-news"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCgKePkWtPuF36bJy0n2cEMQ",
+      "title": "Jadi Mirmirani",
+      "folder": "tech-news"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCxrauf_nmP9L93qiBLSkerA",
+      "title": "kilObit",
+      "folder": "tech-news"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCeeFfhMcJa1kjtfZAGskOCA",
+      "title": "TechLinked",
+      "folder": "tech-news"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UC0vBXGSyV14uvJ4hECDOl0Q",
+      "title": "Techquickie",
+      "folder": "tech-news"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCxVPH8W2ayMey1-b0SY8rBQ",
+      "title": "The Coding Sloth",
+      "folder": "tech-news"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCjr2bPAyPV7t35MvcgT3W8Q",
+      "title": "The Hated One",
+      "folder": "tech-news"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCUyeluBRhGPCW4rPe_UvBZQ",
+      "title": "ThePrimeTime",
+      "folder": "tech-news"
+    }
+  ],
+  "filters": []
+}
