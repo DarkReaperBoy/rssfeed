@@ -26,6 +26,25 @@ npm ci && npm test
 
 ---
 
+## Follow-up pass (user-requested; six atomic commits, each landing green)
+
+| Commit | Change | Verify |
+|---|---|---|
+| `dc74928` | **The article column tracks the pane — everything inside resizes with it.** `.reader` had `width:auto` + `margin:0 auto` inside the column-flex slot: auto cross-axis margins cancel stretch, so the column shrink-wrapped to its content's intrinsic width — the YouTube iframe's default 300px (reproduced in Chromium: column 352px inside a 753px pane; facade articles landed at the thumbnail's natural 480px). Text articles masked it (paragraph max-content clamps to available width). Fixes: `.reader` `width:100%` (the 870px cap + centering stay), `#article_pane` min-width 320→0 (a px floor clips narrow windows instead of letting them shrink), and `.reader-body table` scrolls inside the column (a wide table previously stretched the pane to 1292px with a horizontal scrollbar dragging the video along). | Chromium drag/resize walk: iframe 701px @ pane 753, 290 @ 342, 648 @ 700 (mobile); table article `scrollWidth === clientWidth` at every stop. `npm run test:static` → the reader-layout section (+5 pins) |
+| `666419c` | **Telegram permalinks open the `t.me/s/` web preview** (the channel feed anchored at the message) instead of the bare `t.me/<id>` interstitial; the feed's derived site link too. The stored-message watermark regex accepts both link forms, so feeds scraped before the change still catch up. | `npm run test:e2e` → runs 15–16 (`/s/` on every link + the derived site); `npm run test:ui` → the parser permalink pin |
+| `7d6dd8f` | **Telegram videos embed in the native browser player** (`<video controls preload=metadata poster>` carrying the tokened src). Tokens expire within hours; when one does, the reader swaps the dead player for the linked poster (scoped strictly to telesco.pe srcs — plain mp4 articles keep the browser's own error UI). Verified live: the tokened url HEADs as `video/mp4 200`. | `npm run test:ui` → the telegram video section (+7: native render, safe fallback, non-telegram untouched); `npm run test:e2e` → the native-embed contract; live route-abort walk: dead video → full-width linked poster |
+| `80b90e7` | **A budget-stopped walk heals its backlog on later runs.** The watermark already guaranteed every message newer than the newest stored one lands, but a walk that ended on the page budget (a cold start on a high-volume channel) left the messages below the first-run floor permanently unscraped — later runs stopped at the overlap and never walked deeper. Now a budget stop flags the feed (`status.tgBacklog`); the next run does the fresh catch-up walk as usual, then resumes at `?before=<oldest stored id>` and chews another `maxPages` of backlog per run until it reaches the start of history or the retention horizon (a failed backlog walk keeps the flag). Messages dedupe by channel/id across the two walks. Live: vidyamemes healed 93 messages to the retention horizon in one run (flag cleared); gentoomemes +221 and s_for_smark +234 (still walking, next runs continue). | `npm run test:e2e` → run 16 heal block (6 of 9 stored → all 9 in exactly 2 extra requests, flag clears; the failure path keeps it); `npm run test:ui` → the `startBefore` walker unit (+2) |
+| `65e831a` | **Feed images become the icons** — telegram channel avatars (og:image) and YouTube channel art now show in the sidebar tree and article rows (`faviconHtml` ignored `meta.image` entirely; every feed showed the generic t.me favicon). Feeds without an image keep the favicon service; a broken avatar degrades to the initial-letter tile via the existing delegated error handler. One less favicon-service request per imaged feed. Live: 19/19 telegram items render their avatar. | `npm run test:ui` → the feed-images section (+4); live Chromium sidebar walk |
+| `1e7026f` | **Native videos fill the reading column** — a `<video>` is a replaced element, so `max-width:100%` alone rendered it at intrinsic size (a vertical phone video sat at 320px in a 737px pane and never tracked resizes — the same class of bug as the YouTube iframe). `width:100%` on reader videos and on the expired-token poster fallback. | Chromium on the live dataset: video 685px @ pane 737 → 521 @ 573 after a drag, zero horizontal scroll; `npm run test:static` (+2 pins) |
+
+**Verify the whole pass:**
+```sh
+npm ci && npm test
+```
+then serve any generated `data/` (`npm run serve`), open a telegram channel, and drag the pane divider: the video/player/table all track the width with no horizontal scroll; permalinks land on `t.me/s/<channel>/<id>`; the sidebar shows channel avatars.
+
+---
+
 ## Hardening pass 3 (baseline `main @ 6b73c85`)
 
 Six suites, **669 assertions + sec/chaos verdicts**: `test:ui` (495), `test:char` (34), `test:sec` (client boundary + poisoned-timestamp probe), `test:static` (33), `test:chaos` (5 verdicts), `test:e2e` (102).
