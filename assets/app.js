@@ -643,6 +643,18 @@ function upgradeEmbeds(root, articleLink) {
   const vimeo = (url) => { const m = url.match(/vimeo\.com\/(\d+)/); return m ? m[1] : null; };
   const audioRe = /\.(mp3|m4a|oga|ogg|wav|aac)(\?|$)/i;
   const videoRe = /\.(mp4|webm|ogv|mov)(\?|$)/i;
+  for (const v of $$('video', root)) {
+    const src = v.getAttribute('src') || '';
+    if (!src || !/\.telesco\.pe\//.test(src)) continue;
+    v.addEventListener('error', () => {
+      const a = document.createElement('a');
+      a.href = articleLink; a.target = '_blank'; a.rel = 'noopener noreferrer';
+      const poster = v.getAttribute('poster');
+      if (poster) { const img = document.createElement('img'); img.src = poster; img.alt = 'video'; img.loading = 'lazy'; a.appendChild(img); }
+      else a.textContent = 'Watch on Telegram';
+      v.replaceWith(a);
+    }, { once: true });
+  }
 
   for (const a of $$('a[href]', root)) {
     const url = a.href;

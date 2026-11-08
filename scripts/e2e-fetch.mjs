@@ -512,7 +512,8 @@ console.log('run 15: telegram channels — every message is an article, images r
   ok(a104?.content.includes('https://cdn4.telesco.pe/file/one.jpg') && a104?.content.includes('https://cdn4.telesco.pe/file/two.jpg'), 'album photos are embedded in the article body');
   const a103 = byLink(103);
   ok(a103?.title === 'Video (0:21)' && a103.enclosures[0].type === 'image/thumbnail', 'video messages carry the poster thumbnail and a duration title');
-  ok(a103 && !a103.content.includes('v.mp4'), 'expiring tokened video urls are never embedded');
+  ok(/<video controls preload="metadata" poster="https:\/\/cdn4\.telesco\.pe\/file\/vthumb\.jpg" src="https:\/\/cdn4\.telesco\.pe\/file\/v\.mp4\?token=expiring"><\/video>/.test(a103?.content || ''), 'videos embed natively in the browser player: controls, metadata preload, poster, and the tokened src all survive the sanitizer');
+  ok(a103 && /View on Telegram/.test(a103.content), 'the body still links to the post when the token expires');
   ok(byLink(102)?.title === 'Plain announcement', 'text message titles come from the first line');
   ok(byLink(101)?.title === 'Photo', 'a captionless photo still titles itself');
   const a108 = byLink(108);

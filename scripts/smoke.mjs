@@ -696,6 +696,52 @@ console.log('YouTube chapter timestamps become seekable links (Inoreader parity)
   ok(wY.document.querySelectorAll('#reader-slot .reader-body .embed').length === 2, 'both embeds stay exactly as they were');
   domY.window.close();
 }
+console.log('telegram videos play natively; an expired token falls back to the post link');
+{
+  const tgLink = 'https://t.me/s/demochan/103';
+  const arts = [
+    { id: 'tgv-1', title: 'Video (0:21)', link: tgLink, date: now - 3600e3, author: null, summary: 's',
+      content: `<p><video controls preload="metadata" poster="https://cdn4.telesco.pe/file/vthumb.jpg" src="https://cdn4.telesco.pe/file/v.mp4?token=expiredlongago"></video></p><p><a href="${tgLink}">View on Telegram</a></p>`,
+      text: null, enclosures: [{ url: 'https://cdn4.telesco.pe/file/vthumb.jpg', type: 'image/thumbnail' }], fetchedAt: now },
+    { id: 'tgv-2', title: 'Plain mp4', link: 'https://example.test/mp4post', date: now - 2 * 3600e3, author: null, summary: 's',
+      content: '<p><video controls preload="metadata" src="https://example.test/clip.mp4"></video></p>',
+      text: null, enclosures: [], fetchedAt: now },
+  ];
+  const idxT = { generatedAt: now, folders: [], feeds: { 'fixture-tg': { title: 'Tg Videos', site: 'https://t.me/s/demochan', folder: null, folders: [], count: arts.length, newest: now - 3600e3, oldest: now - 2 * 3600e3 } } };
+  const domT = new JSDOM(html, { url: 'https://example.test/', runScripts: 'outside-only', pretendToBeVisual: true });
+  const wT = domT.window;
+  wT.fetch = async (u) => {
+    const p = String(u).split('?')[0];
+    if (p === 'config.json') return { ok: true, status: 200, json: async () => structuredClone(config) };
+    if (p === 'data/index.json') return { ok: true, status: 200, json: async () => structuredClone(idxT) };
+    if (p === 'data/all-feeds.json') return { ok: true, status: 200, json: async () => structuredClone({ articles: arts.map((a) => ({ ...a, _feed: 'fixture-tg' })) }) };
+    return { ok: false, status: 404, statusText: 'Not Found', json: async () => { throw new Error('404'); } };
+  };
+  wT.eval(appSrc);
+  await settle(1200);
+  const rowT = (id) => [...wT.document.querySelectorAll('#list .row')].find((r) => r.dataset.id === id);
+  rowT('tgv-1').dispatchEvent(new wT.MouseEvent('click', { bubbles: true }));
+  await settle(80);
+  const vid = wT.document.querySelector('#reader-slot .reader-body video');
+  ok(!!vid && vid.controls === true && vid.preload === 'metadata', 'the telegram video renders in the native player with controls');
+  ok(vid && vid.getAttribute('poster') === 'https://cdn4.telesco.pe/file/vthumb.jpg' && vid.src.includes('token='), 'the poster frame and the tokened src ride along');
+  vid.dispatchEvent(new wT.Event('error'));
+  await settle(60);
+  const fallbackImg = wT.document.querySelector(`#reader-slot .reader-body a[href="${tgLink}"] img`);
+  ok(!!fallbackImg, 'an expired token swaps the dead video for the linked poster frame');
+  const fbAnchor = fallbackImg?.closest('a');
+  ok(fbAnchor?.target === '_blank' && fbAnchor?.rel === 'noopener noreferrer', 'the fallback opens safely in a new tab');
+  wT.document.querySelector('#reader-slot [data-act="collapse"]').dispatchEvent(new wT.MouseEvent('click', { bubbles: true }));
+  await settle(50);
+  rowT('tgv-2').dispatchEvent(new wT.MouseEvent('click', { bubbles: true }));
+  await settle(80);
+  const vid2 = wT.document.querySelector('#reader-slot .reader-body video');
+  ok(!!vid2 && vid2.src.includes('clip.mp4'), 'a non-telegram mp4 keeps its native player');
+  vid2.dispatchEvent(new wT.Event('error'));
+  await settle(60);
+  ok(wT.document.querySelector('#reader-slot .reader-body video') === vid2, 'a dead non-telegram video is NOT swapped for a telegram link (out of scope)');
+  domT.window.close();
+}
 console.log('search is global — it crosses the current feed/folder scope');
 {
   click('.tree-item[data-scope="feed:fixture-bbc"]');
@@ -1228,8 +1274,9 @@ console.log('Telegram channel scraping → articles (telegram.mjs)');
   const a103 = tg.tgMessageToArticle(m103, { now: NOW });
   ok(a103.title === 'Video (0:21)', 'a video message without text gets a duration title');
   ok(a103.enclosures.length === 1 && a103.enclosures[0].type === 'image/thumbnail', 'the video poster is the thumbnail enclosure');
-  ok(a103.content.includes('alt="video, 0:21"'), 'the video thumb carries the duration in its alt text');
-  ok(!a103.content.includes('v.mp4'), 'tokened expiring video urls are never embedded (the poster links to the post instead)');
+  ok(/<video controls preload="metadata" poster="https:\/\/cdn4\.telesco\.pe\/file\/vthumb\.jpg" src="https:\/\/cdn4\.telesco\.pe\/file\/v\.mp4\?token=expiring"><\/video>/.test(a103.content), 'videos with a playable src embed natively (controls, metadata preload, poster)');
+  ok(fetchModTg.sanitize(a103.content).includes('<video'), 'the native video embed survives the sanitizer');
+  ok(a103.content.includes('View on Telegram'), 'the poster footer still links to the post when the token expires');
   const a101 = tg.tgMessageToArticle(page.messages.find((m) => m.id === 101), { now: NOW });
   ok(a101.title === 'Photo' && a101.summary === 'Photo', 'a photo with no caption still has a title');
   const a100 = tg.tgMessageToArticle(m100, { now: NOW });

@@ -172,7 +172,9 @@ export function tgMessageToArticle(msg, { now = Date.now(), prevDate } = {}) {
     parts.push(`<p><a href="${esc(msg.link)}"><img src="${esc(p)}" alt=""></a></p>`);
   }
   for (const v of msg.videos) {
-    if (v.thumb) {
+    if (v.src) {
+      parts.push(`<p><video controls preload="metadata"${v.thumb ? ` poster="${esc(v.thumb)}"` : ''} src="${esc(v.src)}"></video></p>`);
+    } else if (v.thumb) {
       const alt = v.duration ? `video, ${v.duration}` : 'video';
       parts.push(`<p><a href="${esc(msg.link)}"><img src="${esc(v.thumb)}" alt="${esc(alt)}"></a></p>`);
     } else {
