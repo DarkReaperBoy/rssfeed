@@ -538,6 +538,7 @@ console.log('run 15: telegram channels — every message is an article, images r
   ok(idx15.feeds.tgdemo.site === 'https://t.me/s/demochan' && idx15.feeds.tgdemo.image === 'https://cdn4.telesco.pe/file/demochan-avatar.jpg', 'site and avatar come from the channel page (site points at the web preview)');
   ok(idx15.feeds.tgburst.title === 'Burst Feed' && idx15.feeds.tgburst.origTitle === null, 'an untitled feed derives its title from the channel');
   ok(idx15.feeds.tgmissing.status.ok === false && /no public posts/.test(idx15.feeds.tgmissing.status.error || ''), 'a missing/private channel reports NO_POSTS in the crawl status');
+  ok(idx15.feeds.tgdeep.status.tgBacklog === true, 'a budget-stopped walk flags the feed as carrying an unscraped backlog');
   const all15tg = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/all-feeds.json'), 'utf8'));
   ok(all15tg.articles.length === 5 + 12 + 6 + 1, `all-feeds.json carries every telegram article (${all15tg.articles.length})`);
   const demoBefore = Object.fromEntries(demo15.map((a) => [a.link, a.id]));
@@ -558,12 +559,21 @@ console.log('run 15: telegram channels — every message is an article, images r
   ok(demo16.filter((a) => demoBefore[a.link]).every((a) => a.id === demoBefore[a.link]), 'every previously-stored message kept its id across runs');
   ok(tgRequests.demochan === reqBefore.demochan + 1, `the second run walked exactly one page (overlap stop: ${tgRequests.demochan - reqBefore.demochan} request)`);
   ok(tgRequests.burstchan === reqBefore.burstchan + 1, `an unchanged channel also stops after one page (${tgRequests.burstchan - reqBefore.burstchan} request)`);
+  const deep16 = tgFeed('tgdeep').articles;
+  ok(deep16.length === 9, `a budget-stopped walk heals on the next run — all 9 deepchan messages now stored (${deep16.length})`);
+  ok(new Set(deep16.map((a) => a.link)).size === 9, 'the healed walk stored each message exactly once (no duplicates across the two walks)');
+  ok(deep16.some((a) => a.link === 'https://t.me/s/deepchan/301'), 'the oldest message 301 — beyond the original page budget — is present after healing');
+  ok(tgRequests.deepchan === reqBefore.deepchan + 2, `the healing run = fresh catch-up walk (1 page) + backlog walk below the oldest stored message (1 page) (${tgRequests.deepchan - reqBefore.deepchan} requests)`);
+  const idxDeep = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/index.json'), 'utf8'));
+  ok(idxDeep.feeds.tgdeep.status.tgBacklog === false, 'the backlog flag clears once the healing walk reaches the start of history');
 
   await new Promise((r) => setTimeout(r, 1100));
   out = await run({ GHRSS_TG_BASE: 'http://127.0.0.1:9' });
   ok(/FETCH FAILED/.test(out), 'the network died (connection refused)');
   const demoFail = tgFeed('tgdemo').articles;
   ok(demoFail.length === 6 && demoFail.some((a) => a.link === 'https://t.me/s/demochan/109'), 'the failure path keeps every retained message');
+  const deepFail = tgFeed('tgdeep').articles;
+  ok(deepFail.length === 9, 'a failed run keeps the healed deepchan history too');
   const idxFail = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/index.json'), 'utf8'));
   ok(idxFail.feeds.tgdemo.status.ok === false && (idxFail.feeds.tgdemo.status.consecutiveFailures || 0) >= 1, 'the crawl status records the failure');
   tgNewMessage = null;

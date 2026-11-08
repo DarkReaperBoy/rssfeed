@@ -674,24 +674,43 @@ async function main() {
         return;
       }
       let knownMaxId = 0;
+      let knownMinId = 0;
       const knownLink = new RegExp(`^https://t\\.me/(?:s/)?${channel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/(\\d+)$`, 'i');
       for (const a of prev.articles || []) {
         const m = knownLink.exec(a.link || '');
-        if (m) knownMaxId = Math.max(knownMaxId, Number(m[1]));
+        if (m) {
+          knownMaxId = Math.max(knownMaxId, Number(m[1]));
+          knownMinId = knownMinId > 0 ? Math.min(knownMinId, Number(m[1])) : Number(m[1]);
+        }
       }
       const pageCap = Number(feed.maxPages) > 0 ? Math.floor(Number(feed.maxPages)) : TG_DEFAULT_MAX_PAGES;
+      const healing = !!prevStatus.tgBacklog;
       let result;
+      let deep = null;
       try {
         result = await tgFetchChannel(tgDoFetch, channel, {
           cutoffMs: now - retainMs,
           knownMaxId,
           maxPages: pageCap,
         });
+        if (healing && knownMinId > 0) {
+          try {
+            deep = await tgFetchChannel(tgDoFetch, channel, {
+              cutoffMs: now - retainMs,
+              knownMaxId: 0,
+              maxPages: pageCap,
+              startBefore: knownMinId,
+            });
+          } catch {
+            deep = null;
+          }
+        }
       } catch (err) {
         failures++;
         status.ok = false;
         status.error = err.message;
         status.consecutiveFailures = (prevStatus.consecutiveFailures || 0) + 1;
+        if (prevStatus.tgBacklog) status.tgBacklog = true;
         const keptFail = keepRetained().filter(inWindow);
         await fs.writeFile(file, JSON.stringify({ articles: keptFail }));
         index.feeds[feed.id] = { ...summarizeFeed({ ...feed, ...feedMetaFor(feed, prevMeta) }, keptFail), status };
@@ -703,12 +722,21 @@ async function main() {
       status.lastSuccess = now;
       status.consecutiveFailures = 0;
       status.error = null;
+      status.tgBacklog = result.stopReason === 'page budget' || (healing && knownMinId > 0 ? (deep ? deep.stopReason === 'page budget' : true) : false);
       const effFeed = { ...feed, title: feed.title || result.info.title || channel, site: feed.site || `https://t.me/s/${channel}`, url: feed.url || `https://t.me/s/${channel}` };
       const fmeta = feedMetaFor(effFeed, prevMeta, { title: result.info.title, link: `https://t.me/s/${channel}`, image: result.info.image ? { url: result.info.image } : null });
       const prevById = new Map((prev.articles || []).map((a) => [a.id, a]));
+      const seenMsg = new Set();
+      const walked = [];
+      for (const msg of [...result.messages, ...(deep?.messages || [])]) {
+        const key = `${msg.channel}/${msg.id}`;
+        if (seenMsg.has(key)) continue;
+        seenMsg.add(key);
+        walked.push(msg);
+      }
       const articles = [];
       let filtered = 0;
-      for (const msg of result.messages) {
+      for (const msg of walked) {
         const id = tgArticleId(msg);
         const a = tgMessageToArticle(msg, { now, prevDate: prevById.get(id)?.date });
         if (feedBlocks && feedFilterDrop(a, feedBlocks)) { filtered++; continue; }
@@ -726,7 +754,8 @@ async function main() {
       index.feeds[feed.id] = { ...summarizeFeed({ ...effFeed, ...fmeta }, merged), status };
       written.set(feed.id, merged);
       const budgetNote = result.stopReason === 'page budget' ? ` — raise "maxPages" (now ${pageCap}) to reach further back` : '';
-      console.log(`[${feed.id}] t.me/${channel}: ${merged.length} messages (${result.pages} page(s), stopped: ${result.stopReason}${budgetNote})${filtered ? ` (dropped ${filtered} by word filter)` : ''}${cfgHidden ? ` (dropped ${cfgHidden} by config filter)` : ''}`);
+      const healNote = healing && knownMinId > 0 ? (deep ? ` — healed the pre-watermark backlog (${deep.messages.length} message(s) below #${knownMinId}, stopped: ${deep.stopReason})` : ' — backlog walk failed, retrying next run') : '';
+      console.log(`[${feed.id}] t.me/${channel}: ${merged.length} messages (${result.pages} page(s), stopped: ${result.stopReason}${budgetNote})${healNote}${filtered ? ` (dropped ${filtered} by word filter)` : ''}${cfgHidden ? ` (dropped ${cfgHidden} by config filter)` : ''}`);
       return;
     }
     if (isHnFeed(feed)) {

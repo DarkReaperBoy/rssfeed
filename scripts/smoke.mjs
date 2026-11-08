@@ -1331,6 +1331,15 @@ console.log('Telegram channel scraping → articles (telegram.mjs)');
     ok(r.pages === 1 && r.stopReason === 'retention window covered', 'the retention cutoff stops the walk once a page reaches past it');
   }
   {
+    const { doFetch, calls } = mkPages([
+      { before: 0, html: mkPage([{ id: 4, iso: '2026-11-08T10:00:00Z' }, { id: 3, iso: '2026-11-08T09:00:00Z' }], 3) },
+      { before: 3, html: mkPage([{ id: 2, iso: '2026-11-08T08:00:00Z' }, { id: 1, iso: '2026-11-08T07:00:00Z' }], null) },
+    ]);
+    const r = await tg.tgFetchChannel(doFetch, 'demochan', { startBefore: 3, base: 'https://t.me' });
+    ok(r.pages === 1 && r.messages.length === 2 && r.messages.every((m) => m.id <= 2), 'startBefore resumes the walk below the watermark (backlog healing) without touching newer pages');
+    ok(calls.length === 1 && calls[0] === 'https://t.me/s/demochan?before=3', 'the resumed walk opens directly at the backlog page');
+  }
+  {
     const { doFetch } = mkPages([
       { before: 0, html: mkPage([{ id: 4, iso: '2026-11-08T10:00:00Z' }, { id: 3, iso: '2026-11-08T09:00:00Z' }], 3) },
       { before: 3, html: mkPage([{ id: 2, iso: '2026-11-08T08:00:00Z' }, { id: 1, iso: '2026-11-08T07:00:00Z' }], null) },

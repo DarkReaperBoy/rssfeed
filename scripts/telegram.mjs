@@ -215,14 +215,14 @@ export function tgMessageToArticle(msg, { now = Date.now(), prevDate } = {}) {
   };
 }
 
-export async function tgFetchChannel(doFetch, channel, { cutoffMs = 0, knownMaxId = 0, maxPages = TG_DEFAULT_MAX_PAGES, base = null, maxBytes = 3_000_000 } = {}) {
+export async function tgFetchChannel(doFetch, channel, { cutoffMs = 0, knownMaxId = 0, maxPages = TG_DEFAULT_MAX_PAGES, base = null, maxBytes = 3_000_000, startBefore = 0 } = {}) {
   const root = String(base || process.env.GHRSS_TG_BASE || 'https://t.me').replace(/\/+$/, '');
   const cap = Number(maxPages) > 0 ? Math.floor(Number(maxPages)) : TG_DEFAULT_MAX_PAGES;
   const messages = new Map();
   let pages = 0;
   let stopReason = 'page budget';
   let info = null;
-  let before = 0;
+  let before = Number(startBefore) > 0 ? Math.floor(Number(startBefore)) : 0;
   while (pages < cap) {
     const url = `${root}/s/${encodeURIComponent(channel)}${before ? `?before=${before}` : ''}`;
     let res;
