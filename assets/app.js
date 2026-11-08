@@ -120,6 +120,8 @@ function updateTitleCounter() {
 function faviconHtml(feed) {
 
   const initial = Array.from(String(feed?.title || '?'))[0] || '?';
+  const selfImg = /^https?:\/\//i.test(String(feed?.image || '')) ? String(feed.image) : '';
+  if (selfImg) return `<span class="favicon-wrap" aria-hidden="true"><img class="favicon" loading="lazy" src="${esc(selfImg)}" alt=""><span class="favicon-tile" data-initial="${esc(initial)}" hidden></span></span>`;
   const site = feed?.site || '';
   let host = '';
   try { if (site) host = new URL(site).hostname; } catch {}
@@ -338,7 +340,7 @@ function renderTree() {
         : (meta.title || id);
     const warnIcon = failed ? '<span class="feed-warn" title="' + esc(warnTitle) + '">⚠</span>' : disabled ? '<span class="feed-warn feed-warn-dim" title="' + esc(warnTitle) + '">⚠</span>' : '';
     return `<button class="tree-item ${state.scope === 'feed:' + id ? 'active' : ''} ${n ? 'unread' : ''} ${dim}" data-scope="feed:${esc(id)}" title="${esc(warnTitle)}">
-      ${faviconHtml({ title: meta.title, site: meta.site })}<span class="label">${esc(meta.title)}</span>${warnIcon}${n ? `<span class="badge" role="button" tabindex="0" data-markread="feed:${esc(id)}" title="Mark as read">${n}</span>` : ''}
+      ${faviconHtml({ title: meta.title, site: meta.site, image: meta.image })}<span class="label">${esc(meta.title)}</span>${warnIcon}${n ? `<span class="badge" role="button" tabindex="0" data-markread="feed:${esc(id)}" title="Mark as read">${n}</span>` : ''}
     </button>`;
   };
   for (const folder of folders) {

@@ -151,6 +151,16 @@ ok($('#reader-slot .reader-title a')?.href === firstLink, 'reader title links to
 ok($('#list .row').classList.contains('expanded'), 'open row is highlighted in the list');
 ok(Number($('#badge-all-items').textContent) === TOTAL - 1, 'opening marks read');
 ok(window.location.hash === `#article/${firstId}`, 'opening an article puts its id in the URL (#article/<id>)');
+console.log('feed images (channel avatars) are the icons when present');
+{
+  const bbcTree = $('.tree-item[data-scope="feed:fixture-bbc"] .favicon');
+  ok(bbcTree?.src === 'https://www.bbc.test/logo.png', 'a feed with an image uses it as the sidebar icon (telegram channel avatars, YouTube channel art)');
+  ok(!!$('.tree-item[data-scope="feed:fixture-bbc"] .favicon-tile[hidden]'), 'the initial-letter fallback tile ships hidden inside the wrap (a broken avatar degrades to it)');
+  const hnTree = $('.tree-item[data-scope="feed:fixture-hn"] .favicon');
+  ok(hnTree?.src.includes('google.com/s2/favicons'), 'a feed without an image keeps the site favicon service');
+  const bbcRow = [...window.document.querySelectorAll('#list .row')].find((r) => r.dataset.id.startsWith('fixture-bbc'));
+  ok(bbcRow?.querySelector('.row-meta .favicon')?.src === 'https://www.bbc.test/logo.png', 'article rows use the feed image as the row icon too');
+}
 console.log('reader prefers extracted full text over the feed teaser');
 {
   click('#search-open');
