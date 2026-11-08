@@ -286,7 +286,7 @@ svg { width: 20px; height: 20px; fill: currentColor; flex: none; }
 body.reader-dragging { cursor: col-resize; user-select: none; }
 body.reader-dragging iframe { pointer-events: none; }
 #article_pane {
-  flex: 1 1 auto; min-width: 320px; max-width: var(--article-cap, 940px);
+  flex: 1 1 auto; min-width: 0; max-width: var(--article-cap, 940px);
   overflow-y: auto; display: flex; flex-direction: column;
   background: var(--bg);
 }
@@ -366,7 +366,7 @@ body.article-open #scroll-nav { display: flex; }
 .row.expanded:hover { background: var(--bg-expanded); }
 .row.expanded::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--accent); }
 
-.reader { max-width: var(--list-max); margin: 0 auto; padding: 0 26px 30px; display: flex; flex-direction: column; flex: 1; }
+.reader { width: 100%; max-width: var(--list-max); margin: 0 auto; padding: 0 26px 30px; display: flex; flex-direction: column; flex: 1; }
 .reader-toolbar {
   position: sticky; top: 0; z-index: 4;
   display: flex; align-items: center; gap: 3px;
@@ -393,7 +393,7 @@ body.article-open #scroll-nav { display: flex; }
 .reader-body figcaption { font-size: 12px; color: var(--text-dim); margin-top: 4px; }
 .reader-body pre { overflow-x: auto; background: var(--bg-hover); padding: 12px; border-radius: 6px; font-size: 13px; }
 .reader-body blockquote { border-left: 3px solid var(--accent); margin: 12px 0; padding: 4px 14px; color: var(--text-dim); }
-.reader-body table { border-collapse: collapse; margin: 12px 0; }
+.reader-body table { display: block; width: max-content; max-width: 100%; overflow-x: auto; border-collapse: collapse; margin: 12px 0; }
 .reader-body td, .reader-body th { border: 1px solid var(--border); padding: 4px 8px; }
 .reader-body audio { width: 100%; margin: 8px 0; }
 .reader-body a.ts { font-variant-numeric: tabular-nums; }

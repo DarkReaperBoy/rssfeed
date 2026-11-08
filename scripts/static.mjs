@@ -107,6 +107,19 @@ console.log('static contract: stylesheet liveness');
   ok(orphanCssIds.length === 0, `no dead id selectors in styles.css (orphans: ${orphanCssIds.join(', ') || 'none'})`);
 }
 
+console.log('static contract: reader pane layout');
+{
+  const readerRule = cssSrc.match(/^\.reader \{([^}]*)\}/m)?.[1] || '';
+  ok(/width:\s*100%/.test(readerRule), "the reader column is width:100% (an auto cross-size with auto margins shrink-wraps to the iframe default 300px instead of tracking the pane)");
+  ok(/max-width:\s*var\(--list-max\)/.test(readerRule), 'the reader column keeps its max-width cap');
+  const paneRule = cssSrc.match(/^#article_pane \{([^}]*)\}/m)?.[1] || '';
+  ok(/min-width:\s*0/.test(paneRule), 'the article pane has min-width:0 (a px floor makes narrow windows clip the pane instead of letting it shrink)');
+  const tableRule = cssSrc.match(/^\.reader-body table \{([^}]*)\}/m)?.[1] || '';
+  ok(/display:\s*block/.test(tableRule) && /overflow-x:\s*auto/.test(tableRule), 'reader tables scroll inside the column (a wide table otherwise stretches the pane into horizontal clipping)');
+  const embedRule = cssSrc.match(/^\.embed iframe \{([^}]*)\}/m)?.[1] || '';
+  ok(/width:\s*100%/.test(embedRule) && /aspect-ratio/.test(embedRule), 'embed iframes stay width:100% with an aspect-ratio');
+}
+
 console.log('static contract: fetch cadence copy matches the workflow schedule');
 {
   const wf = await fs.readFile(path.join(ROOT, '.github/workflows/fetch.yml'), 'utf8');
