@@ -3,7 +3,6 @@ Work phase by phase. You may NOT start a phase until the previous phase's EXIT G
 is met. Merging phases = failure.
 
 the repo in question: https://github.com/DarkReaperBoy/rssfeed
-your api key: 
 
 GLOBAL RULES (apply to every phase):
 1. One atomic change at a time. Verify it before moving to the next.
