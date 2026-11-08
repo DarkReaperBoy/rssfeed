@@ -165,7 +165,7 @@ The fetcher scrapes the channel's **public web preview** (`t.me/s/<channel>`, no
 - **Text** — the message text with its links and emoji; the first line is the title. Media-only messages title themselves (`Photo`, `Photo album (3)`, `Video (0:21)`).
 - **Photos and albums** — every photo is embedded in the article body and carried as an enclosure (the first is the row thumbnail, the rest appear in the attachment strip).
 - **Videos** — the poster frame and duration are stored (tokened video URLs expire within hours, so they're linked rather than embedded).
-- **Link previews, forwards, author signatures** — rendered into the body; `View on Telegram` links to the post.
+- **Link previews, forwards, author signatures** — rendered into the body; `View on Telegram` links to the post's `t.me/s/<channel>/<id>` web-preview page (the full channel feed anchored at the message, not the bare interstitial).
 
 | Option | What it does |
 |---|---|

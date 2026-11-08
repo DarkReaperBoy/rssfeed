@@ -1205,7 +1205,7 @@ console.log('Telegram channel scraping → articles (telegram.mjs)');
   ok(page.moreBefore === 98, 'the more-link data-before drives pagination');
   ok(page.messages.length === 6, `six real messages parsed, the service message is skipped (${page.messages.length})`);
   const m104 = page.messages.find((m) => m.id === 104);
-  ok(m104.channel === 'demochan' && m104.link === 'https://t.me/demochan/104', 'message ids, channel, and permalink come from data-post');
+  ok(m104.channel === 'demochan' && m104.link === 'https://t.me/s/demochan/104', 'message ids, channel, and the /s/ web-preview permalink come from data-post');
   ok(m104.date === Date.parse('2026-11-08T10:00:00+00:00'), 'message time comes from the <time datetime> attribute');
   ok(m104.photos.length === 2 && m104.photos[0] === 'https://cdn4.telesco.pe/file/one.jpg', 'album photos are pulled out of background-image styles');
   ok(/a link/.test(m104.textHtml) && /<br/.test(m104.textHtml), 'message text keeps its markup for the sanitize pipeline');

@@ -674,7 +674,7 @@ async function main() {
         return;
       }
       let knownMaxId = 0;
-      const knownLink = new RegExp(`^https://t\\.me/${channel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/(\\d+)$`, 'i');
+      const knownLink = new RegExp(`^https://t\\.me/(?:s/)?${channel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/(\\d+)$`, 'i');
       for (const a of prev.articles || []) {
         const m = knownLink.exec(a.link || '');
         if (m) knownMaxId = Math.max(knownMaxId, Number(m[1]));
@@ -703,8 +703,8 @@ async function main() {
       status.lastSuccess = now;
       status.consecutiveFailures = 0;
       status.error = null;
-      const effFeed = { ...feed, title: feed.title || result.info.title || channel, site: feed.site || `https://t.me/${channel}`, url: feed.url || `https://t.me/${channel}` };
-      const fmeta = feedMetaFor(effFeed, prevMeta, { title: result.info.title, link: `https://t.me/${channel}`, image: result.info.image ? { url: result.info.image } : null });
+      const effFeed = { ...feed, title: feed.title || result.info.title || channel, site: feed.site || `https://t.me/s/${channel}`, url: feed.url || `https://t.me/s/${channel}` };
+      const fmeta = feedMetaFor(effFeed, prevMeta, { title: result.info.title, link: `https://t.me/s/${channel}`, image: result.info.image ? { url: result.info.image } : null });
       const prevById = new Map((prev.articles || []).map((a) => [a.id, a]));
       const articles = [];
       let filtered = 0;

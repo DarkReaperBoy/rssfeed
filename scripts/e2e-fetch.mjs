@@ -504,8 +504,8 @@ console.log('run 15: telegram channels — every message is an article, images r
   const tgFeed = (id) => JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/feeds', `${id}.json`), 'utf8'));
   const demo15 = tgFeed('tgdemo').articles;
   ok(demo15.length === 5, `five demochan messages stored — the 35-day-old one is outside the 30-day window (${demo15.length})`);
-  ok(demo15.every((a) => /^https:\/\/t\.me\/demochan\/\d+$/.test(a.link)), 'every article links to its t.me message');
-  const byLink = (n) => demo15.find((a) => a.link === `https://t.me/demochan/${n}`);
+  ok(demo15.every((a) => /^https:\/\/t\.me\/s\/demochan\/\d+$/.test(a.link)), 'every article links to its t.me web-preview message');
+  const byLink = (n) => demo15.find((a) => a.link === `https://t.me/s/demochan/${n}`);
   const a104 = byLink(104);
   ok(!!a104 && a104.title === 'Album caption', 'the album caption is the title');
   ok(a104?.enclosures.length === 2 && a104.enclosures[0].type === 'image/thumbnail' && a104.enclosures[1].type === 'image/jpeg', 'album photos land in enclosures: first is the row thumbnail, the rest are attachments');
@@ -521,7 +521,7 @@ console.log('run 15: telegram channels — every message is an article, images r
   const burst15 = tgFeed('tgburst').articles;
   ok(burst15.length === 12, `all 12 burst messages captured across 3-message pages (${burst15.length})`);
   ok(new Set(burst15.map((a) => a.link)).size === 12, 'each burst message is a distinct article');
-  ok(burst15[0].link === 'https://t.me/burstchan/212' && burst15[11].link === 'https://t.me/burstchan/201', 'articles are ordered newest first');
+  ok(burst15[0].link === 'https://t.me/s/burstchan/212' && burst15[11].link === 'https://t.me/s/burstchan/201', 'articles are ordered newest first');
   const deep15 = tgFeed('tgdeep').articles;
   ok(deep15.length === 6 && deep15.every((a) => Number(/(\d+)$/.exec(a.link)[1]) >= 304), 'maxPages=2 caps the walk at the newest 6 of 9 (the page budget)');
   ok(/page budget/.test(out) && /raise "maxPages" \(now 2\)/.test(out), 'the run log names the budget stop and the way out');
@@ -534,7 +534,7 @@ console.log('run 15: telegram channels — every message is an article, images r
   const idx15 = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/index.json'), 'utf8'));
   ok(idx15.feeds.tgdemo.status.ok === true, 'the demo channel crawl is healthy');
   ok(idx15.feeds.tgdemo.title === 'Demo Telegram' && idx15.feeds.tgdemo.origTitle === 'Demo Channel', 'a config rename keeps the channel self-title as origTitle');
-  ok(idx15.feeds.tgdemo.site === 'https://t.me/demochan' && idx15.feeds.tgdemo.image === 'https://cdn4.telesco.pe/file/demochan-avatar.jpg', 'site and avatar come from the channel page');
+  ok(idx15.feeds.tgdemo.site === 'https://t.me/s/demochan' && idx15.feeds.tgdemo.image === 'https://cdn4.telesco.pe/file/demochan-avatar.jpg', 'site and avatar come from the channel page (site points at the web preview)');
   ok(idx15.feeds.tgburst.title === 'Burst Feed' && idx15.feeds.tgburst.origTitle === null, 'an untitled feed derives its title from the channel');
   ok(idx15.feeds.tgmissing.status.ok === false && /no public posts/.test(idx15.feeds.tgmissing.status.error || ''), 'a missing/private channel reports NO_POSTS in the crawl status');
   const all15tg = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/all-feeds.json'), 'utf8'));
@@ -549,11 +549,11 @@ console.log('run 15: telegram channels — every message is an article, images r
   out = await run({ GHRSS_TG_BASE: TG });
   const demo16 = tgFeed('tgdemo').articles;
   ok(demo16.length === 6, `the new message landed, everything retained (${demo16.length})`);
-  const a109 = demo16.find((a) => a.link === 'https://t.me/demochan/109');
+  const a109 = demo16.find((a) => a.link === 'https://t.me/s/demochan/109');
   ok(a109?.title === 'Brand new post', 'message 109 is present');
-  const a108e = demo16.find((a) => a.link === 'https://t.me/demochan/108');
-  ok(a108e?.title === 'Fresh text post (edited) bold' && a108e?.id === demoBefore['https://t.me/demochan/108'], 'an author edit (re-scraped while still on the newest page) updates the title but NEVER the article id — read state survives');
-  ok(demo16.find((a) => a.link === 'https://t.me/demochan/102')?.title === 'Plain announcement', 'older messages beyond the first page keep their stored form (same as any RSS feed)');
+  const a108e = demo16.find((a) => a.link === 'https://t.me/s/demochan/108');
+  ok(a108e?.title === 'Fresh text post (edited) bold' && a108e?.id === demoBefore['https://t.me/s/demochan/108'], 'an author edit (re-scraped while still on the newest page) updates the title but NEVER the article id — read state survives');
+  ok(demo16.find((a) => a.link === 'https://t.me/s/demochan/102')?.title === 'Plain announcement', 'older messages beyond the first page keep their stored form (same as any RSS feed)');
   ok(demo16.filter((a) => demoBefore[a.link]).every((a) => a.id === demoBefore[a.link]), 'every previously-stored message kept its id across runs');
   ok(tgRequests.demochan === reqBefore.demochan + 1, `the second run walked exactly one page (overlap stop: ${tgRequests.demochan - reqBefore.demochan} request)`);
   ok(tgRequests.burstchan === reqBefore.burstchan + 1, `an unchanged channel also stops after one page (${tgRequests.burstchan - reqBefore.burstchan} request)`);
@@ -562,7 +562,7 @@ console.log('run 15: telegram channels — every message is an article, images r
   out = await run({ GHRSS_TG_BASE: 'http://127.0.0.1:9' });
   ok(/FETCH FAILED/.test(out), 'the network died (connection refused)');
   const demoFail = tgFeed('tgdemo').articles;
-  ok(demoFail.length === 6 && demoFail.some((a) => a.link === 'https://t.me/demochan/109'), 'the failure path keeps every retained message');
+  ok(demoFail.length === 6 && demoFail.some((a) => a.link === 'https://t.me/s/demochan/109'), 'the failure path keeps every retained message');
   const idxFail = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/index.json'), 'utf8'));
   ok(idxFail.feeds.tgdemo.status.ok === false && (idxFail.feeds.tgdemo.status.consecutiveFailures || 0) >= 1, 'the crawl status records the failure');
   tgNewMessage = null;

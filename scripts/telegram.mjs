@@ -104,7 +104,7 @@ export function tgParsePage(html) {
         forwarded: stripTgHtml(el.querySelector('.tgme_widget_message_forwarded_from')?.textContent || '').slice(0, 200),
         signature: stripTgHtml(el.querySelector('.tgme_widget_message_signature')?.textContent || '').slice(0, 120),
         pollText: '',
-        link: `https://t.me/${channel}/${id}`,
+        link: `https://t.me/s/${channel}/${id}`,
       };
       for (const w of el.querySelectorAll('.tgme_widget_message_photo_wrap')) {
         const u = absUrl(bgUrl(w.getAttribute('style')));
