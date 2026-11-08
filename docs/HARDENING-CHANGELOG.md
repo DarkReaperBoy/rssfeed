@@ -6,6 +6,25 @@ Run everything with `npm test`.
 
 ---
 
+## Feature: Telegram channel scraping (user-requested)
+
+Baseline `main @ 468246b`. Three atomic commits; the suite grew by **93 assertions** (`test:ui` 495→555, `test:e2e` 102→135) with `test:static` repaired to green (one pre-existing red pin), everything else unchanged — `npm test` exits 0 from a clean install.
+
+| Commit | Change | Verify |
+|---|---|---|
+| `3464bce` | **Pre-existing red test repaired (found during the pass, not caused by it).** The static cron pin demanded exactly `0 * * * *`, but the workflow had moved to `23 * * * *` (minute 23, still hourly) without breaking the "every hour" app/README copy — the pin asserted the wrong thing. It now asserts the hourly cadence (`M * * * *`) so any non-hourly schedule still fails the suite until the copy follows. | `npm run test:static` (32→33 green at that tree) |
+| `d2d401c` | Lockfile hygiene: `package-lock.json` still pinned the pre-bump `engines >=22`; synced to package.json's range. | `npm ci` |
+| `acd0d7f` | **Telegram channels are now a native feed kind.** A `t.me/<channel>` (or `telegram.me`/`telegram.dog`) URL in `config.json` is auto-detected — or be explicit with `type: "telegram"` + `channel` — and the fetcher scrapes the channel's public web preview (`t.me/s/<channel>`, no bot token, no account): **every public message becomes an article** (text with links/emoji, first line as the title; media-only messages title themselves `Photo` / `Photo album (n)` / `Video (0:21)`), **photos and albums are embedded in the body and carried as enclosures** (first photo = row thumbnail, rest = attachment strip), video poster frames + durations are stored (tokened video URLs expire within hours, so they're linked, never embedded), link previews/forwards/signatures render into the body. Pagination walks `?before=` pages until it catches up with stored messages (message-id watermark), reaches the retention horizon, or hits a `maxPages` budget (default 12 ≈ 240 messages/hour/channel) — bursts beyond that continue on the next run, so a hundred posts a day still land one by one; an idle channel costs exactly one request. Requests are throttled ~1/s across all channels in their own serialized chain (like 4chan), a mid-walk failure soft-stops and keeps the fresh first page, and a private/missing/preview-disabled channel flags the feed (`NO_POSTS`) while retaining stored messages. Article ids are message-keyed (`sha1(tg\|channel/id)`), so read state, deep links, and author edits (re-scraped while on the newest page) never rekey. New `scripts/telegram.mjs` mirrors the 4chan/HN module pattern (pure, testable transforms; `GHRSS_TG_BASE` env override for the e2e fake server). Config gains the `telegram-channels` folder with the 19 requested channels. | `npm run test:ui` → the Telegram section (parser, mapper, pagination, throttle-free walker unit pins); `npm run test:e2e` → runs 15–16 (fake t.me server: cold multi-page walk, album/video enclosures, 12-message burst fully captured, maxPages budget, missing-channel NO_POSTS, new+edited messages with stable ids, overlap stop proven by request counts, dead-network failure keeps retained) |
+
+**Live validation (not just fixtures):** all 19 configured channels pulled through the real pipeline — 2 437 messages stored, 1 596 carrying photo enclosures, 0 failures; cold walk 147 s (throttle-bound, 12-page budget hit on the 6 highest-volume channels with the `raise "maxPages"` hint logged), second run 21 s at exactly one request per channel (overlap stop). RTL Persian titles, emoji-only titles, og-image avatars, and `origTitle` renames all verified against production markup.
+
+**Verify the whole pass:**
+```sh
+npm ci && npm test
+```
+
+---
+
 ## Hardening pass 3 (baseline `main @ 6b73c85`)
 
 Six suites, **669 assertions + sec/chaos verdicts**: `test:ui` (495), `test:char` (34), `test:sec` (client boundary + poisoned-timestamp probe), `test:static` (33), `test:chaos` (5 verdicts), `test:e2e` (102).

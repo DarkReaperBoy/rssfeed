@@ -23,7 +23,7 @@ config.json ──► GitHub Action (hourly) ──► data/*.json on the gh-pag
 - **Solid read/unread** — opening an article marks it read; the row tick and keyboard shortcuts flip it back. "Mark as read" / "Mark as unread" work per folder, per feed, or globally — everything, or articles from the last 1–30 days — with Undo.
 - **Filters, server-side** — rules that hide, highlight, auto-mark-read, or keep-unread matching articles at fetch time, scoped to specific feeds or folders, matching on title, content, subject, capcode, author, or link with plain words or regex. Hidden articles never reach the browser; the other actions ship as per-article flags.
 - **Full text extraction** — optionally fetch and store the article's own text instead of the feed's teaser.
-- **Beyond RSS** — YouTube channel feeds (Shorts dropped by default), Hacker News by points/comments, and 4chan boards by reply count.
+- **Beyond RSS** — YouTube channel feeds (Shorts dropped by default), Hacker News by points/comments, 4chan boards by reply count, and Telegram channels scraped from their public `t.me/s/` web previews: every message is an article (photos and albums included), captured even when a channel posts a hundred times a day.
 - **Clickable video timestamps** — chapter times in YouTube descriptions (`6:40 And then there's Chainguard`) become links: a plain click starts the inline player at that moment, seeks it if it's already playing, and Ctrl/middle-click opens YouTube at that point in a new tab.
 - **Resizable reading layout** — drag the divider between the list and the article to suit your screen (double-click resets it); the sidebar resizes too.
 - **Shareable links** — every view has a URL (see below).

@@ -65,7 +65,7 @@ Feeds that reference a folder that doesn't exist still render — they appear as
 
 ## `feeds`
 
-Every feed is an object in the `feeds` array. Four kinds are supported. **Only the URL and the folder are ever required** — everything else the fetcher can derive, it derives.
+Every feed is an object in the `feeds` array. Five kinds are supported. **Only the URL and the folder are ever required** — everything else the fetcher can derive, it derives.
 
 ### RSS / Atom / YouTube
 
@@ -148,6 +148,32 @@ With neither cap set, it follows the HN front page. With one or both set, it pul
 Two rules are baked in and not configurable: **sticky threads are always skipped** (they're the pinned rules/announcement posts, not content) and **closed threads are always included** (an archived thread that made the cut is still worth reading — it's finished, not junk).
 
 Threads are live: what's on the board is what you get, retention trims the rest.
+
+### Telegram channels
+
+```json
+{
+  "url": "https://t.me/IRRadar",
+  "folder": "telegram-channels"
+}
+```
+
+That's the whole entry. A `t.me/`, `telegram.me/`, or `telegram.dog` channel URL is recognized automatically (the same zero-maintenance deal as YouTube feeds) — or be explicit with `"type": "telegram"` plus a `"channel": "<name>"` field and no URL at all.
+
+The fetcher scrapes the channel's **public web preview** (`t.me/s/<channel>`, no account, no bot token). Every public message becomes an article:
+
+- **Text** — the message text with its links and emoji; the first line is the title. Media-only messages title themselves (`Photo`, `Photo album (3)`, `Video (0:21)`).
+- **Photos and albums** — every photo is embedded in the article body and carried as an enclosure (the first is the row thumbnail, the rest appear in the attachment strip).
+- **Videos** — the poster frame and duration are stored (tokened video URLs expire within hours, so they're linked rather than embedded).
+- **Link previews, forwards, author signatures** — rendered into the body; `View on Telegram` links to the post.
+
+| Option | What it does |
+|---|---|
+| `url` | The channel link — `https://t.me/<channel>`, `https://t.me/s/<channel>`, or a message link; the channel name is extracted from it. |
+| `type` / `channel` | Explicit form when there's no URL: `"type": "telegram"` + `"channel": "<name>"`. |
+| `maxPages` | How many preview pages (≈20 messages each) one run may walk back per channel. Default `12` (≈240 messages/hour) — raise it if a channel bursts harder than that between runs. |
+
+How the walk stays complete without hammering Telegram: each run pages backwards (`?before=`) only until it **catches up with already-stored messages**, reaches the **retention horizon**, or hits the page budget — so a channel posting a hundred times a day still lands every message (the next run picks up where the burst left off), while an idle channel costs a single request. Requests are throttled to ~1/second across all channels, and a failure mid-walk keeps the fresh first page rather than throwing it away. Deleted messages stay in your reader until retention ages them out; a private, missing, or preview-disabled channel flags the feed in the sidebar like any failed source. Article ids are message-keyed, so read state and deep links survive edits, renames, and id migrations.
 
 ---
 

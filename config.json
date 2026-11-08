@@ -31,6 +31,10 @@
     {
       "id": "tech-news",
       "name": "Tech News"
+    },
+    {
+      "id": "telegram-channels",
+      "name": "Telegram Channels"
     }
   ],
   "feeds": [
@@ -537,6 +541,101 @@
       "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCUyeluBRhGPCW4rPe_UvBZQ",
       "title": "ThePrimeTime",
       "folder": "tech-news"
+    },
+    {
+      "url": "https://t.me/IRRadar",
+      "title": "IRRadar",
+      "folder": "telegram-channels"
+    },
+    {
+      "url": "https://t.me/patt_channel_x",
+      "title": "Patt's Channel",
+      "folder": "telegram-channels"
+    },
+    {
+      "url": "https://t.me/GreenTextMemes",
+      "title": "GreenTextMemes",
+      "folder": "telegram-channels"
+    },
+    {
+      "url": "https://t.me/gooyban",
+      "title": "gooyban",
+      "folder": "telegram-channels"
+    },
+    {
+      "url": "https://t.me/DeamNet",
+      "title": "DeamNet",
+      "folder": "telegram-channels"
+    },
+    {
+      "url": "https://t.me/apkvision",
+      "title": "ApkVision",
+      "folder": "telegram-channels"
+    },
+    {
+      "url": "https://t.me/vidyamemes",
+      "title": "/v/'s Video Memes",
+      "folder": "telegram-channels"
+    },
+    {
+      "url": "https://t.me/ircfspace",
+      "title": "IRCFspace",
+      "folder": "telegram-channels"
+    },
+    {
+      "url": "https://t.me/TheVPNMethod",
+      "title": "The VPN Method",
+      "folder": "telegram-channels"
+    },
+    {
+      "url": "https://t.me/localhost_ir",
+      "title": "localhost",
+      "folder": "telegram-channels"
+    },
+    {
+      "url": "https://t.me/ThMahiar",
+      "title": "MahYaR",
+      "folder": "telegram-channels"
+    },
+    {
+      "url": "https://t.me/testingcatalog",
+      "title": "TestingCatalog",
+      "folder": "telegram-channels"
+    },
+    {
+      "url": "https://t.me/nixmms",
+      "title": "nixmms",
+      "folder": "telegram-channels"
+    },
+    {
+      "url": "https://t.me/gentoomemes",
+      "title": "/g/'s Tech Memes",
+      "folder": "telegram-channels"
+    },
+    {
+      "url": "https://t.me/appxa",
+      "title": "APPXA",
+      "folder": "telegram-channels"
+    },
+    {
+      "url": "https://t.me/miirzam",
+      "title": "MiRZaM",
+      "folder": "telegram-channels"
+    },
+    {
+      "url": "https://t.me/s_for_smark",
+      "title": "s better than k",
+      "folder": "telegram-channels"
+    },
+    {
+      "url": "https://t.me/ErfJabs",
+      "title": "ErfJab",
+      "folder": "telegram-channels"
+    },
+    {
+      "url": "https://t.me/azadi_az_inja_migzare",
+      "title": "Azadi az Inja Migzare",
+      "folder": "telegram-channels"
     }
   ],
   "filters": []

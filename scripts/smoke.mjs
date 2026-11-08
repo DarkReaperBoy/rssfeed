@@ -1143,6 +1143,194 @@ console.log('Hacker News → articles (hackernews.mjs)');
   const fetchMod2 = await import('./fetch.mjs');
   ok(fetchMod2.feedFilterDrop(a, { include: null, exclude: fetchMod2.compileBlockSrv({ title: ['show hn'] }) }) === true, 'word filters work on HN stories like any feed');
 }
+console.log('Telegram channel scraping → articles (telegram.mjs)');
+{
+  const tg = await import('./telegram.mjs');
+  ok(tg.tgChannelFromUrl('https://t.me/demochan') === 'demochan', 'a plain t.me url yields the channel');
+  ok(tg.tgChannelFromUrl('https://t.me/s/demochan') === 'demochan', 'an /s/ preview url yields the channel');
+  ok(tg.tgChannelFromUrl('https://t.me/demochan/104') === 'demochan', 'a message link yields the channel');
+  ok(tg.tgChannelFromUrl('https://telegram.me/Demo_Chan') === 'Demo_Chan', 'telegram.me mirrors work');
+  ok(tg.tgChannelFromUrl('https://t.me/joinchat/xyz') === null, 'joinchat links are not channels');
+  ok(tg.tgChannelFromUrl('https://t.me/') === null, 'a bare t.me root is not a channel');
+  ok(tg.tgChannelFromUrl('https://evil.com/t.me/x') === null, 'a spoofed path on another host is not a channel');
+  ok(tg.tgChannelFromUrl('https://example.com/feed.xml') === null, 'ordinary urls are not channels');
+  ok(tg.tgChannelFromUrl('not a url') === null, 'garbage is not a channel');
+  ok(tg.isTelegramFeed({ type: 'telegram' }) === true && tg.isTelegramFeed({ type: 'tg' }) === true, 'the telegram feed types are recognized');
+  ok(tg.isTelegramFeed({ url: 'https://t.me/demochan' }) === true, 'a t.me url alone is enough (zero-maintenance entry, like YouTube feeds)');
+  ok(tg.isTelegramFeed({ url: 'https://t.me/joinchat/xyz' }) === false, 'a joinchat link is not a feed');
+  ok(tg.isTelegramFeed({ type: 'telegram', channel: 'foo' }) === true, 'an explicit channel field works with the type');
+  ok(tg.tgChannelOf({ channel: '@foo' }) === 'foo', 'a leading @ is tolerated on the channel field');
+  ok(tg.tgChannelOf({ url: 'https://t.me/s/bar' }) === 'bar', 'the channel comes from the url when the field is absent');
+  const fetchModTg = await import('./fetch.mjs');
+  ok(fetchModTg.stripTags('start <i class="emoji" style="background-image:url(\'//x\')"><b>🔥</b></i> end') === 'start 🔥 end', 'inline emoji render as their characters once markup is stripped');
+
+  const NOW = 1762600000000;
+  const msgHtml = (id, inner, datetime = '2026-11-08T10:00:00+00:00') => `
+    <div class="tgme_widget_message_wrap js-widget_message_wrap"><div class="tgme_widget_message js-widget_message" data-post="demochan/${id}" data-view="x">
+      <div class="tgme_widget_message_bubble">
+        <div class="tgme_widget_message_author accent_color"><a class="tgme_widget_message_owner_name" href="https://t.me/demochan"><span dir="auto">Demo Channel</span></a></div>
+        ${inner}
+        <div class="tgme_widget_message_footer compact js-message_footer"><div class="tgme_widget_message_info short js-message_info"><span class="tgme_widget_message_views">3.04K</span><span class="copyonly"> views</span><span class="tgme_widget_message_meta"><a class="tgme_widget_message_date" href="https://t.me/demochan/${id}"><time datetime="${datetime}" class="time">10:00</time></a></span></div></div>
+      </div>
+    </div></div>`;
+  const albumMsg = msgHtml(104, `
+        <a class="tgme_widget_message_photo_wrap 1 2" href="https://t.me/demochan/104" style="width:653px;background-image:url('https://cdn4.telesco.pe/file/one.jpg')"><div class="tgme_widget_message_photo" style="padding-top:100%"></div></a>
+        <a class="tgme_widget_message_photo_wrap 1 2" href="https://t.me/demochan/104" style="width:653px;background-image:url('https://cdn4.telesco.pe/file/two.jpg')"><div class="tgme_widget_message_photo" style="padding-top:80%"></div></a>
+        <div class="tgme_widget_message_text js-message_text" dir="auto">Album caption <i class="emoji" style="background-image:url('//telegram.org/img/emoji/40/F09F938D.png')"><b>🔥</b></i>line<br/><br/>second para with <a href="https://example.com/x" target="_blank">a link</a></div>`);
+  const videoMsg = msgHtml(103, `
+        <a class="tgme_widget_message_video_player js-message_video_player" href="https://t.me/demochan/103"><i class="tgme_widget_message_video_thumb" style="background-image:url('//cdn4.telesco.pe/file/vthumb.jpg')"></i>
+        <div class="tgme_widget_message_video_wrap" style="width:1920px;padding-top:56.25%"><video src="https://cdn4.telesco.pe/file/v.mp4?token=expiring" class="tgme_widget_message_video js-message_video" width="100%" height="100%"></video></div>
+        <div class="message_video_play js-message_video_play"></div><time class="message_video_duration js-message_video_duration">0:21</time></a>`, '2026-11-07T09:30:00+00:00');
+  const textMsg = msgHtml(102, `<div class="tgme_widget_message_text js-message_text" dir="auto">Plain announcement<br/>two lines</div>`, '2026-11-06T08:00:00+00:00');
+  const photoOnlyMsg = msgHtml(101, `<a class="tgme_widget_message_photo_wrap 9 8" href="https://t.me/demochan/101" style="width:400px;background-image:url('https://cdn4.telesco.pe/file/solo.jpg')"><div class="tgme_widget_message_photo" style="padding-top:75%"></div></a>`, '2026-11-05T07:00:00+00:00');
+  const webpageMsg = msgHtml(100, `<div class="tgme_widget_message_text js-message_text" dir="auto">read this</div>
+        <div class="tgme_widget_message_webpage_wrap"><a class="tgme_widget_message_webpage" href="https://example.com/story">
+          <div class="tgme_widget_message_webpage_site">Example News</div>
+          <div class="tgme_widget_message_webpage_title">A big story</div>
+          <div class="tgme_widget_message_webpage_description">What happened, in short</div>
+        </a></div>`, '2026-11-04T06:00:00+00:00');
+  const forwardedMsg = msgHtml(98, `<div class="tgme_widget_message_forwarded_from"><span class="copyonly">Forwarded from </span><a href="https://t.me/other">Other Channel</a></div>
+        <div class="tgme_widget_message_text js-message_text" dir="auto">shared post body</div><span class="tgme_widget_message_signature">Demo Admin</span>`, '2026-11-03T05:00:00+00:00');
+  const serviceMsg = `<div class="tgme_widget_message_wrap"><div class="tgme_widget_message service_message message_service_condensed">Channel created</div></div>`;
+  const pageHtml = `<!DOCTYPE html><html><head><title>Demo Channel – Telegram</title>
+    <meta property="og:title" content="Demo Channel">
+    <meta property="og:description" content="A channel for tests">
+    <meta property="og:image" content="https://cdn4.telesco.pe/file/avatar.jpg">
+    </head><body><div class="tgme_container"><section class="tgme_channel_history js-message_history">
+    <div class="tgme_widget_message_centered js-messages_more_wrap"><a href="/s/demochan?before=98" class="tme_messages_more js-messages_more" data-before="98"></a></div>
+    ${albumMsg}${videoMsg}${textMsg}${photoOnlyMsg}${webpageMsg}${forwardedMsg}${serviceMsg}
+    </section></div></body></html>`;
+  const page = tg.tgParsePage(pageHtml);
+  ok(page.title === 'Demo Channel' && page.description === 'A channel for tests' && page.image === 'https://cdn4.telesco.pe/file/avatar.jpg', 'og channel meta (title/description/avatar) captured');
+  ok(page.moreBefore === 98, 'the more-link data-before drives pagination');
+  ok(page.messages.length === 6, `six real messages parsed, the service message is skipped (${page.messages.length})`);
+  const m104 = page.messages.find((m) => m.id === 104);
+  ok(m104.channel === 'demochan' && m104.link === 'https://t.me/demochan/104', 'message ids, channel, and permalink come from data-post');
+  ok(m104.date === Date.parse('2026-11-08T10:00:00+00:00'), 'message time comes from the <time datetime> attribute');
+  ok(m104.photos.length === 2 && m104.photos[0] === 'https://cdn4.telesco.pe/file/one.jpg', 'album photos are pulled out of background-image styles');
+  ok(/a link/.test(m104.textHtml) && /<br/.test(m104.textHtml), 'message text keeps its markup for the sanitize pipeline');
+  const m103 = page.messages.find((m) => m.id === 103);
+  ok(m103.videos.length === 1 && m103.videos[0].thumb === 'https://cdn4.telesco.pe/file/vthumb.jpg' && m103.videos[0].duration === '0:21', 'video thumbs and durations are captured');
+  const m100 = page.messages.find((m) => m.id === 100);
+  ok(m100.webpage?.href === 'https://example.com/story' && m100.webpage?.title === 'A big story' && m100.webpage?.site === 'Example News' && m100.webpage?.description === 'What happened, in short', 'link previews carry site/title/description/href');
+  const m98 = page.messages.find((m) => m.id === 98);
+  ok(m98.forwarded === 'Forwarded from Other Channel' && m98.signature === 'Demo Admin', 'forwarding note and author signature are captured');
+
+  const a104 = tg.tgMessageToArticle(m104, { now: NOW });
+  ok(a104.id === tg.tgArticleId(m104) && a104.id === tg.tgMessageToArticle(m104, { now: 1 }).id, 'article ids are message-keyed and edit/date independent');
+  ok(a104.title === 'Album caption 🔥line', `the title is the first text line, emoji as characters (${a104.title})`);
+  ok(a104.enclosures.length === 2 && a104.enclosures[0].type === 'image/thumbnail' && a104.enclosures[1].type === 'image/jpeg', 'album: first photo is the row thumbnail, the rest are image attachments');
+  ok(a104.content.includes('<img src="https://cdn4.telesco.pe/file/one.jpg"') && a104.content.includes('<img src="https://cdn4.telesco.pe/file/two.jpg"'), 'every album photo is embedded in the content');
+  ok(a104.content.includes('second para with'), 'double-br paragraphs split into separate <p> blocks');
+  ok(a104.content.includes('View on Telegram'), 'the footer links to the post');
+  ok(fetchModTg.sanitize(a104.content).includes('<img src="https://cdn4.telesco.pe/file/one.jpg"'), 'photo imgs survive the sanitizer');
+  ok(!fetchModTg.sanitize(a104.content).includes('background-image'), 'inline styles never survive the sanitizer');
+  const a103 = tg.tgMessageToArticle(m103, { now: NOW });
+  ok(a103.title === 'Video (0:21)', 'a video message without text gets a duration title');
+  ok(a103.enclosures.length === 1 && a103.enclosures[0].type === 'image/thumbnail', 'the video poster is the thumbnail enclosure');
+  ok(a103.content.includes('alt="video, 0:21"'), 'the video thumb carries the duration in its alt text');
+  ok(!a103.content.includes('v.mp4'), 'tokened expiring video urls are never embedded (the poster links to the post instead)');
+  const a101 = tg.tgMessageToArticle(page.messages.find((m) => m.id === 101), { now: NOW });
+  ok(a101.title === 'Photo' && a101.summary === 'Photo', 'a photo with no caption still has a title');
+  const a100 = tg.tgMessageToArticle(m100, { now: NOW });
+  ok(a100.content.includes('<a href="https://example.com/story">A big story</a>'), 'the link preview becomes a linked block');
+  const a98 = tg.tgMessageToArticle(m98, { now: NOW });
+  ok(a98.author === 'Demo Admin', 'the author signature becomes the article author');
+  ok(a98.content.startsWith('<p><em>Forwarded from Other Channel</em></p>'), 'forwarded messages carry the origin note first');
+  const aNoText = tg.tgMessageToArticle({ id: 77, channel: 'demochan', date: null, textHtml: '', photos: [], videos: [], webpage: null, forwarded: '', signature: '', pollText: '', link: 'https://t.me/demochan/77' }, { now: NOW });
+  ok(aNoText.title === 'Message #77', 'a media-less, text-less message still gets a stable fallback title');
+  ok(aNoText.date === NOW && tg.tgMessageToArticle({ ...aNoText, raw: 1, id: 77, date: null, textHtml: '', photos: [], videos: [], webpage: null, forwarded: '', signature: '', pollText: '', link: 'https://t.me/demochan/77' }, { now: NOW, prevDate: 12345 }).date === 12345, 'an undated message keeps its first-seen date across runs (prevDate)');
+
+  const mkPages = (pages) => {
+    const calls = [];
+    const doFetch = async (url) => {
+      calls.push(url);
+      const before = Number(new URL(url).searchParams.get('before') || 0);
+      const entry = pages.find((p) => p.before === before);
+      if (!entry) return { ok: false, status: 500, text: async () => '' };
+      if (entry.error) return { ok: false, status: entry.error, text: async () => '' };
+      return { ok: true, status: 200, text: async () => entry.html };
+    };
+    return { doFetch, calls };
+  };
+  const wrapMsg = (id, iso) => msgHtml(id, `<div class="tgme_widget_message_text js-message_text" dir="auto">m${id}</div>`, iso).trim();
+  const mkPage = (ids, moreBefore, base = 'https://t.me') => `<!DOCTYPE html><html><head><meta property="og:title" content="Paged"></head><body><section class="tgme_channel_history js-message_history">${moreBefore ? `<div class="tgme_widget_message_centered js-messages_more_wrap"><a href="/s/x?before=${moreBefore}" class="tme_messages_more js-messages_more" data-before="${moreBefore}"></a></div>` : ''}${ids.map((x) => wrapMsg(x.id, x.iso)).join('')}</section></body></html>`;
+
+  {
+    const { doFetch, calls } = mkPages([
+      { before: 0, html: mkPage([{ id: 4, iso: '2026-11-08T10:00:00Z' }, { id: 3, iso: '2026-11-08T09:00:00Z' }], 3) },
+      { before: 3, html: mkPage([{ id: 2, iso: '2026-11-08T08:00:00Z' }, { id: 1, iso: '2026-11-08T07:00:00Z' }], null) },
+    ]);
+    const r = await tg.tgFetchChannel(doFetch, 'demochan', { base: 'https://t.me' });
+    ok(r.pages === 2 && r.messages.length === 4 && r.messages[0].id === 1 && r.messages[3].id === 4, 'pagination walks ?before= pages to the start of history');
+    ok(r.stopReason === 'start of history', 'start of history is reported');
+    ok(r.info.title === 'Paged', 'channel info comes from the first page');
+    ok(calls[0] === 'https://t.me/s/demochan' && calls[1] === 'https://t.me/s/demochan?before=3', 'page urls are exactly the t.me preview form');
+  }
+  {
+    const { doFetch, calls } = mkPages([
+      { before: 0, html: mkPage([{ id: 4, iso: '2026-11-08T10:00:00Z' }, { id: 3, iso: '2026-11-08T09:00:00Z' }], 3) },
+      { before: 3, html: mkPage([{ id: 2, iso: '2026-11-08T08:00:00Z' }, { id: 1, iso: '2026-11-08T07:00:00Z' }], null) },
+    ]);
+    const r = await tg.tgFetchChannel(doFetch, 'demochan', { knownMaxId: 3, base: 'https://t.me' });
+    ok(r.pages === 1 && r.stopReason === 'caught up with stored messages' && calls.length === 1, 'the overlap watermark stops the walk after one page when nothing new is beyond it');
+    ok(r.messages.length === 2 && r.messages.some((m) => m.id === 4), 'the page that reached the watermark still contributes its new messages');
+  }
+  {
+    const { doFetch } = mkPages([
+      { before: 0, html: mkPage([{ id: 4, iso: '2026-11-08T10:00:00Z' }, { id: 3, iso: '2026-10-01T09:00:00Z' }], 3) },
+    ]);
+    const r = await tg.tgFetchChannel(doFetch, 'demochan', { cutoffMs: Date.parse('2026-11-01T00:00:00Z'), base: 'https://t.me' });
+    ok(r.pages === 1 && r.stopReason === 'retention window covered', 'the retention cutoff stops the walk once a page reaches past it');
+  }
+  {
+    const { doFetch } = mkPages([
+      { before: 0, html: mkPage([{ id: 4, iso: '2026-11-08T10:00:00Z' }, { id: 3, iso: '2026-11-08T09:00:00Z' }], 3) },
+      { before: 3, html: mkPage([{ id: 2, iso: '2026-11-08T08:00:00Z' }, { id: 1, iso: '2026-11-08T07:00:00Z' }], null) },
+    ]);
+    const r = await tg.tgFetchChannel(doFetch, 'demochan', { maxPages: 1, base: 'https://t.me' });
+    ok(r.pages === 1 && r.stopReason === 'page budget' && r.messages.length === 2, 'the page budget caps the walk (raise maxPages to reach further back)');
+  }
+  {
+    let threw = null;
+    try { await tg.tgFetchChannel(async () => ({ ok: false, status: 503, text: async () => '' }), 'demochan'); } catch (e) { threw = e; }
+    ok(threw && threw.code === 'HTTP', 'a failed first page throws HTTP — the feed reports failure, old messages kept');
+  }
+  {
+    let threw = null;
+    try { await tg.tgFetchChannel(async () => ({ ok: true, status: 200, text: async () => '<html><body><div class="tgme_page">If you have Telegram, you can contact @demochan</div></body></html>' }), 'demochan'); } catch (e) { threw = e; }
+    ok(threw && threw.code === 'NO_POSTS', 'a channel with no public preview (missing/private/login wall) reports NO_POSTS');
+  }
+  {
+    let n = 0;
+    const doFetch = async () => {
+      n++;
+      if (n === 1) return { ok: true, status: 200, text: async () => mkPage([{ id: 4, iso: '2026-11-08T10:00:00Z' }, { id: 3, iso: '2026-11-08T09:00:00Z' }], 3) };
+      throw new Error('connection reset');
+    };
+    const r = await tg.tgFetchChannel(doFetch, 'demochan', { base: 'https://t.me' });
+    ok(r.pages === 1 && r.messages.length === 2 && /network error/.test(r.stopReason), 'a later page failing mid-walk is a soft stop: the fresh first page still lands');
+  }
+  {
+    let n = 0;
+    const doFetch = async () => {
+      n++;
+      if (n === 1) return { ok: true, status: 200, text: async () => mkPage([{ id: 4, iso: '2026-11-08T10:00:00Z' }, { id: 3, iso: '2026-11-08T09:00:00Z' }], 3) };
+      return { ok: true, status: 200, text: async () => '<html><body></body></html>' };
+    };
+    const r = await tg.tgFetchChannel(doFetch, 'demochan', { base: 'https://t.me' });
+    ok(r.pages === 1 && r.stopReason === 'start of history', 'an empty follow-up page reads as the end of history');
+  }
+  {
+    const stallPage = `<!DOCTYPE html><html><head><meta property="og:title" content="S"></head><body><section class="tgme_channel_history js-message_history"><div class="tgme_widget_message_centered js-messages_more_wrap"><a href="/s/x?before=5" class="tme_messages_more js-messages_more" data-before="5"></a></div>${wrapMsg(5, '2026-11-08T10:00:00Z')}${wrapMsg(4, '2026-11-08T09:00:00Z')}</section></body></html>`;
+    const doFetch = async () => ({ ok: true, status: 200, text: async () => stallPage });
+    const r = await tg.tgFetchChannel(doFetch, 'demochan', { base: 'https://t.me' });
+    ok(r.stopReason === 'pagination stalled', 'a data-before that never decreases can never loop the walker');
+    ok(r.messages.length === 2, 'the stalled walk still returns what it has');
+  }
+  ok(tg.TG_DEFAULT_MAX_PAGES === 12, 'the default page budget (12 pages ≈ 240 messages/hour/channel) is exported and pinned');
+  ok(fetchModTg.feedFilterDrop(tg.tgMessageToArticle(page.messages.find((m) => m.id === 102), { now: NOW }), { include: null, exclude: fetchModTg.compileBlockSrv({ title: ['announcement'] }) }) === true, 'word filters work on telegram messages like any feed');
+}
 console.log('fetch.mjs pure helpers (entity decode, linkify, ids, matchers)');
 {
   const fetchMod = await import('./fetch.mjs');

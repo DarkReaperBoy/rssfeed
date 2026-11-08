@@ -8,6 +8,7 @@ import { Readability } from '@mozilla/readability';
 import sanitizeHtml from 'sanitize-html';
 import { chanThreadsFromCatalog, chanThreadPasses, chanThreadToArticle } from './4chan.mjs';
 import { hnHitToArticle, hnFeedOptions, hnFetchAllPages } from './hackernews.mjs';
+import { isTelegramFeed, tgChannelOf, tgFetchChannel, tgArticleId, tgMessageToArticle, TG_DEFAULT_MAX_PAGES } from './telegram.mjs';
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const DATA_DIR = path.join(ROOT, 'data');
 const FEEDS_DIR = path.join(DATA_DIR, 'feeds');
@@ -355,6 +356,8 @@ const deriveFeedId = (f) => {
   if (f.id) return String(f.id);
   if (f.type === '4chan') return `4chan-${slugify(String(f.board || '').toLowerCase().replace(/\//g, ''), 'board')}`;
   if (isHnFeed(f)) return 'hackernews';
+  const tgCh = isTelegramFeed(f) ? tgChannelOf(f) : null;
+  if (tgCh) return `tg-${slugify(tgCh.toLowerCase(), 'channel')}`;
   const u = String(f.url || '');
   try {
     const url = new URL(u);
@@ -369,8 +372,12 @@ const deriveFeedId = (f) => {
   } catch { return slugify(u, 'feed').slice(0, 64); }
 };
 async function resolveFeeds(config) {
-  const feedKey = (f) => f.url || (f.type === '4chan' ? `4chan:${String(f.board || '').toLowerCase().replace(/\//g, '')}` : isHnFeed(f) ? `hackernews:${f.id || 'default'}` : `id:${f.id}`);
-  const usable = (f) => f && (f.url || f.type === '4chan' || isHnFeed(f));
+  const feedKey = (f) => {
+    const tgCh = isTelegramFeed(f) ? tgChannelOf(f) : null;
+    if (tgCh) return `telegram:${tgCh.toLowerCase()}`;
+    return f.url || (f.type === '4chan' ? `4chan:${String(f.board || '').toLowerCase().replace(/\//g, '')}` : isHnFeed(f) ? `hackernews:${f.id || 'default'}` : `id:${f.id}`);
+  };
+  const usable = (f) => f && (f.url || f.type === '4chan' || isHnFeed(f) || isTelegramFeed(f));
   const configFeeds = (config.feeds || []).filter(usable);
   for (const f of config.feeds || []) if (!usable(f)) console.warn(`skip feed (no url/board/type): ${JSON.stringify(f)}`);
   const byId = new Map(configFeeds.filter((f) => f.id).map((f) => [f.id, f]));
@@ -424,6 +431,20 @@ async function chanThrottle() {
   chanLastReq = Date.now();
 }
 let chanBoardsCache = null;
+let tgLastReq = 0;
+async function tgThrottle() {
+  const wait = tgLastReq + 1100 - Date.now();
+  if (wait > 0) await sleep(wait);
+  tgLastReq = Date.now();
+}
+const tgDoFetch = async (url) => {
+  await tgThrottle();
+  return fetch(url, {
+    headers: { 'User-Agent': UA, Accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8' },
+    signal: AbortSignal.timeout(35000),
+    redirect: 'follow',
+  });
+};
 async function getChanBoards() {
   if (chanBoardsCache) return chanBoardsCache;
   try {
@@ -641,6 +662,73 @@ async function main() {
       console.log(`[${feed.id}] /${board}/: ${kept.length} live threads${skipped ? ` (skipped ${skipped} below the reply/word filters)` : ''}${filtered ? ` (dropped ${filtered} by word filter)` : ''}${cfgHidden ? ` (dropped ${cfgHidden} by config filter)` : ''}${cap ? ` (capped at ${cap})` : ''}`);
       return;
     }
+    if (isTelegramFeed(feed)) {
+      const channel = tgChannelOf(feed) || '';
+      if (!channel) {
+        failures++;
+        const keptErr = keepRetained().filter(inWindow);
+        await fs.writeFile(file, JSON.stringify({ articles: keptErr }));
+        index.feeds[feed.id] = { ...summarizeFeed({ ...feed, site: feed.site || 'https://t.me' }, keptErr), status: { ...status, ok: false, error: 'telegram feed needs a channel (a t.me/<channel> url or a "channel" field)' } };
+        written.set(feed.id, keptErr);
+        console.error(`[${feed.id}] CONFIG ERROR: telegram feed needs a channel (a t.me/<channel> url or a "channel" field)`);
+        return;
+      }
+      let knownMaxId = 0;
+      const knownLink = new RegExp(`^https://t\\.me/${channel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/(\\d+)$`, 'i');
+      for (const a of prev.articles || []) {
+        const m = knownLink.exec(a.link || '');
+        if (m) knownMaxId = Math.max(knownMaxId, Number(m[1]));
+      }
+      const pageCap = Number(feed.maxPages) > 0 ? Math.floor(Number(feed.maxPages)) : TG_DEFAULT_MAX_PAGES;
+      let result;
+      try {
+        result = await tgFetchChannel(tgDoFetch, channel, {
+          cutoffMs: now - retainMs,
+          knownMaxId,
+          maxPages: pageCap,
+        });
+      } catch (err) {
+        failures++;
+        status.ok = false;
+        status.error = err.message;
+        status.consecutiveFailures = (prevStatus.consecutiveFailures || 0) + 1;
+        const keptFail = keepRetained().filter(inWindow);
+        await fs.writeFile(file, JSON.stringify({ articles: keptFail }));
+        index.feeds[feed.id] = { ...summarizeFeed({ ...feed, ...feedMetaFor(feed, prevMeta) }, keptFail), status };
+        written.set(feed.id, keptFail);
+        console.error(`[${feed.id}] FETCH FAILED: ${err.message} — keeping ${keptFail.length} messages`);
+        return;
+      }
+      status.ok = true;
+      status.lastSuccess = now;
+      status.consecutiveFailures = 0;
+      status.error = null;
+      const effFeed = { ...feed, title: feed.title || result.info.title || channel, site: feed.site || `https://t.me/${channel}`, url: feed.url || `https://t.me/${channel}` };
+      const fmeta = feedMetaFor(effFeed, prevMeta, { title: result.info.title, link: `https://t.me/${channel}`, image: result.info.image ? { url: result.info.image } : null });
+      const prevById = new Map((prev.articles || []).map((a) => [a.id, a]));
+      const articles = [];
+      let filtered = 0;
+      for (const msg of result.messages) {
+        const id = tgArticleId(msg);
+        const a = tgMessageToArticle(msg, { now, prevDate: prevById.get(id)?.date });
+        if (feedBlocks && feedFilterDrop(a, feedBlocks)) { filtered++; continue; }
+        const r = configFilterActions(a, feed.id, folders, configRules);
+        if (r.hidden) { cfgHidden++; continue; }
+        applyActions(a, r);
+        a.content = sanitize(a.content);
+        articles.push(a);
+      }
+      const byId = new Map();
+      const prevList = keepRetained();
+      for (const a of [...prevList, ...articles]) byId.set(a.id, a);
+      const merged = [...byId.values()].sort((a, b) => b.date - a.date).filter(inWindow);
+      await fs.writeFile(file, JSON.stringify({ articles: merged }));
+      index.feeds[feed.id] = { ...summarizeFeed({ ...effFeed, ...fmeta }, merged), status };
+      written.set(feed.id, merged);
+      const budgetNote = result.stopReason === 'page budget' ? ` — raise "maxPages" (now ${pageCap}) to reach further back` : '';
+      console.log(`[${feed.id}] t.me/${channel}: ${merged.length} messages (${result.pages} page(s), stopped: ${result.stopReason}${budgetNote})${filtered ? ` (dropped ${filtered} by word filter)` : ''}${cfgHidden ? ` (dropped ${cfgHidden} by config filter)` : ''}`);
+      return;
+    }
     if (isHnFeed(feed)) {
       const effFeed = { ...feed, title: feed.title || 'Hacker News', site: feed.site || 'https://news.ycombinator.com/' };
       const { minPoints, minComments } = hnFeedOptions(feed);
@@ -828,16 +916,18 @@ async function main() {
     console.log(`[${feed.id}] ${merged.length} articles (last ${retentionDays} days, no cap) from "${fmeta.origTitle || fmeta.title}"`);
   };
   const chanFeeds = feeds.filter((f) => f.type === '4chan');
-  const poolFeeds = feeds.filter((f) => f.type !== '4chan');
+  const tgFeeds = feeds.filter((f) => isTelegramFeed(f));
+  const poolFeeds = feeds.filter((f) => f.type !== '4chan' && !isTelegramFeed(f));
   const runOne = async (feed) => {
     try { await processFeed(feed); }
     catch (err) { failures++; console.error(`[${feed.id}] FAILED: ${err.message}`); }
   };
   const chanChain = (async () => { for (const feed of chanFeeds) await runOne(feed); })();
+  const tgChain = (async () => { for (const feed of tgFeeds) await runOne(feed); })();
   const pool = Array.from({ length: Math.min(FETCH_CONCURRENCY, poolFeeds.length) }, async () => {
     while (poolFeeds.length) await runOne(poolFeeds.shift());
   });
-  await Promise.all([...pool, chanChain]);
+  await Promise.all([...pool, chanChain, tgChain]);
   for (const [oldId] of Object.entries(prevFeedMeta)) {
     if (!currentFeedIds.has(oldId)) {
       try {

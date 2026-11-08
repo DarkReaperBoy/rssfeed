@@ -34,6 +34,63 @@ const article1Html = `<!doctype html><html><head><title>FT Article One</title></
 const article2Html = '<!doctype html><html><head><title>FT Two</title></head><body><p>tiny</p></body></html>';
 let chanMode = 'ok';
 const CHAN_LM = 'Mon, 01 Jan 2024 00:00:00 GMT';
+const tgMsg = (channel, m) => `
+    <div class="tgme_widget_message_wrap js-widget_message_wrap"><div class="tgme_widget_message js-widget_message" data-post="${channel}/${m.id}" data-view="x">
+      <div class="tgme_widget_message_bubble">
+        <div class="tgme_widget_message_author accent_color"><a class="tgme_widget_message_owner_name" href="https://t.me/${channel}"><span dir="auto">${channel}</span></a></div>
+        ${m.inner}
+        <div class="tgme_widget_message_footer compact js-message_footer"><div class="tgme_widget_message_info short js-message_info"><span class="tgme_widget_message_views">1.2K</span><span class="copyonly"> views</span><span class="tgme_widget_message_meta"><a class="tgme_widget_message_date" href="https://t.me/${channel}/${m.id}"><time datetime="${new Date(now - m.mins * 60000).toISOString()}" class="time">10:00</time></a></span></div></div>
+      </div>
+    </div></div>`;
+const tgText = (t) => `<div class="tgme_widget_message_text js-message_text" dir="auto">${t}</div>`;
+const tgPhoto = (u) => `<a class="tgme_widget_message_photo_wrap 1 2" href="#" style="width:653px;background-image:url('${u}')"><div class="tgme_widget_message_photo" style="padding-top:100%"></div></a>`;
+const tgVideo = `<a class="tgme_widget_message_video_player js-message_video_player" href="#"><i class="tgme_widget_message_video_thumb" style="background-image:url('https://cdn4.telesco.pe/file/vthumb.jpg')"></i><div class="tgme_widget_message_video_wrap" style="width:100px;padding-top:50%"><video src="https://cdn4.telesco.pe/file/v.mp4?token=expiring" class="tgme_widget_message_video js-message_video" width="100%" height="100%"></video></div><div class="message_video_play js-message_video_play"></div><time class="message_video_duration js-message_video_duration">0:21</time></a>`;
+let tgNewMessage = null;
+let tgEdited108 = false;
+const tgRequests = {};
+const tgChannels = () => {
+  const demo = [
+    { id: 108, mins: 60, inner: tgText(tgEdited108 ? 'Fresh text post (edited) <b>bold</b>' : 'Fresh text post <b>bold</b>') },
+    { id: 104, mins: 2 * 24 * 60, inner: tgPhoto('https://cdn4.telesco.pe/file/one.jpg') + tgPhoto('https://cdn4.telesco.pe/file/two.jpg') + tgText('Album caption') },
+    { id: 103, mins: 3 * 24 * 60, inner: tgVideo },
+    { id: 102, mins: 4 * 24 * 60, inner: tgText('Plain announcement') },
+    { id: 101, mins: 5 * 24 * 60, inner: tgPhoto('https://cdn4.telesco.pe/file/solo.jpg') },
+    { id: 99, mins: 35 * 24 * 60, inner: tgPhoto('https://cdn4.telesco.pe/file/ancient.jpg') },
+  ];
+  if (tgNewMessage) demo.unshift(tgNewMessage);
+  return {
+    demochan: { title: 'Demo Channel', messages: demo },
+    burstchan: {
+      title: 'Burst Feed',
+      messages: Array.from({ length: 12 }, (_, i) => ({ id: 212 - i, mins: 30 + i * 55, inner: tgText(`Burst message ${212 - i}`) })),
+    },
+    deepchan: {
+      title: 'Deep Channel',
+      messages: Array.from({ length: 9 }, (_, i) => ({ id: 309 - i, mins: 40 + i * 90, inner: tgText(`Deep message ${309 - i}`) })),
+    },
+  };
+};
+const tgRoutes = (req, res) => {
+  const u = new URL(req.url, 'http://t.me');
+  const m = /^\/s\/([A-Za-z0-9_]+)$/.exec(u.pathname);
+  if (!m) return false;
+  const channel = m[1];
+  const chan = tgChannels()[channel];
+  tgRequests[channel] = (tgRequests[channel] || 0) + 1;
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+  if (!chan) {
+    res.end(`<!DOCTYPE html><html><head><title>Telegram Messenger</title></head><body><div class="tgme_page_wrap"><div class="tgme_page"><a href="https://t.me/">If you have Telegram, you can contact @${channel} right away.</a></div></div></body></html>`);
+    return true;
+  }
+  const before = Number(u.searchParams.get('before') || 0);
+  const filtered = chan.messages.filter((x) => !before || x.id < before).sort((a, b) => b.id - a.id);
+  const PAGE = 3;
+  const pageMsgs = filtered.slice(0, PAGE);
+  const moreBefore = filtered.length > PAGE ? pageMsgs[pageMsgs.length - 1].id : null;
+  const body = pageMsgs.slice().reverse().map((x) => tgMsg(channel, x)).join('');
+  res.end(`<!DOCTYPE html><html><head><meta property="og:title" content="${chan.title}"><meta property="og:image" content="https://cdn4.telesco.pe/file/${channel}-avatar.jpg"></head><body><div class="tgme_container"><section class="tgme_channel_history js-message_history">${moreBefore ? `<div class="tgme_widget_message_centered js-messages_more_wrap"><a href="/s/${channel}?before=${moreBefore}" class="tme_messages_more js-messages_more" data-before="${moreBefore}"></a></div>` : ''}${body}</section></div></body></html>`);
+  return true;
+};
 const chanCatalog = () => JSON.stringify([{ threads: [
   { no: 9001, time: Math.floor(now / 1000) - 3600, replies: 120, sub: 'Fresh thread', com: 'fresh op' },
   { no: 9002, time: Math.floor(now / 1000) - 90 * 86400, replies: 400, sub: 'Ninety-day-old thread', com: 'old op' },
@@ -71,13 +128,14 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/rss+xml; charset=utf-8' });
     res.end(brokenRss);
   } else if (chanRoutes(req, res)) { /* served */ }
+  else if (tgRoutes(req, res)) { /* served */ }
   else { res.writeHead(404); res.end(); }
 });
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const port = server.address().port;
 fs.rmSync(SANDBOX, { recursive: true, force: true });
 fs.mkdirSync(path.join(SANDBOX, 'scripts'), { recursive: true });
-for (const f of ['fetch.mjs', '4chan.mjs', 'hackernews.mjs']) fs.copyFileSync(path.join(ROOT, 'scripts', f), path.join(SANDBOX, 'scripts', f));
+for (const f of ['fetch.mjs', '4chan.mjs', 'hackernews.mjs', 'telegram.mjs']) fs.copyFileSync(path.join(ROOT, 'scripts', f), path.join(SANDBOX, 'scripts', f));
 fs.writeFileSync(path.join(SANDBOX, 'config.json'), JSON.stringify({
   settings: { retentionDays: 30, fullTextDefault: false },
   feeds: [
@@ -152,6 +210,7 @@ const server2 = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     res.end(article2Html);
   } else if (chanRoutes(req, res)) { /* served */ }
+  else if (tgRoutes(req, res)) { /* served */ }
   else { res.writeHead(404); res.end(); }
 });
 await new Promise((r) => server2.listen(port, '127.0.0.1', r));
@@ -421,6 +480,83 @@ console.log('run 14: full-text extraction — extract once, reuse across runs, r
   ok(ftFeedHits === 3 && !/not modified/.test(out), 'the third run re-parses the feed (new etag)');
   ok(art1Hits === 1 && art2Hits === 2, 'an item with stored text is never re-fetched; a textless item retries its page');
   ok(a1()?.text?.includes('READABILITY_MARKER_PHRASE'), 'the reused text is still intact after the re-parse');
+}
+console.log('run 15: telegram channels — every message is an article, images ride along, bursts paginate');
+{
+  const TG = `http://127.0.0.1:${port}`;
+  fs.writeFileSync(path.join(SANDBOX, 'config.json'), JSON.stringify({
+    settings: { retentionDays: 30, fullTextDefault: false },
+    feeds: [
+      { id: 'tgdemo', title: 'Demo Telegram', url: 'https://t.me/demochan' },
+      { id: 'tgburst', url: 'https://t.me/burstchan' },
+      { id: 'tgdeep', url: 'https://t.me/deepchan', maxPages: 2 },
+      { id: 'tgmissing', url: 'https://t.me/missingchan' },
+    ],
+  }, null, 2));
+  await new Promise((r) => setTimeout(r, 1100));
+  out = await run({ GHRSS_TG_BASE: TG });
+  const tgFeed = (id) => JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/feeds', `${id}.json`), 'utf8'));
+  const demo15 = tgFeed('tgdemo').articles;
+  ok(demo15.length === 5, `five demochan messages stored — the 35-day-old one is outside the 30-day window (${demo15.length})`);
+  ok(demo15.every((a) => /^https:\/\/t\.me\/demochan\/\d+$/.test(a.link)), 'every article links to its t.me message');
+  const byLink = (n) => demo15.find((a) => a.link === `https://t.me/demochan/${n}`);
+  const a104 = byLink(104);
+  ok(!!a104 && a104.title === 'Album caption', 'the album caption is the title');
+  ok(a104?.enclosures.length === 2 && a104.enclosures[0].type === 'image/thumbnail' && a104.enclosures[1].type === 'image/jpeg', 'album photos land in enclosures: first is the row thumbnail, the rest are attachments');
+  ok(a104?.content.includes('https://cdn4.telesco.pe/file/one.jpg') && a104?.content.includes('https://cdn4.telesco.pe/file/two.jpg'), 'album photos are embedded in the article body');
+  const a103 = byLink(103);
+  ok(a103?.title === 'Video (0:21)' && a103.enclosures[0].type === 'image/thumbnail', 'video messages carry the poster thumbnail and a duration title');
+  ok(a103 && !a103.content.includes('v.mp4'), 'expiring tokened video urls are never embedded');
+  ok(byLink(102)?.title === 'Plain announcement', 'text message titles come from the first line');
+  ok(byLink(101)?.title === 'Photo', 'a captionless photo still titles itself');
+  const a108 = byLink(108);
+  ok(a108?.content.includes('<b>bold</b>') && a108?.title === 'Fresh text post bold', 'markup survives into the body, the title is the flattened first line');
+  ok(demo15.every((a) => a.content.includes('View on Telegram')), 'every message body links back to the post');
+  const burst15 = tgFeed('tgburst').articles;
+  ok(burst15.length === 12, `all 12 burst messages captured across 3-message pages (${burst15.length})`);
+  ok(new Set(burst15.map((a) => a.link)).size === 12, 'each burst message is a distinct article');
+  ok(burst15[0].link === 'https://t.me/burstchan/212' && burst15[11].link === 'https://t.me/burstchan/201', 'articles are ordered newest first');
+  const deep15 = tgFeed('tgdeep').articles;
+  ok(deep15.length === 6 && deep15.every((a) => Number(/(\d+)$/.exec(a.link)[1]) >= 304), 'maxPages=2 caps the walk at the newest 6 of 9 (the page budget)');
+  ok(/page budget/.test(out) && /raise "maxPages" \(now 2\)/.test(out), 'the run log names the budget stop and the way out');
+  const miss15 = tgFeed('tgmissing').articles;
+  ok(miss15.length === 0, 'a channel with no public preview stores nothing');
+  const idx15 = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/index.json'), 'utf8'));
+  ok(idx15.feeds.tgdemo.status.ok === true, 'the demo channel crawl is healthy');
+  ok(idx15.feeds.tgdemo.title === 'Demo Telegram' && idx15.feeds.tgdemo.origTitle === 'Demo Channel', 'a config rename keeps the channel self-title as origTitle');
+  ok(idx15.feeds.tgdemo.site === 'https://t.me/demochan' && idx15.feeds.tgdemo.image === 'https://cdn4.telesco.pe/file/demochan-avatar.jpg', 'site and avatar come from the channel page');
+  ok(idx15.feeds.tgburst.title === 'Burst Feed' && idx15.feeds.tgburst.origTitle === null, 'an untitled feed derives its title from the channel');
+  ok(idx15.feeds.tgmissing.status.ok === false && /no public posts/.test(idx15.feeds.tgmissing.status.error || ''), 'a missing/private channel reports NO_POSTS in the crawl status');
+  const all15tg = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/all-feeds.json'), 'utf8'));
+  ok(all15tg.articles.length === 5 + 12 + 6, `all-feeds.json carries every telegram article (${all15tg.articles.length})`);
+  const demoBefore = Object.fromEntries(demo15.map((a) => [a.link, a.id]));
+
+  console.log('run 16: telegram incremental — new + edited messages, overlap stop, failure keeps retained');
+  tgNewMessage = { id: 109, mins: 5, inner: tgText('Brand new post') };
+  tgEdited108 = true;
+  await new Promise((r) => setTimeout(r, 1100));
+  const reqBefore = { ...tgRequests };
+  out = await run({ GHRSS_TG_BASE: TG });
+  const demo16 = tgFeed('tgdemo').articles;
+  ok(demo16.length === 6, `the new message landed, everything retained (${demo16.length})`);
+  const a109 = demo16.find((a) => a.link === 'https://t.me/demochan/109');
+  ok(a109?.title === 'Brand new post', 'message 109 is present');
+  const a108e = demo16.find((a) => a.link === 'https://t.me/demochan/108');
+  ok(a108e?.title === 'Fresh text post (edited) bold' && a108e?.id === demoBefore['https://t.me/demochan/108'], 'an author edit (re-scraped while still on the newest page) updates the title but NEVER the article id — read state survives');
+  ok(demo16.find((a) => a.link === 'https://t.me/demochan/102')?.title === 'Plain announcement', 'older messages beyond the first page keep their stored form (same as any RSS feed)');
+  ok(demo16.filter((a) => demoBefore[a.link]).every((a) => a.id === demoBefore[a.link]), 'every previously-stored message kept its id across runs');
+  ok(tgRequests.demochan === reqBefore.demochan + 1, `the second run walked exactly one page (overlap stop: ${tgRequests.demochan - reqBefore.demochan} request)`);
+  ok(tgRequests.burstchan === reqBefore.burstchan + 1, `an unchanged channel also stops after one page (${tgRequests.burstchan - reqBefore.burstchan} request)`);
+
+  await new Promise((r) => setTimeout(r, 1100));
+  out = await run({ GHRSS_TG_BASE: 'http://127.0.0.1:9' });
+  ok(/FETCH FAILED/.test(out), 'the network died (connection refused)');
+  const demoFail = tgFeed('tgdemo').articles;
+  ok(demoFail.length === 6 && demoFail.some((a) => a.link === 'https://t.me/demochan/109'), 'the failure path keeps every retained message');
+  const idxFail = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/index.json'), 'utf8'));
+  ok(idxFail.feeds.tgdemo.status.ok === false && (idxFail.feeds.tgdemo.status.consecutiveFailures || 0) >= 1, 'the crawl status records the failure');
+  tgNewMessage = null;
+  tgEdited108 = false;
 }
 console.log('id-migration matchers (unit)');
 {
