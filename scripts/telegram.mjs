@@ -122,6 +122,12 @@ export function tgParsePage(html) {
           });
         }
       }
+      for (const player of el.querySelectorAll('.tgme_widget_message_video_player')) {
+        if (player.querySelector('.tgme_widget_message_video')) continue;
+        const thumb = absUrl(bgUrl(player.querySelector('.tgme_widget_message_video_thumb')?.getAttribute('style')));
+        const duration = stripTgHtml(player.querySelector('.message_video_duration')?.textContent || '').slice(0, 12);
+        if (thumb || duration) msg.videos.push({ thumb, src: null, duration });
+      }
       const wp = el.querySelector('.tgme_widget_message_webpage');
       if (wp) {
         const a = wp.closest('a') || wp.querySelector('a');

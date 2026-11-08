@@ -45,6 +45,7 @@ const tgMsg = (channel, m) => `
 const tgText = (t) => `<div class="tgme_widget_message_text js-message_text" dir="auto">${t}</div>`;
 const tgPhoto = (u) => `<a class="tgme_widget_message_photo_wrap 1 2" href="#" style="width:653px;background-image:url('${u}')"><div class="tgme_widget_message_photo" style="padding-top:100%"></div></a>`;
 const tgVideo = `<a class="tgme_widget_message_video_player js-message_video_player" href="#"><i class="tgme_widget_message_video_thumb" style="background-image:url('https://cdn4.telesco.pe/file/vthumb.jpg')"></i><div class="tgme_widget_message_video_wrap" style="width:100px;padding-top:50%"><video src="https://cdn4.telesco.pe/file/v.mp4?token=expiring" class="tgme_widget_message_video js-message_video" width="100%" height="100%"></video></div><div class="message_video_play js-message_video_play"></div><time class="message_video_duration js-message_video_duration">0:21</time></a>`;
+const tgBigVideo = `<a class="tgme_widget_message_video_player not_supported js-message_video_player" href="https://t.me/bigchan/501"><i class="tgme_widget_message_video_thumb" style="background-image:url('https://cdn4.telesco.pe/file/vbigthumb.jpg')"></i><div class="tgme_widget_message_video_wrap" style="width:880px;padding-top:81.81%"></div><div class="message_video_play js-message_video_play"></div><time class="message_video_duration js-message_video_duration">1:05</time><div class="message_media_not_supported_wrap"><div class="message_media_not_supported"><div class="message_media_not_supported_label">Media is too big</div><span class="message_media_view_in_telegram">VIEW IN TELEGRAM</span></div></div></a>`;
 let tgNewMessage = null;
 let tgEdited108 = false;
 const tgRequests = {};
@@ -67,6 +68,10 @@ const tgChannels = () => {
     deepchan: {
       title: 'Deep Channel',
       messages: Array.from({ length: 9 }, (_, i) => ({ id: 309 - i, mins: 40 + i * 90, inner: tgText(`Deep message ${309 - i}`) })),
+    },
+    bigchan: {
+      title: 'Big Media Channel',
+      messages: [{ id: 501, mins: 90, inner: tgBigVideo }],
     },
   };
 };
@@ -490,6 +495,7 @@ console.log('run 15: telegram channels — every message is an article, images r
       { id: 'tgdemo', title: 'Demo Telegram', url: 'https://t.me/demochan' },
       { id: 'tgburst', url: 'https://t.me/burstchan' },
       { id: 'tgdeep', url: 'https://t.me/deepchan', maxPages: 2 },
+      { id: 'tgbig', url: 'https://t.me/bigchan' },
       { id: 'tgmissing', url: 'https://t.me/missingchan' },
     ],
   }, null, 2));
@@ -519,6 +525,10 @@ console.log('run 15: telegram channels — every message is an article, images r
   const deep15 = tgFeed('tgdeep').articles;
   ok(deep15.length === 6 && deep15.every((a) => Number(/(\d+)$/.exec(a.link)[1]) >= 304), 'maxPages=2 caps the walk at the newest 6 of 9 (the page budget)');
   ok(/page budget/.test(out) && /raise "maxPages" \(now 2\)/.test(out), 'the run log names the budget stop and the way out');
+  const big15 = tgFeed('tgbig').articles;
+  ok(big15.length === 1 && big15[0].title === 'Video (1:05)', `a too-big video (player without a <video> tag) still titles itself with the duration (${big15[0]?.title})`);
+  ok(big15[0].enclosures.length === 1 && big15[0].enclosures[0].url === 'https://cdn4.telesco.pe/file/vbigthumb.jpg' && big15[0].enclosures[0].type === 'image/thumbnail', 'the too-big video poster is carried as the row thumbnail');
+  ok(big15[0].content.includes('vbigthumb.jpg') && big15[0].content.includes('View on Telegram'), 'the too-big video poster is embedded in the body next to the post link');
   const miss15 = tgFeed('tgmissing').articles;
   ok(miss15.length === 0, 'a channel with no public preview stores nothing');
   const idx15 = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/index.json'), 'utf8'));
@@ -528,7 +538,7 @@ console.log('run 15: telegram channels — every message is an article, images r
   ok(idx15.feeds.tgburst.title === 'Burst Feed' && idx15.feeds.tgburst.origTitle === null, 'an untitled feed derives its title from the channel');
   ok(idx15.feeds.tgmissing.status.ok === false && /no public posts/.test(idx15.feeds.tgmissing.status.error || ''), 'a missing/private channel reports NO_POSTS in the crawl status');
   const all15tg = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/all-feeds.json'), 'utf8'));
-  ok(all15tg.articles.length === 5 + 12 + 6, `all-feeds.json carries every telegram article (${all15tg.articles.length})`);
+  ok(all15tg.articles.length === 5 + 12 + 6 + 1, `all-feeds.json carries every telegram article (${all15tg.articles.length})`);
   const demoBefore = Object.fromEntries(demo15.map((a) => [a.link, a.id]));
 
   console.log('run 16: telegram incremental — new + edited messages, overlap stop, failure keeps retained');
