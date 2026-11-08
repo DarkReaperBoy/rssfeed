@@ -652,7 +652,7 @@ function upgradeEmbeds(root, articleLink) {
       const a = document.createElement('a');
       a.href = articleLink; a.target = '_blank'; a.rel = 'noopener noreferrer';
       const poster = v.getAttribute('poster');
-      if (poster) { const img = document.createElement('img'); img.src = poster; img.alt = 'video'; img.loading = 'lazy'; a.appendChild(img); }
+      if (poster) { const img = document.createElement('img'); img.src = poster; img.alt = 'video'; img.loading = 'lazy'; img.className = 'video-fallback'; a.appendChild(img); }
       else a.textContent = 'Watch on Telegram';
       v.replaceWith(a);
     }, { once: true });
