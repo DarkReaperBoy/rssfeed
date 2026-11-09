@@ -157,9 +157,10 @@ function materializeFeedFlags(feedId, articles) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const FETCH_TIMEOUT_MS = Number(window.RSS_FETCH_TIMEOUT_MS) || 10000;
-async function fetchJson(url) {
+const CONSOLIDATED_TIMEOUT_MS = Number(window.RSS_CONSOLIDATED_TIMEOUT_MS) || Number(window.RSS_FETCH_TIMEOUT_MS) || 45000;
+async function fetchJson(url, timeoutMs = FETCH_TIMEOUT_MS) {
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
     const res = await fetch(url, { cache: 'no-cache', signal: ctrl.signal });
     if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
@@ -167,6 +168,30 @@ async function fetchJson(url) {
   } finally {
     clearTimeout(timer);
   }
+}
+async function fetchJsonGz(url, timeoutMs) {
+  if (typeof DecompressionStream !== 'function' || typeof Response !== 'function') return null;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${url}.gz`, { cache: 'no-cache', signal: ctrl.signal });
+    if (!res.ok) return null;
+    if (!res.body || typeof res.body.pipeThrough !== 'function') return null;
+    const text = await new Response(res.body.pipeThrough(new DecompressionStream('gzip'))).text();
+    return JSON.parse(text);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+async function fetchConsolidated() {
+  const t0 = Date.now();
+  const gz = await fetchJsonGz('data/all-feeds.json', CONSOLIDATED_TIMEOUT_MS);
+  if (gz) return gz;
+  const left = CONSOLIDATED_TIMEOUT_MS - (Date.now() - t0);
+  if (left < 500) return null;
+  return fetchJson('data/all-feeds.json', left);
 }
 async function loadFeed(feedId, force = false) {
 
@@ -1780,53 +1805,57 @@ function pruneReadState() {
   }
   if (dropped) saveRead();
 }
-async function loadConsolidatedIntoState() {
-  try {
-    const allData = await fetchJson('data/all-feeds.json');
-
-    if (!Array.isArray(allData?.articles) || !state.index?.feeds) return false;
-
-    const prevById = new Map();
-    for (const arts of state.feeds.values()) for (const a of arts) prevById.set(a.id, a);
-    const grouped = new Map();
-    for (const a of allData.articles) {
-      const feedId = a._feed;
-      if (!feedId) continue;
-      const old = prevById.get(a.id);
-      if (old && old.content === a.content && old.title === a.title && old.link === a.link
-        && old.summary === a.summary && (old.enclosures || []).length === (a.enclosures || []).length) {
-        a.fetchedAt = old.fetchedAt || a.fetchedAt;
+let consolidatedInFlight = null;
+function loadConsolidatedIntoState() {
+  if (!consolidatedInFlight) {
+    consolidatedInFlight = (async () => {
+      try {
+        const allData = await fetchConsolidated();
+        if (!Array.isArray(allData?.articles) || !state.index?.feeds) return false;
+        const prevById = new Map();
+        for (const arts of state.feeds.values()) for (const a of arts) prevById.set(a.id, a);
+        const grouped = new Map();
+        for (const a of allData.articles) {
+          const feedId = a._feed;
+          if (!feedId) continue;
+          const old = prevById.get(a.id);
+          if (old && old.content === a.content && old.title === a.title && old.link === a.link
+            && old.summary === a.summary && (old.enclosures || []).length === (a.enclosures || []).length) {
+            a.fetchedAt = old.fetchedAt || a.fetchedAt;
+          }
+          if (!grouped.has(feedId)) grouped.set(feedId, []);
+          grouped.get(feedId).push(a);
+        }
+        state.feeds = new Map();
+        for (const [feedId, arts] of grouped.entries()) {
+          materializeFeedFlags(feedId, arts);
+          state.feeds.set(feedId, arts);
+        }
+        for (const id of Object.keys(state.index.feeds)) {
+          if (!state.feeds.has(id)) state.feeds.set(id, []);
+          state.settled.add(id);
+        }
+        markFeedsChanged();
+        const feedsMeta = { ...state.index.feeds };
+        for (const [feedId, arts] of state.feeds.entries()) {
+          const meta = feedsMeta[feedId];
+          if (meta) {
+            const sorted = [...arts].sort((x, y) => y.date - x.date);
+            meta.count = arts.length;
+            meta.newest = sorted[0]?.date || meta.newest;
+            meta.oldest = sorted[sorted.length - 1]?.date || meta.oldest;
+          }
+        }
+        state.index = { ...state.index, feeds: feedsMeta };
+        state.failed.clear();
+        pruneReadState();
+        return true;
+      } catch {
+        return false;
       }
-      if (!grouped.has(feedId)) grouped.set(feedId, []);
-      grouped.get(feedId).push(a);
-    }
-    state.feeds = new Map();
-    for (const [feedId, arts] of grouped.entries()) {
-      materializeFeedFlags(feedId, arts);
-      state.feeds.set(feedId, arts);
-    }
-    for (const id of Object.keys(state.index.feeds)) {
-      if (!state.feeds.has(id)) state.feeds.set(id, []); 
-      state.settled.add(id);
-    }
-    markFeedsChanged();
-    const feedsMeta = { ...state.index.feeds };
-    for (const [feedId, arts] of state.feeds.entries()) {
-      const meta = feedsMeta[feedId];
-      if (meta) {
-        const sorted = [...arts].sort((x, y) => y.date - x.date);
-        meta.count = arts.length;
-        meta.newest = sorted[0]?.date || meta.newest;
-        meta.oldest = sorted[sorted.length - 1]?.date || meta.oldest;
-      }
-    }
-    state.index = { ...state.index, feeds: feedsMeta };
-    state.failed.clear();
-    pruneReadState();
-    return true;
-  } catch {
-    return false;
+    })().finally(() => { consolidatedInFlight = null; });
   }
+  return consolidatedInFlight;
 }
 
 async function boot() {
@@ -1862,7 +1891,6 @@ async function boot() {
   }
   try {
     state.index = await fetchJson('data/index.json');
-    await loadConsolidatedIntoState();
   } catch {
     state.index = null;
   }
@@ -1870,6 +1898,10 @@ async function boot() {
   syncControls();
   renderAll();
   flashUpdated();
+  if (state.index) {
+    await loadConsolidatedIntoState();
+    renderAll();
+  }
   await ensureLoadedForScope();
   startPolling();
 

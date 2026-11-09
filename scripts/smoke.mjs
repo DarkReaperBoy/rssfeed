@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { JSDOM } from 'jsdom';
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -1002,6 +1003,94 @@ console.log('an explicit un-read beats a backend markRead flag — even after a 
   await settle(600);
   ok(badge6() === TOTAL - 1, 'and stays read — no seesaw');
   dom6.window.close();
+}
+console.log('transport: the consolidated payload rides a gzipped artifact when the browser can inflate it');
+{
+  const domG = new JSDOM(html, { url: 'https://example.test/', runScripts: 'outside-only', pretendToBeVisual: true });
+  const wG = domG.window;
+  wG.DecompressionStream = DecompressionStream;
+  wG.Response = Response;
+  const reqs = [];
+  wG.fetch = async (url) => {
+    const p = String(url).split('?')[0];
+    reqs.push(p);
+    if (p === 'config.json') return { ok: true, status: 200, json: async () => structuredClone(config) };
+    if (p === 'data/index.json') return { ok: true, status: 200, json: async () => structuredClone(index) };
+    if (p === 'data/all-feeds.json.gz') return { ok: true, status: 200, body: new Blob([zlib.gzipSync(JSON.stringify(allFeeds))]).stream() };
+    return { ok: false, status: 404, statusText: 'Not Found', json: async () => { throw new Error('404'); } };
+  };
+  wG.eval(appSrc);
+  await settle(1200);
+  const gzCalls = reqs.filter((p) => p === 'data/all-feeds.json.gz').length;
+  ok(gzCalls === 1, `the gz artifact is fetched exactly once (${gzCalls})`);
+  ok(!reqs.includes('data/all-feeds.json'), 'the plain consolidated file is never touched when the gz loads (the multi-megabyte wire cost is gone)');
+  const rowsG = wG.document.querySelectorAll('#list .row').length;
+  ok(rowsG >= 5, `articles render from the inflated payload (${rowsG} rows)`);
+  ok(Number(wG.document.querySelector('#badge-all-items').textContent) === TOTAL, 'unread counts survive the gz path');
+  domG.window.close();
+}
+console.log('transport: a missing gz artifact falls back to the plain consolidated file');
+{
+  const domM = new JSDOM(html, { url: 'https://example.test/', runScripts: 'outside-only', pretendToBeVisual: true });
+  const wM = domM.window;
+  wM.DecompressionStream = DecompressionStream;
+  wM.Response = Response;
+  const reqs = [];
+  wM.fetch = async (url) => {
+    const p = String(url).split('?')[0];
+    reqs.push(p);
+    if (p === 'config.json') return { ok: true, status: 200, json: async () => structuredClone(config) };
+    if (p === 'data/index.json') return { ok: true, status: 200, json: async () => structuredClone(index) };
+    if (p === 'data/all-feeds.json.gz') return { ok: false, status: 404, statusText: 'Not Found', json: async () => { throw new Error('404'); } };
+    if (p === 'data/all-feeds.json') return { ok: true, status: 200, json: async () => structuredClone(allFeeds) };
+    return { ok: false, status: 404, statusText: 'Not Found', json: async () => { throw new Error('404'); } };
+  };
+  wM.eval(appSrc);
+  await settle(1200);
+  ok(reqs.includes('data/all-feeds.json.gz') && reqs.includes('data/all-feeds.json'), 'a 404 on the gz falls through to the plain file (transition-safe)');
+  ok(wM.document.querySelectorAll('#list .row').length >= 5, 'articles still render from the plain fallback');
+  domM.window.close();
+}
+console.log('transport: a corrupt gz artifact falls back to the plain consolidated file');
+{
+  const domC = new JSDOM(html, { url: 'https://example.test/', runScripts: 'outside-only', pretendToBeVisual: true });
+  const wC = domC.window;
+  wC.DecompressionStream = DecompressionStream;
+  wC.Response = Response;
+  wC.fetch = async (url) => {
+    const p = String(url).split('?')[0];
+    if (p === 'config.json') return { ok: true, status: 200, json: async () => structuredClone(config) };
+    if (p === 'data/index.json') return { ok: true, status: 200, json: async () => structuredClone(index) };
+    if (p === 'data/all-feeds.json.gz') return { ok: true, status: 200, body: new Blob([Buffer.from('this is not a gzip stream')]).stream() };
+    if (p === 'data/all-feeds.json') return { ok: true, status: 200, json: async () => structuredClone(allFeeds) };
+    return { ok: false, status: 404, statusText: 'Not Found', json: async () => { throw new Error('404'); } };
+  };
+  wC.eval(appSrc);
+  await settle(1200);
+  ok(wC.document.querySelectorAll('#list .row').length >= 5, 'a gz that fails to inflate never wedges the boot — the plain file answers');
+  domC.window.close();
+}
+console.log('paint: the tree paints from index.json while the consolidated file is still in flight');
+{
+  const domP = new JSDOM(html, { url: 'https://example.test/', runScripts: 'outside-only', pretendToBeVisual: true });
+  const wP = domP.window;
+  let consolidatedCalls = 0;
+  wP.fetch = async (url) => {
+    const p = String(url).split('?')[0];
+    if (p === 'config.json') return { ok: true, status: 200, json: async () => structuredClone(config) };
+    if (p === 'data/index.json') return { ok: true, status: 200, json: async () => structuredClone(index) };
+    if (p === 'data/all-feeds.json') { consolidatedCalls++; await settle(900); return { ok: true, status: 200, json: async () => structuredClone(allFeeds) }; }
+    return { ok: false, status: 404, statusText: 'Not Found', json: async () => { throw new Error('404'); } };
+  };
+  wP.eval(appSrc);
+  await settle(350);
+  const treeEarly = wP.document.querySelectorAll('#tree .tree-item').length;
+  ok(treeEarly >= 4, `sidebar items render before the payload lands (${treeEarly})`);
+  ok(wP.document.querySelector('#empty h3')?.textContent === 'Loading articles…', 'the empty state says it is loading, not that there is nothing');
+  await settle(1300);
+  ok(wP.document.querySelectorAll('#list .row').length >= 5, 'rows render once the payload lands');
+  ok(consolidatedCalls === 1, `exactly one consolidated fetch for the whole boot (${consolidatedCalls})`);
+  domP.window.close();
 }
 console.log('degraded network: hung feed fetches never wedge the UI');
 {
