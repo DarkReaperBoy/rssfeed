@@ -1240,11 +1240,12 @@ console.log('Telegram channel scraping → articles (telegram.mjs)');
   const textMsg = msgHtml(102, `<div class="tgme_widget_message_text js-message_text" dir="auto">Plain announcement<br/>two lines</div>`, '2026-11-06T08:00:00+00:00');
   const photoOnlyMsg = msgHtml(101, `<a class="tgme_widget_message_photo_wrap 9 8" href="https://t.me/demochan/101" style="width:400px;background-image:url('https://cdn4.telesco.pe/file/solo.jpg')"><div class="tgme_widget_message_photo" style="padding-top:75%"></div></a>`, '2026-11-05T07:00:00+00:00');
   const webpageMsg = msgHtml(100, `<div class="tgme_widget_message_text js-message_text" dir="auto">read this</div>
-        <div class="tgme_widget_message_webpage_wrap"><a class="tgme_widget_message_webpage" href="https://example.com/story">
-          <div class="tgme_widget_message_webpage_site">Example News</div>
-          <div class="tgme_widget_message_webpage_title">A big story</div>
-          <div class="tgme_widget_message_webpage_description">What happened, in short</div>
-        </a></div>`, '2026-11-04T06:00:00+00:00');
+        <a class="tgme_widget_message_link_preview" href="https://example.com/story">
+          <div class="link_preview_site_name accent_color" dir="auto">Example News</div>
+          <i class="link_preview_image" style="background-image:url('https://cdn4.telesco.pe/file/lp.jpg');padding-top:52.375%"></i>
+          <div class="link_preview_title" dir="auto">A big story</div>
+          <div class="link_preview_description" dir="auto">What happened, in short</div>
+        </a>`, '2026-11-04T06:00:00+00:00');
   const forwardedMsg = msgHtml(98, `<div class="tgme_widget_message_forwarded_from"><span class="copyonly">Forwarded from </span><a href="https://t.me/other">Other Channel</a></div>
         <div class="tgme_widget_message_text js-message_text" dir="auto">shared post body</div><span class="tgme_widget_message_signature">Demo Admin</span>`, '2026-11-03T05:00:00+00:00');
   const serviceMsg = `<div class="tgme_widget_message_wrap"><div class="tgme_widget_message service_message message_service_condensed">Channel created</div></div>`;
@@ -1269,6 +1270,7 @@ console.log('Telegram channel scraping → articles (telegram.mjs)');
   ok(m103.videos.length === 1 && m103.videos[0].thumb === 'https://cdn4.telesco.pe/file/vthumb.jpg' && m103.videos[0].duration === '0:21', 'video thumbs and durations are captured');
   const m100 = page.messages.find((m) => m.id === 100);
   ok(m100.webpage?.href === 'https://example.com/story' && m100.webpage?.title === 'A big story' && m100.webpage?.site === 'Example News' && m100.webpage?.description === 'What happened, in short', 'link previews carry site/title/description/href');
+  ok(m100.webpage?.photo === 'https://cdn4.telesco.pe/file/lp.jpg', 'the preview image is pulled out of the background-image style');
   const m98 = page.messages.find((m) => m.id === 98);
   ok(m98.forwarded === 'Forwarded from Other Channel' && m98.signature === 'Demo Admin', 'forwarding note and author signature are captured');
 
