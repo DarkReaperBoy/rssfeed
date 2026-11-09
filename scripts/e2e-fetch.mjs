@@ -150,17 +150,41 @@ const ytChannels = {
   ORDER2: { title: 'Oldest-First Channel', page: 'UCORDER2', entries: [{ vid: 'OLD2', title: 'Ancient video', hoursAgo: 300 }, { vid: 'NEW2', title: 'Fresh video', hoursAgo: 30 }] },
   NOTHUMB: { title: 'Thumbless Channel', page: 'UCNOTHUMB', entries: [{ vid: 'NOT1', title: 'Thumbless video', hoursAgo: 20, noThumb: true }] },
   LATEST1: { title: 'Shorts-Led Channel', page: 'UCLATEST1', entries: [{ vid: 'SHORTX', title: 'A short', hoursAgo: 3, link: 'https://www.youtube.com/shorts/S1' }, { vid: 'VIDOK', title: 'A real video', hoursAgo: 40 }] },
+  AVONE: { title: 'Avatar One Channel', page: 'UCAV1', etag: '"av1v1"', entries: [{ vid: 'AVA1', title: 'Avatar one video', hoursAgo: 10 }, { vid: 'AVA0', title: 'Avatar one old video', hoursAgo: 300 }] },
+  AVTWO: { title: 'Avatar Two Channel', page: 'UCAV2', entries: [{ vid: 'AVB1', title: 'Avatar two video', hoursAgo: 9 }] },
+  AVNOPAGE: { title: 'No Page Channel', page: 'UCNOPAGE', entries: [{ vid: 'AVN1', title: 'No page video', hoursAgo: 8 }] },
+  AVSHORTS: { title: 'Avatar Shorts Channel', page: 'UCAVS', entries: [{ vid: 'AVS1', title: 'A short', hoursAgo: 3, link: 'https://www.youtube.com/shorts/S9' }, { vid: 'AVS2', title: 'A real video', hoursAgo: 40 }] },
+  AVPLAY: { title: 'Playlist Channel', alt: 'https://www.youtube.com/playlist?list=PLAV1', entries: [{ vid: 'AVP1', title: 'Playlist video', hoursAgo: 7 }] },
+  AVDEAD: { title: 'Dead Avatar Channel', page: 'UCAVDEAD', entries: [{ vid: 'AVD1', title: 'Dead channel video', hoursAgo: 6 }] },
 };
-const ytHardFail = new Set(['HFONE', 'HFTWO', 'HFTHREE']);
+const ytHardFail = new Set(['HFONE', 'HFTWO', 'HFTHREE', 'AVDEAD']);
 const ytFirstFail = new Set(['RETRY1', 'AFTER1']);
 const ytHits = {};
 let ytBurstViolations = 0;
 let ytLastHit = 0;
 const YT_BURST_MS = 60;
+const ytChannelPages = {
+  UCAV1: 'https://yt3.googleusercontent.com/yti/AAA/av1=s900-c-k-c0x00ffffff-no-rj',
+  UCAV2: 'https://yt3.googleusercontent.com/yti/BBB/av2=s900-c-k-c0x00ffffff-no-rj',
+  UCAVS: 'https://yt3.googleusercontent.com/yti/CCC/shorts=s900-c-k-c0x00ffffff-no-rj',
+};
+const ytPageHits = {};
 const ytRoutes = (req, res) => {
   const u = new URL(req.url, 'http://www.youtube.com');
+  if (u.pathname.startsWith('/channel/')) {
+    const page = u.pathname.slice('/channel/'.length).replace(/\/+$/, '');
+    ytPageHits[page] = (ytPageHits[page] || 0) + 1;
+    const img = ytChannelPages[page];
+    if (!img) { res.writeHead(404); res.end(); return true; }
+    const metaTag = page === 'UCAV2'
+      ? `<meta content="${img}" property="og:image">`
+      : `<meta property="og:image" content="${img}">`;
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(`<!DOCTYPE html><html><head><title>${page}</title>${metaTag}</head><body><div>channel</div></body></html>`);
+    return true;
+  }
   if (u.pathname !== '/feeds/videos.xml') return false;
-  const cid = u.searchParams.get('channel_id');
+  const cid = u.searchParams.get('channel_id') || u.searchParams.get('playlist_id');
   if (!cid) return false;
   ytHits[cid] = (ytHits[cid] || 0) + 1;
   const since = Date.now() - ytLastHit;
@@ -169,18 +193,21 @@ const ytRoutes = (req, res) => {
     ytBurstViolations++;
     res.writeHead(404); res.end(); return true;
   }
-  if (ytHardFail.has(cid) || (ytFirstFail.has(cid) && ytHits[cid] === 1) || !ytChannels[cid]) {
+  const chan = ytChannels[cid];
+  if (ytHardFail.has(cid) || (ytFirstFail.has(cid) && ytHits[cid] === 1) || !chan) {
     res.writeHead(404); res.end(); return true;
   }
-  const chan = ytChannels[cid];
-  res.writeHead(200, { 'Content-Type': 'application/atom+xml; charset=utf-8' });
+  if (chan.etag && req.headers['if-none-match'] === chan.etag) { res.writeHead(304); res.end(); return true; }
+  const heads = { 'Content-Type': 'application/atom+xml; charset=utf-8' };
+  if (chan.etag) heads.ETag = chan.etag;
+  res.writeHead(200, heads);
   res.end(`<?xml version="1.0" encoding="UTF-8"?>
 <feed xmlns:yt="http://www.youtube.com/xml/schemas/2015" xmlns:media="http://search.yahoo.com/mrss/" xmlns="http://www.w3.org/2005/Atom">
  <link rel="self" href="http://www.youtube.com/feeds/videos.xml?channel_id=${cid}"/>
  <id>yt:channel:${cid}</id>
  <yt:channelId>${cid}</yt:channelId>
  <title>${chan.title}</title>
- <link rel="alternate" href="https://www.youtube.com/channel/${chan.page}"/>
+ <link rel="alternate" href="${chan.alt || `https://www.youtube.com/channel/${chan.page}`}"/>
  <author>
   <name>${chan.title}</name>
   <uri>https://www.youtube.com/channel/${chan.page}</uri>
@@ -940,27 +967,67 @@ console.log('run 29: YouTube feeds ride their own spaced lane — no burst, retr
   const plainArts = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/feeds/yt-plain-thumb.json'), 'utf8')).articles;
   ok(plainArts[0]?.enclosures?.some((e) => e.url === 'https://plain.test/thumb-1.jpg' && e.type === 'image/thumbnail'), 'item thumbnails still ride along as enclosures for any feed');
 }
-console.log('run 30: a YouTube feed with no channel image icons itself from the newest video thumbnail');
+console.log('run 30: YouTube feeds icon from the channel avatar — never a video thumbnail');
 {
   const YT_BASE = `http://127.0.0.1:${port}/feeds`;
   fs.writeFileSync(path.join(SANDBOX, 'config.json'), JSON.stringify({
     settings: { retentionDays: 30, fullTextDefault: false },
     feeds: [
-      { id: 'yt-demo', title: 'YT Demo', url: `${YT_BASE}/videos.xml?channel_id=DEMOA` },
-      { id: 'yt-order', title: 'YT Order', url: `${YT_BASE}/videos.xml?channel_id=ORDER2` },
-      { id: 'yt-nothumb', title: 'YT NoThumb', url: `${YT_BASE}/videos.xml?channel_id=NOTHUMB` },
-      { id: 'yt-shorts-led', title: 'YT Shorts-Led', url: `${YT_BASE}/videos.xml?channel_id=LATEST1` },
+      { id: 'av1', title: 'Avatar One', url: `${YT_BASE}/videos.xml?channel_id=AVONE` },
+      { id: 'av2', title: 'Avatar Two', url: `${YT_BASE}/videos.xml?channel_id=AVTWO` },
+      { id: 'av-nopage', title: 'No Page', url: `${YT_BASE}/videos.xml?channel_id=AVNOPAGE` },
+      { id: 'av-shorts', title: 'Shorts-Led', url: `${YT_BASE}/videos.xml?channel_id=AVSHORTS` },
+      { id: 'av-playlist', title: 'Playlist Feed', url: `${YT_BASE}/videos.xml?playlist_id=AVPLAY` },
     ],
   }, null, 2));
   out = await run({ GHRSS_YT_BASE: YT_BASE, GHRSS_YT_THROTTLE_MS: '120', GHRSS_YT_RETRY_DELAYS: '60,90' });
   const idx30 = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/index.json'), 'utf8'));
-  ok(idx30.feeds['yt-demo'].image === 'https://i.ytimg.com/vi/NEWA/mqdefault.jpg', `an iconless YouTube feed gains its icon on the next successful fetch — deployed data heals itself (${idx30.feeds['yt-demo'].image})`);
-  ok(idx30.feeds['yt-order'].image === 'https://i.ytimg.com/vi/NEW2/mqdefault.jpg', `the newest item wins by date, not by list position — newest-last ordering picks the fresh thumb (${idx30.feeds['yt-order'].image})`);
-  ok(idx30.feeds['yt-nothumb'].image === null && idx30.feeds['yt-nothumb'].status.ok === true, `a thumbnail-less channel stays iconless, no placeholder invented (${idx30.feeds['yt-nothumb'].image})`);
-  const shortsFeed = idx30.feeds['yt-shorts-led'];
-  ok(shortsFeed.image === 'https://i.ytimg.com/vi/VIDOK/mqdefault.jpg', `a dropped short never becomes the icon — the newest real video does (${shortsFeed.image})`);
-  ok(shortsFeed.count === 1, `the short itself is dropped from the articles (${shortsFeed.count})`);
-  ok(idx30.feeds['yt-demo'].site === 'https://www.youtube.com/channel/UCDEMOA', 'the site survives the icon pass unchanged');
+  ok(idx30.feeds.av1.image === 'https://yt3.googleusercontent.com/yti/AAA/av1=s96-c-k-c0x00ffffff-no-rj', `the channel avatar becomes the icon, downscaled to 96px (${idx30.feeds.av1.image})`);
+  ok(idx30.feeds.av2.image === 'https://yt3.googleusercontent.com/yti/BBB/av2=s96-c-k-c0x00ffffff-no-rj', `attribute order in the page meta does not matter (${idx30.feeds.av2.image})`);
+  ok(idx30.feeds['av-nopage'].image === null && idx30.feeds['av-nopage'].status.ok === true, `a channel page that 404s leaves the feed healthy and iconless — the reader falls back to the classic YouTube logo (${idx30.feeds['av-nopage'].image})`);
+  ok(idx30.feeds['av-shorts'].image === 'https://yt3.googleusercontent.com/yti/CCC/shorts=s96-c-k-c0x00ffffff-no-rj', `a shorts-led channel still gets its real avatar, never a video thumbnail (${idx30.feeds['av-shorts'].image})`);
+  ok(idx30.feeds['av-playlist'].image === null, `playlist feeds never scrape a playlist thumbnail as the icon (${idx30.feeds['av-playlist'].image})`);
+  ok(!Object.values(idx30.feeds).some((f) => /i\d?\.ytimg\.com\/vi\//.test(String(f?.image))), 'no feed anywhere carries a video-thumbnail icon');
+  ok(ytPageHits.UCAV1 === 1 && ytPageHits.UCAV2 === 1, `one channel-page fetch per iconless feed (${ytPageHits.UCAV1 || 0}/${ytPageHits.UCAV2 || 0})`);
+  ok(!ytPageHits.UCAVDEAD, `no channel-page fetch for feeds that failed their own fetch (${ytPageHits.UCAVDEAD || 0})`);
+}
+console.log('run 31: deployed thumbnail icons heal to avatars — even on a 304, and cached avatars never refetch');
+{
+  const YT_BASE = `http://127.0.0.1:${port}/feeds`;
+  const idxPath = path.join(SANDBOX, 'data/index.json');
+  const idxSeed = JSON.parse(fs.readFileSync(idxPath, 'utf8'));
+  idxSeed.feeds.av1.image = 'https://i1.ytimg.com/vi/LEGACY/mqdefault.jpg';
+  fs.writeFileSync(idxPath, JSON.stringify(idxSeed));
+  const before31 = { ...ytPageHits };
+  out = await run({ GHRSS_YT_BASE: YT_BASE, GHRSS_YT_THROTTLE_MS: '120', GHRSS_YT_RETRY_DELAYS: '60,90' });
+  const idx31 = JSON.parse(fs.readFileSync(idxPath, 'utf8'));
+  ok(new RegExp('\\[av1\\] not modified').test(out), 'the feed itself answered 304 — the icon heals without refetching the feed');
+  ok(idx31.feeds.av1.image === 'https://yt3.googleusercontent.com/yti/AAA/av1=s96-c-k-c0x00ffffff-no-rj', `a legacy video-thumbnail icon heals to the channel avatar on a not-modified run (${idx31.feeds.av1.image})`);
+  ok(idx31.feeds.av1.status.ok === true, 'the healing 304 run stays green');
+  ok((ytPageHits.UCAV1 || 0) === (before31.UCAV1 || 0) + 1, `the heal fetched the channel page exactly once (${(ytPageHits.UCAV1 || 0) - (before31.UCAV1 || 0)})`);
+  ok((ytPageHits.UCAV2 || 0) === (before31.UCAV2 || 0), `an already-good avatar is never refetched (${ytPageHits.UCAV2} total)`);
+}
+console.log('run 32: a dead YouTube channel drops its legacy thumbnail without paying for a page fetch');
+{
+  const YT_BASE = `http://127.0.0.1:${port}/feeds`;
+  const idxPath = path.join(SANDBOX, 'data/index.json');
+  const idxSeed = JSON.parse(fs.readFileSync(idxPath, 'utf8'));
+  idxSeed.feeds['av-dead'] = {
+    ...(idxSeed.feeds['av-dead'] || { title: 'Dead One', site: 'https://www.youtube.com/channel/UCAVDEAD', xml: `${YT_BASE}/videos.xml?channel_id=AVDEAD`, folder: null, folders: [], count: 0, newest: null, oldest: null }),
+    image: 'https://i2.ytimg.com/vi/OLDDEAD/mqdefault.jpg',
+  };
+  fs.writeFileSync(idxPath, JSON.stringify(idxSeed));
+  fs.writeFileSync(path.join(SANDBOX, 'config.json'), JSON.stringify({
+    settings: { retentionDays: 30, fullTextDefault: false },
+    feeds: [
+      { id: 'av-dead', title: 'Dead One', url: `${YT_BASE}/videos.xml?channel_id=AVDEAD` },
+    ],
+  }, null, 2));
+  out = await run({ GHRSS_YT_BASE: YT_BASE, GHRSS_YT_THROTTLE_MS: '120', GHRSS_YT_RETRY_DELAYS: '60,90' });
+  const idx32 = JSON.parse(fs.readFileSync(idxPath, 'utf8'));
+  ok(idx32.feeds['av-dead'].status.ok === false, 'the dead channel fails its own fetch');
+  ok(idx32.feeds['av-dead'].image === null, `its legacy thumbnail icon is stripped, not kept (${idx32.feeds['av-dead'].image})`);
+  ok(!ytPageHits.UCAVDEAD, `a failing feed never pays for a channel-page fetch (${ytPageHits.UCAVDEAD || 0})`);
 }
 console.log('id-migration matchers (unit)');
 {

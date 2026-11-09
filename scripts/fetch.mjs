@@ -294,20 +294,6 @@ function feedMetaFor(feed, prevMeta, parsed = null) {
   const image = httpOr(parsed?.image?.url || parsed?.icon || parsed?.logo, httpOr(prevMeta?.image, null));
   return { title, origTitle, site, xml: feed.url || null, image };
 }
-function newestItemThumb(parsed) {
-  let best = null;
-  let bestDate = -Infinity;
-  for (const item of parsed?.items || []) {
-    const t = item?.mediaThumbnail?.$?.url
-      || (Array.isArray(item?.mediaGroup?.['media:thumbnail']) ? item.mediaGroup['media:thumbnail'][0]?.$?.url : item?.mediaGroup?.['media:thumbnail']?.$?.url)
-      || null;
-    if (!t) continue;
-    if (isShortItem(item.link, item.title, item.contentSnippet || '')) continue;
-    const d = pickDate(item) ?? -Infinity;
-    if (d >= bestDate) { bestDate = d; best = String(t); }
-  }
-  return httpOr(best, null);
-}
 function summarizeFeed(feed, articles) {
   const sorted = [...articles].sort((a, b) => b.date - a.date);
   const folders = feedFolders(feed);
@@ -471,6 +457,44 @@ async function ytThrottle() {
   ytLastReq = Date.now();
 }
 let ytThrottleMisses = 0;
+// YouTube icons: the channel's own avatar, scraped from the channel page's
+// og:image and downscaled to favicon size on Google's resizable yt3 CDN —
+// a video thumbnail is never the channel's face. The value caches in feed
+// meta, so an iconless feed costs one extra (throttled) page fetch once;
+// legacy thumbnail icons from earlier runs are retired wherever they surface.
+const YT_THUMB_ICON_RE = /^https?:\/\/i\d*\.ytimg\.com\/vi\//i;
+const YT_CHANNEL_PAGE_RE = /^https?:\/\/(?:www\.|m\.)?youtube\.com\/(?:channel\/|@|user\/|c\/)/i;
+const YT_AVATAR_HOST_RE = /^https?:\/\/yt[23]\.(?:googleusercontent|ggpht)\.com\//i;
+const ytAvatarPageUrl = (u) => {
+  if (!YT_TEST_BASE) return u;
+  try { return new URL(YT_TEST_BASE).origin + new URL(u).pathname; } catch { return u; }
+};
+const downscaleYtAvatar = (u) => (YT_AVATAR_HOST_RE.test(u) ? String(u).replace(/=s\d+/, '=s96') : u);
+function ogImageUrl(html) {
+  const m = /<meta[^>]+property=["']og:image["'][^>]*content=["']([^"']+)["']/i.exec(html)
+    || /<meta[^>]+content=["']([^"']+)["'][^>]*property=["']og:image["']/i.exec(html);
+  return m ? m[1] : null;
+}
+async function ytChannelAvatar(channelUrl) {
+  await ytThrottle();
+  const res = await fetch(ytAvatarPageUrl(channelUrl), {
+    headers: { 'User-Agent': UA, Accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8' },
+    signal: AbortSignal.timeout(25000),
+    redirect: 'follow',
+  });
+  if (!res.ok) return null;
+  const type = res.headers.get('content-type') || '';
+  if (type && !/html/i.test(type)) return null;
+  const html = (await res.text()).slice(0, 262144);
+  const og = ogImageUrl(html);
+  return og && /^https?:\/\//i.test(og) ? downscaleYtAvatar(og) : null;
+}
+async function ytHealIcon(fmeta, channelUrl) {
+  if (fmeta.image && !YT_THUMB_ICON_RE.test(fmeta.image)) return;
+  fmeta.image = null;
+  if (!channelUrl || !YT_CHANNEL_PAGE_RE.test(channelUrl)) return;
+  try { fmeta.image = await ytChannelAvatar(channelUrl); } catch { fmeta.image = null; }
+}
 
 const tgDoFetch = async (url) => {
   await tgThrottle();
@@ -946,8 +970,10 @@ async function main() {
           feedBlocks,
           cf: cList,
         });
+        const fmeta304 = feedMetaFor(feed, prevMeta);
+        if (ytLike) await ytHealIcon(fmeta304, fmeta304.site);
         await fs.writeFile(file, JSON.stringify({ articles: kept }));
-        index.feeds[feed.id] = { ...summarizeFeed({ ...feed, ...feedMetaFor(feed, prevMeta) }, kept), status };
+        index.feeds[feed.id] = { ...summarizeFeed({ ...feed, ...fmeta304 }, kept), status };
         written.set(feed.id, kept);
         console.log(`[${feed.id}] not modified — keeping ${kept.length} articles${cfgHidden ? ` (dropped ${cfgHidden} by config filter)` : ''}`);
         return;
@@ -966,8 +992,10 @@ async function main() {
       status.consecutiveFailures = (prevStatus.consecutiveFailures || 0) + 1;
       const kept = keepRetained().filter(inWindow);
       await fs.writeFile(file, JSON.stringify({ articles: kept }));
+      const fmetaFail = feedMetaFor(feed, prevMeta);
+      if (ytLike && fmetaFail.image && YT_THUMB_ICON_RE.test(fmetaFail.image)) fmetaFail.image = null;
       index.feeds[feed.id] = {
-        ...summarizeFeed({ ...feed, ...feedMetaFor(feed, prevMeta) }, kept),
+        ...summarizeFeed({ ...feed, ...fmetaFail }, kept),
         status,
       };
       written.set(feed.id, kept);
@@ -984,8 +1012,10 @@ async function main() {
       status.consecutiveFailures = (prevStatus.consecutiveFailures || 0) + 1;
       let kept = keepRetained().filter(inWindow);
       await fs.writeFile(file, JSON.stringify({ articles: kept }));
+      const fmetaParse = feedMetaFor(feed, prevMeta);
+      if (ytLike && fmetaParse.image && YT_THUMB_ICON_RE.test(fmetaParse.image)) fmetaParse.image = null;
       index.feeds[feed.id] = {
-        ...summarizeFeed({ ...feed, ...feedMetaFor(feed, prevMeta) }, kept),
+        ...summarizeFeed({ ...feed, ...fmetaParse }, kept),
         status,
       };
       written.set(feed.id, kept);
@@ -998,7 +1028,7 @@ async function main() {
     status.error = null;
     if (ytLike) ytThrottleMisses = 0;
     const fmeta = feedMetaFor(feed, prevMeta, parsed);
-    if (ytLike && !fmeta.image) fmeta.image = newestItemThumb(parsed);
+    if (ytLike) await ytHealIcon(fmeta, httpOr(parsed?.link));
     const wantText = feed.fullText ?? fullTextDefault;
     let textBudget = wantText ? TEXT_EXTRACT_BUDGET : 0;
     const ytShorts = isYouTubeLike(feed.url) && (feed.dropShorts ?? dropShortsDefault);
