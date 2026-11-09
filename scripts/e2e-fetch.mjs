@@ -155,6 +155,7 @@ const ytChannels = {
   AVNOPAGE: { title: 'No Page Channel', page: 'UCNOPAGE', entries: [{ vid: 'AVN1', title: 'No page video', hoursAgo: 8 }] },
   AVSHORTS: { title: 'Avatar Shorts Channel', page: 'UCAVS', entries: [{ vid: 'AVS1', title: 'A short', hoursAgo: 3, link: 'https://www.youtube.com/shorts/S9' }, { vid: 'AVS2', title: 'A real video', hoursAgo: 40 }] },
   AVPLAY: { title: 'Playlist Channel', alt: 'https://www.youtube.com/playlist?list=PLAV1', entries: [{ vid: 'AVP1', title: 'Playlist video', hoursAgo: 7 }] },
+  AVBIG: { title: 'Avatar Big Channel', page: 'UCBIG', entries: [{ vid: 'AVG1', title: 'Big page video', hoursAgo: 5 }] },
   AVDEAD: { title: 'Dead Avatar Channel', page: 'UCAVDEAD', entries: [{ vid: 'AVD1', title: 'Dead channel video', hoursAgo: 6 }] },
 };
 const ytHardFail = new Set(['HFONE', 'HFTWO', 'HFTHREE', 'AVDEAD']);
@@ -167,7 +168,9 @@ const ytChannelPages = {
   UCAV1: 'https://yt3.googleusercontent.com/yti/AAA/av1=s900-c-k-c0x00ffffff-no-rj',
   UCAV2: 'https://yt3.googleusercontent.com/yti/BBB/av2=s900-c-k-c0x00ffffff-no-rj',
   UCAVS: 'https://yt3.googleusercontent.com/yti/CCC/shorts=s900-c-k-c0x00ffffff-no-rj',
+  UCBIG: 'https://yt3.googleusercontent.com/yti/BIG/avbig=s900-c-k-c0x00ffffff-no-rj',
 };
+const ytBigPageFiller = 'x'.repeat(917504);
 const ytPageHits = {};
 const ytRoutes = (req, res) => {
   const u = new URL(req.url, 'http://www.youtube.com');
@@ -179,8 +182,9 @@ const ytRoutes = (req, res) => {
     const metaTag = page === 'UCAV2'
       ? `<meta content="${img}" property="og:image">`
       : `<meta property="og:image" content="${img}">`;
+    const headPad = page === 'UCBIG' ? `<script>var filler="${ytBigPageFiller}";</script>` : '';
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-    res.end(`<!DOCTYPE html><html><head><title>${page}</title>${metaTag}</head><body><div>channel</div></body></html>`);
+    res.end(`<!DOCTYPE html><html><head><title>${page}</title>${headPad}${metaTag}</head><body><div>channel</div></body></html>`);
     return true;
   }
   if (u.pathname !== '/feeds/videos.xml') return false;
@@ -978,6 +982,7 @@ console.log('run 30: YouTube feeds icon from the channel avatar — never a vide
       { id: 'av-nopage', title: 'No Page', url: `${YT_BASE}/videos.xml?channel_id=AVNOPAGE` },
       { id: 'av-shorts', title: 'Shorts-Led', url: `${YT_BASE}/videos.xml?channel_id=AVSHORTS` },
       { id: 'av-playlist', title: 'Playlist Feed', url: `${YT_BASE}/videos.xml?playlist_id=AVPLAY` },
+      { id: 'av-big', title: 'Avatar Big', url: `${YT_BASE}/videos.xml?channel_id=AVBIG` },
     ],
   }, null, 2));
   out = await run({ GHRSS_YT_BASE: YT_BASE, GHRSS_YT_THROTTLE_MS: '120', GHRSS_YT_RETRY_DELAYS: '60,90' });
@@ -987,6 +992,8 @@ console.log('run 30: YouTube feeds icon from the channel avatar — never a vide
   ok(idx30.feeds['av-nopage'].image === null && idx30.feeds['av-nopage'].status.ok === true, `a channel page that 404s leaves the feed healthy and iconless — the reader falls back to the classic YouTube logo (${idx30.feeds['av-nopage'].image})`);
   ok(idx30.feeds['av-shorts'].image === 'https://yt3.googleusercontent.com/yti/CCC/shorts=s96-c-k-c0x00ffffff-no-rj', `a shorts-led channel still gets its real avatar, never a video thumbnail (${idx30.feeds['av-shorts'].image})`);
   ok(idx30.feeds['av-playlist'].image === null, `playlist feeds never scrape a playlist thumbnail as the icon (${idx30.feeds['av-playlist'].image})`);
+  ok(idx30.feeds['av-big'].image === 'https://yt3.googleusercontent.com/yti/BIG/avbig=s96-c-k-c0x00ffffff-no-rj', `the avatar is found even buried ~900 KB deep in a real-sized channel page — YouTube serves ~1.1 MB pages with og:image far past any small scan window (${idx30.feeds['av-big'].image})`);
+  ok(ytPageHits.UCBIG === 1, `the big page was fetched exactly once (${ytPageHits.UCBIG || 0})`);
   ok(!Object.values(idx30.feeds).some((f) => /i\d?\.ytimg\.com\/vi\//.test(String(f?.image))), 'no feed anywhere carries a video-thumbnail icon');
   ok(ytPageHits.UCAV1 === 1 && ytPageHits.UCAV2 === 1, `one channel-page fetch per iconless feed (${ytPageHits.UCAV1 || 0}/${ytPageHits.UCAV2 || 0})`);
   ok(!ytPageHits.UCAVDEAD, `no channel-page fetch for feeds that failed their own fetch (${ytPageHits.UCAVDEAD || 0})`);

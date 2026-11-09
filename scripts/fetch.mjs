@@ -463,6 +463,7 @@ let ytThrottleMisses = 0;
 // meta, so an iconless feed costs one extra (throttled) page fetch once;
 // legacy thumbnail icons from earlier runs are retired wherever they surface.
 const YT_THUMB_ICON_RE = /^https?:\/\/i\d*\.ytimg\.com\/vi\//i;
+const YT_PAGE_SCAN_MAX = 4 * 1024 * 1024;
 const YT_CHANNEL_PAGE_RE = /^https?:\/\/(?:www\.|m\.)?youtube\.com\/(?:channel\/|@|user\/|c\/)/i;
 const YT_AVATAR_HOST_RE = /^https?:\/\/yt[23]\.(?:googleusercontent|ggpht)\.com\//i;
 const ytAvatarPageUrl = (u) => {
@@ -485,7 +486,7 @@ async function ytChannelAvatar(channelUrl) {
   if (!res.ok) return null;
   const type = res.headers.get('content-type') || '';
   if (type && !/html/i.test(type)) return null;
-  const html = (await res.text()).slice(0, 262144);
+  const html = (await res.text()).slice(0, YT_PAGE_SCAN_MAX);
   const og = ogImageUrl(html);
   return og && /^https?:\/\//i.test(og) ? downscaleYtAvatar(og) : null;
 }
