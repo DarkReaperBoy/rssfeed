@@ -445,6 +445,34 @@ const tgDoFetch = async (url) => {
     redirect: 'follow',
   });
 };
+// Telegram gap tracking: intervals of message ids no walk has fetched yet.
+// A gap {floor, ceil} means every message with floor < id < ceil may be missing:
+// floor is the highest id known fetched below the hole (0 = unknown bottom),
+// ceil the lowest id known fetched above it. Gaps survive runs and failures in
+// status.tgGaps; each run chews the newest hole first until the list empties.
+const TG_NATURAL_STOPS = new Set(['caught up with stored messages', 'start of history', 'retention window covered', 'pagination stalled']);
+const tgDeepest = (msgs) => (msgs.length ? Math.min(...msgs.map((m) => m.id)) : 0);
+function tgMergeGaps(raw) {
+  const cleaned = [];
+  for (const g of Array.isArray(raw) ? raw : []) {
+    const floor = Math.max(0, Math.floor(Number(g?.floor) || 0));
+    const ceil = Math.max(0, Math.floor(Number(g?.ceil) || 0));
+    if (ceil > floor + 1) cleaned.push({ floor, ceil }); // an empty interval is nothing to fetch
+  }
+  cleaned.sort((a, b) => a.floor - b.floor);
+  const out = [];
+  for (const g of cleaned) {
+    const last = out[out.length - 1];
+    if (last && g.floor <= last.ceil) last.ceil = Math.max(last.ceil, g.ceil);
+    else out.push(g);
+  }
+  // cap pathological growth: merge the two oldest until bounded — a re-walk over already-stored ids just dedupes
+  while (out.length > 40) {
+    const old = out.shift();
+    out[0] = { floor: old.floor, ceil: Math.max(old.ceil, out[0].ceil) };
+  }
+  return out.sort((a, b) => b.ceil - a.ceil); // newest hole first
+}
 async function getChanBoards() {
   if (chanBoardsCache) return chanBoardsCache;
   try {
@@ -684,33 +712,58 @@ async function main() {
         }
       }
       const pageCap = Number(feed.maxPages) > 0 ? Math.floor(Number(feed.maxPages)) : TG_DEFAULT_MAX_PAGES;
-      const healing = !!prevStatus.tgBacklog;
+      // hole tracking: persist unfetched id intervals; a legacy tgBacklog flag (pre-tgGaps state) migrates to a gap below the oldest stored message
+      let gaps = tgMergeGaps(prevStatus.tgGaps);
+      if (prevStatus.tgBacklog && !Array.isArray(prevStatus.tgGaps) && knownMinId > 0) gaps = tgMergeGaps([...gaps, { floor: 0, ceil: knownMinId }]);
       let result;
-      let deep = null;
+      const chewMsgs = [];
+      let chewPages = 0;
+      let chewedGaps = 0;
       try {
         result = await tgFetchChannel(tgDoFetch, channel, {
           cutoffMs: now - retainMs,
           knownMaxId,
           maxPages: pageCap,
         });
-        if (healing && knownMinId > 0) {
+        // a non-natural stop above the watermark leaves a hole: record it as a gap
+        const deepest = tgDeepest(result.messages);
+        if (!TG_NATURAL_STOPS.has(result.stopReason) && deepest > knownMaxId + 1) {
+          gaps = tgMergeGaps([...gaps, { floor: knownMaxId, ceil: deepest }]);
+        }
+        // chew the tracked holes newest-first until the page budget runs out or the list empties
+        let budget = pageCap;
+        while (budget > 0 && gaps.length) {
+          const gap = gaps[0];
+          let walk;
           try {
-            deep = await tgFetchChannel(tgDoFetch, channel, {
+            walk = await tgFetchChannel(tgDoFetch, channel, {
               cutoffMs: now - retainMs,
-              knownMaxId: 0,
-              maxPages: pageCap,
-              startBefore: knownMinId,
+              knownMaxId: gap.floor,
+              maxPages: budget,
+              startBefore: gap.ceil,
             });
-          } catch {
-            deep = null;
+          } catch (err) {
+            if (err.code === 'NO_POSTS') { gaps = gaps.slice(1); continue; } // the region is gone — nothing to fetch
+            break; // transport died before any page — keep the gap, retry next run
           }
+          budget -= walk.pages;
+          chewPages += walk.pages;
+          chewedGaps++;
+          chewMsgs.push(...walk.messages);
+          const deep = tgDeepest(walk.messages);
+          if (TG_NATURAL_STOPS.has(walk.stopReason) || deep <= gap.floor + 1) { gaps = gaps.slice(1); continue; } // healed down to the anchor
+          gap.ceil = deep; // partial progress — the unfetched tail stays on the list
+          if (walk.stopReason !== 'page budget') break; // mid-walk transport error — retry next run
         }
       } catch (err) {
         failures++;
         status.ok = false;
         status.error = err.message;
         status.consecutiveFailures = (prevStatus.consecutiveFailures || 0) + 1;
-        if (prevStatus.tgBacklog) status.tgBacklog = true;
+        if (gaps.length) {
+          status.tgGaps = gaps;
+          status.tgBacklog = true;
+        }
         const keptFail = keepRetained().filter(inWindow);
         await fs.writeFile(file, JSON.stringify({ articles: keptFail }));
         index.feeds[feed.id] = { ...summarizeFeed({ ...feed, ...feedMetaFor(feed, prevMeta) }, keptFail), status };
@@ -722,13 +775,14 @@ async function main() {
       status.lastSuccess = now;
       status.consecutiveFailures = 0;
       status.error = null;
-      status.tgBacklog = result.stopReason === 'page budget' || (healing && knownMinId > 0 ? (deep ? deep.stopReason === 'page budget' : true) : false);
+      status.tgBacklog = gaps.length > 0;
+      if (gaps.length) status.tgGaps = gaps;
       const effFeed = { ...feed, title: feed.title || result.info.title || channel, site: feed.site || `https://t.me/s/${channel}`, url: feed.url || `https://t.me/s/${channel}` };
       const fmeta = feedMetaFor(effFeed, prevMeta, { title: result.info.title, link: `https://t.me/s/${channel}`, image: result.info.image ? { url: result.info.image } : null });
       const prevById = new Map((prev.articles || []).map((a) => [a.id, a]));
       const seenMsg = new Set();
       const walked = [];
-      for (const msg of [...result.messages, ...(deep?.messages || [])]) {
+      for (const msg of [...result.messages, ...chewMsgs]) {
         const key = `${msg.channel}/${msg.id}`;
         if (seenMsg.has(key)) continue;
         seenMsg.add(key);
@@ -753,9 +807,10 @@ async function main() {
       await fs.writeFile(file, JSON.stringify({ articles: merged }));
       index.feeds[feed.id] = { ...summarizeFeed({ ...effFeed, ...fmeta }, merged), status };
       written.set(feed.id, merged);
-      const budgetNote = result.stopReason === 'page budget' ? ` — raise "maxPages" (now ${pageCap}) to reach further back` : '';
-      const healNote = healing && knownMinId > 0 ? (deep ? ` — healed the pre-watermark backlog (${deep.messages.length} message(s) below #${knownMinId}, stopped: ${deep.stopReason})` : ' — backlog walk failed, retrying next run') : '';
-      console.log(`[${feed.id}] t.me/${channel}: ${merged.length} messages (${result.pages} page(s), stopped: ${result.stopReason}${budgetNote})${healNote}${filtered ? ` (dropped ${filtered} by word filter)` : ''}${cfgHidden ? ` (dropped ${cfgHidden} by config filter)` : ''}`);
+      const missing = gaps.reduce((n, g) => n + (g.ceil - g.floor - 1), 0);
+      const budgetNote = gaps.length ? ` — ${missing} message(s) in ${gaps.length} unfetched gap(s): raise "maxPages" (now ${pageCap}) or later runs keep healing` : '';
+      const healNote = chewPages ? ` — healed ${chewMsgs.length} message(s) from tracked gap(s) (${chewPages} page(s), ${chewedGaps} walk(s))` : '';
+      console.log(`[${feed.id}] t.me/${channel}: ${merged.length} messages (${result.pages} fresh page(s)${chewPages ? ` + ${chewPages} gap page(s)` : ''}, stopped: ${result.stopReason}${budgetNote})${healNote}${filtered ? ` (dropped ${filtered} by word filter)` : ''}${cfgHidden ? ` (dropped ${cfgHidden} by config filter)` : ''}`);
       return;
     }
     if (isHnFeed(feed)) {

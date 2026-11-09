@@ -48,6 +48,7 @@ const tgVideo = `<a class="tgme_widget_message_video_player js-message_video_pla
 const tgBigVideo = `<a class="tgme_widget_message_video_player not_supported js-message_video_player" href="https://t.me/bigchan/501"><i class="tgme_widget_message_video_thumb" style="background-image:url('https://cdn4.telesco.pe/file/vbigthumb.jpg')"></i><div class="tgme_widget_message_video_wrap" style="width:880px;padding-top:81.81%"></div><div class="message_video_play js-message_video_play"></div><time class="message_video_duration js-message_video_duration">1:05</time><div class="message_media_not_supported_wrap"><div class="message_media_not_supported"><div class="message_media_not_supported_label">Media is too big</div><span class="message_media_view_in_telegram">VIEW IN TELEGRAM</span></div></div></a>`;
 let tgNewMessage = null;
 let tgEdited108 = false;
+let tgDeepExtra = [];
 const tgRequests = {};
 const tgChannels = () => {
   const demo = [
@@ -67,7 +68,7 @@ const tgChannels = () => {
     },
     deepchan: {
       title: 'Deep Channel',
-      messages: Array.from({ length: 9 }, (_, i) => ({ id: 309 - i, mins: 40 + i * 90, inner: tgText(`Deep message ${309 - i}`) })),
+      messages: [...tgDeepExtra, ...Array.from({ length: 9 }, (_, i) => ({ id: 309 - i, mins: 40 + i * 90, inner: tgText(`Deep message ${309 - i}`) }))],
     },
     bigchan: {
       title: 'Big Media Channel',
@@ -524,8 +525,10 @@ console.log('run 15: telegram channels — every message is an article, images r
   ok(new Set(burst15.map((a) => a.link)).size === 12, 'each burst message is a distinct article');
   ok(burst15[0].link === 'https://t.me/s/burstchan/212' && burst15[11].link === 'https://t.me/s/burstchan/201', 'articles are ordered newest first');
   const deep15 = tgFeed('tgdeep').articles;
-  ok(deep15.length === 6 && deep15.every((a) => Number(/(\d+)$/.exec(a.link)[1]) >= 304), 'maxPages=2 caps the walk at the newest 6 of 9 (the page budget)');
-  ok(/page budget/.test(out) && /raise "maxPages" \(now 2\)/.test(out), 'the run log names the budget stop and the way out');
+  ok(deep15.length === 9 && new Set(deep15.map((a) => a.link)).size === 9, `maxPages=2 stops the fresh walk after 6 of 9, then the same-run gap walk heals the other 3 (${deep15.length} stored, unique)`);
+  ok(deep15.some((a) => a.link === 'https://t.me/s/deepchan/301'), 'message 301 — beyond the page budget — is stored in the very run that first saw the channel');
+  ok(/page budget/.test(out) && /healed 3 message\(s\) from tracked gap\(s\)/.test(out), 'the run log names the budget stop and the same-run gap heal');
+  ok(tgRequests.deepchan === 3, `the cold crawl = fresh walk (2 pages) + gap walk (1 page) (${tgRequests.deepchan} requests)`);
   const big15 = tgFeed('tgbig').articles;
   ok(big15.length === 1 && big15[0].title === 'Video (1:05)', `a too-big video (player without a <video> tag) still titles itself with the duration (${big15[0]?.title})`);
   ok(big15[0].enclosures.length === 1 && big15[0].enclosures[0].url === 'https://cdn4.telesco.pe/file/vbigthumb.jpg' && big15[0].enclosures[0].type === 'image/thumbnail', 'the too-big video poster is carried as the row thumbnail');
@@ -538,9 +541,10 @@ console.log('run 15: telegram channels — every message is an article, images r
   ok(idx15.feeds.tgdemo.site === 'https://t.me/s/demochan' && idx15.feeds.tgdemo.image === 'https://cdn4.telesco.pe/file/demochan-avatar.jpg', 'site and avatar come from the channel page (site points at the web preview)');
   ok(idx15.feeds.tgburst.title === 'Burst Feed' && idx15.feeds.tgburst.origTitle === null, 'an untitled feed derives its title from the channel');
   ok(idx15.feeds.tgmissing.status.ok === false && /no public posts/.test(idx15.feeds.tgmissing.status.error || ''), 'a missing/private channel reports NO_POSTS in the crawl status');
-  ok(idx15.feeds.tgdeep.status.tgBacklog === true, 'a budget-stopped walk flags the feed as carrying an unscraped backlog');
+  ok(idx15.feeds.tgdeep.status.tgBacklog === false, 'the cold-start gap healed in the same run — no backlog flag remains');
+  ok(!idx15.feeds.tgdeep.status.tgGaps, 'no unfetched gap intervals persist once the gap walk reaches the start of history');
   const all15tg = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/all-feeds.json'), 'utf8'));
-  ok(all15tg.articles.length === 5 + 12 + 6 + 1, `all-feeds.json carries every telegram article (${all15tg.articles.length})`);
+  ok(all15tg.articles.length === 5 + 12 + 9 + 1, `all-feeds.json carries every telegram article (${all15tg.articles.length})`);
   const demoBefore = Object.fromEntries(demo15.map((a) => [a.link, a.id]));
 
   console.log('run 16: telegram incremental — new + edited messages, overlap stop, failure keeps retained');
@@ -560,12 +564,12 @@ console.log('run 15: telegram channels — every message is an article, images r
   ok(tgRequests.demochan === reqBefore.demochan + 1, `the second run walked exactly one page (overlap stop: ${tgRequests.demochan - reqBefore.demochan} request)`);
   ok(tgRequests.burstchan === reqBefore.burstchan + 1, `an unchanged channel also stops after one page (${tgRequests.burstchan - reqBefore.burstchan} request)`);
   const deep16 = tgFeed('tgdeep').articles;
-  ok(deep16.length === 9, `a budget-stopped walk heals on the next run — all 9 deepchan messages now stored (${deep16.length})`);
-  ok(new Set(deep16.map((a) => a.link)).size === 9, 'the healed walk stored each message exactly once (no duplicates across the two walks)');
+  ok(deep16.length === 9, `the fully-caught-up channel retains all 9 messages across runs (${deep16.length})`);
+  ok(new Set(deep16.map((a) => a.link)).size === 9, 'each deepchan message is stored exactly once (no duplicates across runs)');
   ok(deep16.some((a) => a.link === 'https://t.me/s/deepchan/301'), 'the oldest message 301 — beyond the original page budget — is present after healing');
-  ok(tgRequests.deepchan === reqBefore.deepchan + 2, `the healing run = fresh catch-up walk (1 page) + backlog walk below the oldest stored message (1 page) (${tgRequests.deepchan - reqBefore.deepchan} requests)`);
+  ok(tgRequests.deepchan === reqBefore.deepchan + 1, `a caught-up channel costs exactly one page per run (overlap stop: ${tgRequests.deepchan - reqBefore.deepchan} request)`);
   const idxDeep = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/index.json'), 'utf8'));
-  ok(idxDeep.feeds.tgdeep.status.tgBacklog === false, 'the backlog flag clears once the healing walk reaches the start of history');
+  ok(idxDeep.feeds.tgdeep.status.tgBacklog === false, 'the backlog flag stays clear while the walk keeps up');
 
   await new Promise((r) => setTimeout(r, 1100));
   out = await run({ GHRSS_TG_BASE: 'http://127.0.0.1:9' });
@@ -576,8 +580,92 @@ console.log('run 15: telegram channels — every message is an article, images r
   ok(deepFail.length === 9, 'a failed run keeps the healed deepchan history too');
   const idxFail = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/index.json'), 'utf8'));
   ok(idxFail.feeds.tgdemo.status.ok === false && (idxFail.feeds.tgdemo.status.consecutiveFailures || 0) >= 1, 'the crawl status records the failure');
+
+  console.log('run 17: telegram flood — a burst past the budget leaves no hole the same run');
+  tgDeepExtra = Array.from({ length: 9 }, (_, i) => ({ id: 318 - i, mins: 3 + i, inner: tgText(`Flood message ${318 - i}`) }));
+  await new Promise((r) => setTimeout(r, 1100));
+  const req17 = { ...tgRequests };
+  out = await run({ GHRSS_TG_BASE: TG });
+  const idsOf = (arts) => arts.map((a) => Number(/(\d+)$/.exec(a.link)[1]));
+  const deep17 = tgFeed('tgdeep').articles;
+  const ids17 = idsOf(deep17);
+  ok(deep17.length === 18 && new Set(deep17.map((a) => a.link)).size === 18, `an 18-message channel fully stores in one run despite maxPages=2 (${deep17.length})`);
+  ok([310, 311, 312].every((n) => ids17.includes(n)), 'the hole between the budget stop (#313) and the old watermark (#309) is filled the same run');
+  ok(tgRequests.deepchan === req17.deepchan + 4, `fresh walk (2 pages) + gap walk (2 pages) (${tgRequests.deepchan - req17.deepchan} requests)`);
+  const idx17 = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/index.json'), 'utf8'));
+  ok(idx17.feeds.tgdeep.status.tgBacklog === false && !idx17.feeds.tgdeep.status.tgGaps, 'the burst left no tracked gap behind');
+
+  console.log('run 18: sustained overflow — what exceeds the budget persists as a tracked gap');
+  tgDeepExtra = [...Array.from({ length: 18 }, (_, i) => ({ id: 336 - i, mins: 2 + i, inner: tgText(`Flood two ${336 - i}`) })), ...tgDeepExtra];
+  await new Promise((r) => setTimeout(r, 1100));
+  const req18 = { ...tgRequests };
+  out = await run({ GHRSS_TG_BASE: TG });
+  const deep18 = tgFeed('tgdeep').articles;
+  const ids18 = idsOf(deep18);
+  ok(deep18.length === 30, `2×maxPages stores 30 of 36 messages in one run (${deep18.length})`);
+  ok(ids18.every((n) => !(n >= 319 && n <= 324)), 'messages 319–324 are the honest known-missing hole — nothing silently dropped');
+  ok([325, 336].every((n) => ids18.includes(n)), 'the two walks reached down to #325 and up to #336');
+  const idx18 = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/index.json'), 'utf8'));
+  const gaps18 = idx18.feeds.tgdeep.status.tgGaps || [];
+  ok(gaps18.length === 1 && gaps18[0].floor === 318 && gaps18[0].ceil === 325, `the unfetched hole is persisted as a gap interval {floor:318, ceil:325} (${JSON.stringify(gaps18)})`);
+  ok(idx18.feeds.tgdeep.status.tgBacklog === true, 'a remaining gap keeps the backlog flag raised');
+  ok(/raise "maxPages" \(now 2\)/.test(out), 'the log tells the operator the page budget is the limit');
+  ok(tgRequests.deepchan === req18.deepchan + 4, `fresh (2) + gap chew (2) pages (${tgRequests.deepchan - req18.deepchan} requests)`);
+
+  console.log('run 19: the persisted gap heals on the next run');
+  await new Promise((r) => setTimeout(r, 1100));
+  const req19 = { ...tgRequests };
+  out = await run({ GHRSS_TG_BASE: TG });
+  const deep19 = tgFeed('tgdeep').articles;
+  const ids19 = idsOf(deep19);
+  ok(deep19.length === 36 && new Set(deep19.map((a) => a.link)).size === 36, `all 36 messages stored after the gap heals (${deep19.length})`);
+  ok([319, 320, 321, 322, 323, 324].every((n) => ids19.includes(n)), 'the hole 319–324 is closed');
+  const idx19 = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/index.json'), 'utf8'));
+  ok(!idx19.feeds.tgdeep.status.tgGaps && idx19.feeds.tgdeep.status.tgBacklog === false, 'the gap list empties and the flag clears');
+  ok(tgRequests.deepchan === req19.deepchan + 3, `fresh (1, overlap stop) + gap chew (2) (${tgRequests.deepchan - req19.deepchan} requests)`);
+
+  console.log('run 20: a bigger flood re-opens a gap, then the network dies with the gap in flight');
+  tgDeepExtra = [...Array.from({ length: 15 }, (_, i) => ({ id: 351 - i, mins: 2 + i, inner: tgText(`Flood three ${351 - i}`) })), ...tgDeepExtra];
+  await new Promise((r) => setTimeout(r, 1100));
+  out = await run({ GHRSS_TG_BASE: TG });
+  const idx20 = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/index.json'), 'utf8'));
+  const gaps20 = idx20.feeds.tgdeep.status.tgGaps || [];
+  ok(gaps20.length === 1 && gaps20[0].floor === 336 && gaps20[0].ceil === 340, `the 15-message flood leaves gap {floor:336, ceil:340} (${JSON.stringify(gaps20)})`);
+  ok(idx20.feeds.tgdeep.status.tgBacklog === true, 'flag raised mid-overflow');
+
+  await new Promise((r) => setTimeout(r, 1100));
+  out = await run({ GHRSS_TG_BASE: 'http://127.0.0.1:9' });
+  ok(/FETCH FAILED/.test(out), 'the network died again (connection refused)');
+  const idxFail2 = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/index.json'), 'utf8'));
+  const gapsFail = idxFail2.feeds.tgdeep.status.tgGaps || [];
+  ok(gapsFail.length === 1 && gapsFail[0].floor === 336 && gapsFail[0].ceil === 340, `a failed run keeps the in-flight gap so healing resumes after recovery (${JSON.stringify(gapsFail)})`);
+  ok(idxFail2.feeds.tgdeep.status.tgBacklog === true, 'the backlog flag survives the failure');
+
+  console.log('run 21: recovery — the surviving gap closes');
+  await new Promise((r) => setTimeout(r, 1100));
+  out = await run({ GHRSS_TG_BASE: TG });
+  const deep21 = tgFeed('tgdeep').articles;
+  const ids21 = idsOf(deep21);
+  ok(deep21.length === 51 && [337, 338, 339].every((n) => ids21.includes(n)), `all 51 messages stored, the in-flight gap 337–339 closed (${deep21.length})`);
+  const idx21 = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/index.json'), 'utf8'));
+  ok(!idx21.feeds.tgdeep.status.tgGaps && idx21.feeds.tgdeep.status.tgBacklog === false, 'gap list empty, flag clear after recovery');
+
+  console.log('run 22: a legacy tgBacklog flag migrates into the gap list');
+  const idxPath = path.join(SANDBOX, 'data/index.json');
+  const idxLegacy = JSON.parse(fs.readFileSync(idxPath, 'utf8'));
+  idxLegacy.feeds.tgdeep.status.tgBacklog = true;
+  delete idxLegacy.feeds.tgdeep.status.tgGaps;
+  fs.writeFileSync(idxPath, JSON.stringify(idxLegacy));
+  await new Promise((r) => setTimeout(r, 1100));
+  const req22 = { ...tgRequests };
+  out = await run({ GHRSS_TG_BASE: TG });
+  const idx22 = JSON.parse(fs.readFileSync(idxPath, 'utf8'));
+  ok(idx22.feeds.tgdeep.status.tgBacklog === false && !idx22.feeds.tgdeep.status.tgGaps, 'a legacy flag heals as a gap below the oldest stored message and clears');
+  ok(tgRequests.deepchan === req22.deepchan + 2, `fresh walk (1) + migrated-gap probe (1) (${tgRequests.deepchan - req22.deepchan} requests)`);
+
   tgNewMessage = null;
   tgEdited108 = false;
+  tgDeepExtra = [];
 }
 console.log('id-migration matchers (unit)');
 {
