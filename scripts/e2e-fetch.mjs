@@ -66,6 +66,8 @@ const tgMediaMsgs = () => [
 let tgNewMessage = null;
 let tgEdited108 = false;
 let tgDeepExtra = [];
+let tgMonthNew = null;
+const monthMsgs = () => Array.from({ length: 46 }, (_, i) => ({ id: 500 - i, mins: 60 + i * 1440, inner: tgText(`Month message ${500 - i}`) }));
 const tgRequests = {};
 const tgChannels = () => {
   const demo = [
@@ -94,6 +96,14 @@ const tgChannels = () => {
     mediachan: {
       title: 'Media Zoo Channel',
       messages: tgMediaMsgs(),
+    },
+    monthchan: {
+      title: 'Month Channel',
+      messages: tgMonthNew ? [{ id: 501, mins: 10, inner: tgText('Month message 501') }, ...monthMsgs()] : monthMsgs(),
+    },
+    monthtight: {
+      title: 'Month Tight',
+      messages: monthMsgs(),
     },
   };
 };
@@ -546,10 +556,10 @@ console.log('run 15: telegram channels — every message is an article, images r
   ok(new Set(burst15.map((a) => a.link)).size === 12, 'each burst message is a distinct article');
   ok(burst15[0].link === 'https://t.me/s/burstchan/212' && burst15[11].link === 'https://t.me/s/burstchan/201', 'articles are ordered newest first');
   const deep15 = tgFeed('tgdeep').articles;
-  ok(deep15.length === 9 && new Set(deep15.map((a) => a.link)).size === 9, `maxPages=2 stops the fresh walk after 6 of 9, then the same-run gap walk heals the other 3 (${deep15.length} stored, unique)`);
-  ok(deep15.some((a) => a.link === 'https://t.me/s/deepchan/301'), 'message 301 — beyond the page budget — is stored in the very run that first saw the channel');
-  ok(/page budget/.test(out) && /healed 3 message\(s\) from tracked gap\(s\)/.test(out), 'the run log names the budget stop and the same-run gap heal');
-  ok(tgRequests.deepchan === 3, `the cold crawl = fresh walk (2 pages) + gap walk (1 page) (${tgRequests.deepchan} requests)`);
+  ok(deep15.length === 9 && new Set(deep15.map((a) => a.link)).size === 9, `a brand-new channel syncs its whole history in the first walk — maxPages is a steady-state budget, not an initial-sync one (${deep15.length} stored, unique)`);
+  ok(deep15.some((a) => a.link === 'https://t.me/s/deepchan/301'), 'message 301 — the oldest message — is stored in the very run that first saw the channel');
+  ok(/\[tgdeep\] t\.me\/deepchan: 9 messages \(3 fresh page\(s\), stopped: start of history\)/.test(out), 'the cold crawl stops at the start of history, not at a page budget');
+  ok(tgRequests.deepchan === 3, `the cold crawl covered all 3 pages of history (${tgRequests.deepchan} request(s))`);
   const big15 = tgFeed('tgbig').articles;
   ok(big15.length === 1 && big15[0].title === 'Video (1:05)', `a too-big video (player without a <video> tag) still titles itself with the duration (${big15[0]?.title})`);
   ok(big15[0].enclosures.length === 1 && big15[0].enclosures[0].url === 'https://cdn4.telesco.pe/file/vbigthumb.jpg' && big15[0].enclosures[0].type === 'image/thumbnail', 'the too-big video poster is carried as the row thumbnail');
@@ -726,6 +736,85 @@ console.log('run 23: telegram link previews — the real link_preview markup rid
   const a708 = media23.find((a) => a.link === 'https://t.me/s/mediachan/708');
   ok(a708?.title === 'read this: sysinternals on linux', 'text over a preview titles from the first line');
   ok(a708?.content.includes('How-To Geek'), 'a text-plus-preview message carries the site attribution too');
+}
+console.log('run 24: a fresh telegram instance syncs the whole latest month and marks that as the start');
+{
+  const TG = `http://127.0.0.1:${port}`;
+  fs.writeFileSync(path.join(SANDBOX, 'config.json'), JSON.stringify({
+    settings: { retentionDays: 60, fullTextDefault: false },
+    feeds: [
+      { id: 'tgmedia', url: 'https://t.me/mediachan' },
+      { id: 'tgmonth', url: 'https://t.me/monthchan' },
+      { id: 'tgtight', url: 'https://t.me/monthtight', freshMaxPages: 2 },
+    ],
+  }, null, 2));
+  await new Promise((r) => setTimeout(r, 1100));
+  const req24 = { ...tgRequests };
+  out = await run({ GHRSS_TG_BASE: TG });
+  const tgFeedX = (id) => JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/feeds', `${id}.json`), 'utf8')).articles;
+  const idsOf = (arts) => arts.map((a) => Number(/(\d+)$/.exec(a.link)[1]));
+  const month24 = tgFeedX('tgmonth');
+  const ids24 = idsOf(month24);
+  ok(month24.length === 33, `the first run stores the whole 31-day month plus the last page's two stragglers (${month24.length})`);
+  ok(Array.from({ length: 31 }, (_, i) => 500 - i).every((n) => ids24.includes(n)), 'every message of the latest month is stored in the very first run');
+  ok(Math.min(...ids24) === 468, `the walk stopped at the 31-day month cutoff, not the 60-day retention (deepest id ${Math.min(...ids24)})`);
+  ok(tgRequests.monthchan === 11, `11 pages of three walk exactly one month (${tgRequests.monthchan} request(s))`);
+  const idx24 = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/index.json'), 'utf8'));
+  ok(idx24.feeds.tgmonth.status.tgMonthDone === true && !idx24.feeds.tgmonth.status.tgGaps, 'the completed month sync is marked — that mark IS the start');
+  ok(/initial month sync done, marked as the start/.test(out), 'the run log names the mark');
+  const tight24 = tgFeedX('tgtight');
+  const tids24 = idsOf(tight24);
+  ok(tight24.length === 12 && Math.max(...tids24) === 500 && Math.min(...tids24) === 489, `a freshMaxPages=2 feed syncs 12 of the month in its first run (${tight24.length})`);
+  ok(tgRequests.monthtight === 4, `fresh walk (2 pages) + month-gap walk (2 pages) (${tgRequests.monthtight} request(s))`);
+  const tstatus24 = idx24.feeds.tgtight.status;
+  ok(tstatus24.tgMonthDone !== true && tstatus24.tgBacklog === true && (tstatus24.tgGaps || []).length === 1 && tstatus24.tgGaps[0].floor === 0 && tstatus24.tgGaps[0].ceil === 489, `the unfinished month tail persists as gap {floor:0, ceil:489} (${JSON.stringify(tstatus24.tgGaps)})`);
+  ok(/initial month sync still healing/.test(out), 'the run log names the healing state');
+  ok(/raise "freshMaxPages" \(now 2\)/.test(out), 'the healing note names the fresh-sync budget knob, not maxPages');
+  ok(tgRequests.mediachan === req24.mediachan + 1, `a month-synced feed costs exactly one page per run (${tgRequests.mediachan - req24.mediachan})`);
+
+  console.log('run 25: the marked start holds — new posts land, healing continues');
+  tgMonthNew = true;
+  await new Promise((r) => setTimeout(r, 1100));
+  const req25 = { ...tgRequests };
+  out = await run({ GHRSS_TG_BASE: TG });
+  const month25 = tgFeedX('tgmonth');
+  ok(month25.length === 34 && month25.some((a) => a.link === 'https://t.me/s/monthchan/501'), 'a new post above the mark lands');
+  ok(tgRequests.monthchan === req25.monthchan + 1, `a month-synced feed stays a one-page walk (${tgRequests.monthchan - req25.monthchan} request(s))`);
+  const idx25 = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/index.json'), 'utf8'));
+  ok(idx25.feeds.tgmonth.status.tgMonthDone === true, 'the mark survives incremental runs');
+  const tight25 = tgFeedX('tgtight');
+  const tstatus25 = idx25.feeds.tgtight.status;
+  ok(tight25.length === 18, `the healing walk stores the next six messages (${tight25.length})`);
+  ok((tstatus25.tgGaps || []).length === 1 && tstatus25.tgGaps[0].ceil === 483, `the gap tail shrinks to {floor:0, ceil:483} (${JSON.stringify(tstatus25.tgGaps)})`);
+  ok(tstatus25.tgMonthDone !== true, 'the mark only lands once the whole month is covered');
+  ok(tgRequests.monthtight === req25.monthtight + 3, `fresh walk (1) + healing walk (2) pages (${tgRequests.monthtight - req25.monthtight} request(s))`);
+
+  console.log('run 26: healing grinds on — the gap keeps shrinking');
+  await new Promise((r) => setTimeout(r, 1100));
+  out = await run({ GHRSS_TG_BASE: TG });
+  const idx26 = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/index.json'), 'utf8'));
+  ok(tgFeedX('tgtight').length === 24, `six more healed (${tgFeedX('tgtight').length})`);
+  ok(idx26.feeds.tgtight.status.tgGaps[0].ceil === 477, `gap shrinks to {0,477} (${JSON.stringify(idx26.feeds.tgtight.status.tgGaps)})`);
+
+  console.log('run 27: healing grinds on — one tail left');
+  await new Promise((r) => setTimeout(r, 1100));
+  out = await run({ GHRSS_TG_BASE: TG });
+  const idx27 = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/index.json'), 'utf8'));
+  ok(tgFeedX('tgtight').length === 30, `six more healed (${tgFeedX('tgtight').length})`);
+  ok(idx27.feeds.tgtight.status.tgGaps[0].ceil === 471, `gap shrinks to {0,471} (${JSON.stringify(idx27.feeds.tgtight.status.tgGaps)})`);
+
+  console.log('run 28: the month heals to the cutoff — the mark lands');
+  await new Promise((r) => setTimeout(r, 1100));
+  const req28 = { ...tgRequests };
+  out = await run({ GHRSS_TG_BASE: TG });
+  const tight28 = tgFeedX('tgtight');
+  const tids28 = idsOf(tight28);
+  const idx28 = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/index.json'), 'utf8'));
+  ok(tight28.length === 33 && Array.from({ length: 31 }, (_, i) => 500 - i).every((n) => tids28.includes(n)), `the healed feed matches the full month (${tight28.length})`);
+  ok(Math.min(...tids28) === 468, 'the healing walk stopped at the same 31-day cutoff — nothing older than the month start was fetched');
+  ok(!idx28.feeds.tgtight.status.tgGaps && idx28.feeds.tgtight.status.tgMonthDone === true && idx28.feeds.tgtight.status.tgBacklog === false, 'gap list empty, mark landed, backlog clear');
+  ok(tgRequests.monthtight === req28.monthtight + 2, `fresh walk (1) + final healing page (1) (${tgRequests.monthtight - req28.monthtight} request(s))`);
+  tgMonthNew = null;
 }
 console.log('id-migration matchers (unit)');
 {

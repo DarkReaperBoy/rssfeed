@@ -8,7 +8,7 @@ import { Readability } from '@mozilla/readability';
 import sanitizeHtml from 'sanitize-html';
 import { chanThreadsFromCatalog, chanThreadPasses, chanThreadToArticle } from './4chan.mjs';
 import { hnHitToArticle, hnFeedOptions, hnFetchAllPages } from './hackernews.mjs';
-import { isTelegramFeed, tgChannelOf, tgFetchChannel, tgArticleId, tgMessageToArticle, TG_DEFAULT_MAX_PAGES } from './telegram.mjs';
+import { isTelegramFeed, tgChannelOf, tgFetchChannel, tgArticleId, tgMessageToArticle, TG_DEFAULT_MAX_PAGES, TG_FRESH_MAX_PAGES, TG_FRESH_MONTH_MS } from './telegram.mjs';
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const DATA_DIR = path.join(ROOT, 'data');
 const FEEDS_DIR = path.join(DATA_DIR, 'feeds');
@@ -712,6 +712,12 @@ async function main() {
         }
       }
       const pageCap = Number(feed.maxPages) > 0 ? Math.floor(Number(feed.maxPages)) : TG_DEFAULT_MAX_PAGES;
+      // a fresh instance (no completed month sync yet) walks the whole latest month and marks that as the start;
+      // the steady-state page budget only applies once the start exists
+      const initialMonth = !prevStatus.tgMonthDone;
+      const freshCap = Number(feed.freshMaxPages) > 0 ? Math.floor(Number(feed.freshMaxPages)) : TG_FRESH_MAX_PAGES;
+      const runCap = initialMonth ? freshCap : pageCap;
+      const walkCutoff = initialMonth ? now - TG_FRESH_MONTH_MS : now - retainMs;
       // hole tracking: persist unfetched id intervals; a legacy tgBacklog flag (pre-tgGaps state) migrates to a gap below the oldest stored message
       let gaps = tgMergeGaps(prevStatus.tgGaps);
       if (prevStatus.tgBacklog && !Array.isArray(prevStatus.tgGaps) && knownMinId > 0) gaps = tgMergeGaps([...gaps, { floor: 0, ceil: knownMinId }]);
@@ -721,9 +727,9 @@ async function main() {
       let chewedGaps = 0;
       try {
         result = await tgFetchChannel(tgDoFetch, channel, {
-          cutoffMs: now - retainMs,
+          cutoffMs: walkCutoff,
           knownMaxId,
-          maxPages: pageCap,
+          maxPages: runCap,
         });
         // a non-natural stop above the watermark leaves a hole: record it as a gap
         const deepest = tgDeepest(result.messages);
@@ -731,13 +737,13 @@ async function main() {
           gaps = tgMergeGaps([...gaps, { floor: knownMaxId, ceil: deepest }]);
         }
         // chew the tracked holes newest-first until the page budget runs out or the list empties
-        let budget = pageCap;
+        let budget = runCap;
         while (budget > 0 && gaps.length) {
           const gap = gaps[0];
           let walk;
           try {
             walk = await tgFetchChannel(tgDoFetch, channel, {
-              cutoffMs: now - retainMs,
+              cutoffMs: walkCutoff,
               knownMaxId: gap.floor,
               maxPages: budget,
               startBefore: gap.ceil,
@@ -764,6 +770,7 @@ async function main() {
           status.tgGaps = gaps;
           status.tgBacklog = true;
         }
+        if (prevStatus.tgMonthDone) status.tgMonthDone = true;
         const keptFail = keepRetained().filter(inWindow);
         await fs.writeFile(file, JSON.stringify({ articles: keptFail }));
         index.feeds[feed.id] = { ...summarizeFeed({ ...feed, ...feedMetaFor(feed, prevMeta) }, keptFail), status };
@@ -777,6 +784,7 @@ async function main() {
       status.error = null;
       status.tgBacklog = gaps.length > 0;
       if (gaps.length) status.tgGaps = gaps;
+      if (prevStatus.tgMonthDone || !gaps.length) status.tgMonthDone = true;
       const effFeed = { ...feed, title: feed.title || result.info.title || channel, site: feed.site || `https://t.me/s/${channel}`, url: feed.url || `https://t.me/s/${channel}` };
       const fmeta = feedMetaFor(effFeed, prevMeta, { title: result.info.title, link: `https://t.me/s/${channel}`, image: result.info.image ? { url: result.info.image } : null });
       const prevById = new Map((prev.articles || []).map((a) => [a.id, a]));
@@ -808,9 +816,10 @@ async function main() {
       index.feeds[feed.id] = { ...summarizeFeed({ ...effFeed, ...fmeta }, merged), status };
       written.set(feed.id, merged);
       const missing = gaps.reduce((n, g) => n + (g.ceil - g.floor - 1), 0);
-      const budgetNote = gaps.length ? ` — ${missing} message(s) in ${gaps.length} unfetched gap(s): raise "maxPages" (now ${pageCap}) or later runs keep healing` : '';
+      const budgetNote = gaps.length ? ` — ${missing} message(s) in ${gaps.length} unfetched gap(s): raise "${initialMonth ? 'freshMaxPages' : 'maxPages'}" (now ${initialMonth ? freshCap : pageCap}) or later runs keep healing` : '';
       const healNote = chewPages ? ` — healed ${chewMsgs.length} message(s) from tracked gap(s) (${chewPages} page(s), ${chewedGaps} walk(s))` : '';
-      console.log(`[${feed.id}] t.me/${channel}: ${merged.length} messages (${result.pages} fresh page(s)${chewPages ? ` + ${chewPages} gap page(s)` : ''}, stopped: ${result.stopReason}${budgetNote})${healNote}${filtered ? ` (dropped ${filtered} by word filter)` : ''}${cfgHidden ? ` (dropped ${cfgHidden} by config filter)` : ''}`);
+      const monthNote = initialMonth ? (gaps.length ? ' — initial month sync still healing' : ' — initial month sync done, marked as the start') : '';
+      console.log(`[${feed.id}] t.me/${channel}: ${merged.length} messages (${result.pages} fresh page(s)${chewPages ? ` + ${chewPages} gap page(s)` : ''}, stopped: ${result.stopReason}${budgetNote})${monthNote}${healNote}${filtered ? ` (dropped ${filtered} by word filter)` : ''}${cfgHidden ? ` (dropped ${cfgHidden} by config filter)` : ''}`);
       return;
     }
     if (isHnFeed(feed)) {

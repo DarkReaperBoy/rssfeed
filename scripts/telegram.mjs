@@ -4,6 +4,9 @@ import { JSDOM } from 'jsdom';
 const sha1 = (s) => crypto.createHash('sha1').update(s).digest('hex');
 
 export const TG_DEFAULT_MAX_PAGES = 12;
+// a brand-new instance syncs the whole latest month first: that month is the start.
+export const TG_FRESH_MAX_PAGES = 200;
+export const TG_FRESH_MONTH_MS = 31 * 86400000;
 const TG_HOSTS = new Set(['t.me', 'telegram.me', 'telegram.dog']);
 const TG_RESERVED = new Set(['joinchat', 'addstickers', 'share', 'proxy', 'socks', 'bg', 'invoice', 'login', 'contact', 'verify', 'iv']);
 const TG_CHANNEL_RE = /^[A-Za-z0-9_]{3,64}$/;
