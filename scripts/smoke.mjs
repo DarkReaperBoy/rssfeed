@@ -42,6 +42,10 @@ const FIX = {
       text: null, enclosures: [], fetchedAt: now,
     }],
   },
+  'fixture-yt-down': {
+    title: 'Down YT', site: '', folder: 'tech',
+    articles: mkArticles('fixture-yt-down', ['Stale video story']),
+  },
 };
 FIX['fixture-verge'].articles[2].text = '<p>Extracted full text present</p>';
 FIX['fixture-verge'].articles[2].content = '<p>Short teaser only</p>';
@@ -54,6 +58,7 @@ const config = {
     { id: 'fixture-hn', title: 'Hacker News', url: 'https://hnrss.test/frontpage', site: 'https://news.ycombinator.com', folder: 'tech' },
     { id: 'fixture-verge', title: 'The Verge', url: 'https://theverge.test/rss', site: 'https://www.theverge.com', folder: 'tech' },
     { id: 'fixture-bbc', title: 'BBC News', url: 'https://bbc.test/rss', site: 'https://www.bbc.com/news', folder: 'news' },
+    { id: 'fixture-yt-down', title: 'Down YT', url: 'https://www.youtube.com/feeds/videos.xml?channel_id=UCDEAD00', site: '', folder: 'tech' },
   ],
 };
 const urlOf = Object.fromEntries(config.feeds.map((f) => [f.id, f.url]));
@@ -160,6 +165,14 @@ console.log('feed images (channel avatars) are the icons when present');
   ok(hnTree?.src.includes('google.com/s2/favicons'), 'a feed without an image keeps the site favicon service');
   const bbcRow = [...window.document.querySelectorAll('#list .row')].find((r) => r.dataset.id.startsWith('fixture-bbc'));
   ok(bbcRow?.querySelector('.row-meta .favicon')?.src === 'https://www.bbc.test/logo.png', 'article rows use the feed image as the row icon too');
+  console.log('a feed with no site yet still shows its xml host favicon');
+  {
+    const ytDownTree = $('.tree-item[data-scope="feed:fixture-yt-down"] .favicon');
+    ok(ytDownTree?.src === 'https://www.google.com/s2/favicons?domain=www.youtube.com&sz=64', `a never-succeeded YouTube feed (empty site, no image) falls back to its xml host for the favicon, not a letter tile (${ytDownTree?.src})`);
+    ok(!!$('.tree-item[data-scope="feed:fixture-yt-down"] .favicon-tile[hidden]'), 'the fallback tile stays hidden behind the xml-host favicon');
+    const ytDownRow = [...window.document.querySelectorAll('#list .row')].find((r) => r.dataset.id.startsWith('fixture-yt-down'));
+    ok(ytDownRow?.querySelector('.row-meta .favicon')?.src === 'https://www.google.com/s2/favicons?domain=www.youtube.com&sz=64', 'article rows use the xml-host fallback too');
+  }
 }
 console.log('reader prefers extracted full text over the feed teaser');
 {
@@ -306,16 +319,16 @@ ok($('#mark-age-desc').textContent === 'Read articles from the last', 'the resto
 ok($('#mark-age-apply').textContent === 'Mark as unread', 'the apply button flips with the direction');
 setAge(window, 1);
 await settle(20);
-ok($('#mark-age-count').textContent === 'Will mark 19 articles', 'the preview names the nineteen sub-day reads');
+ok($('#mark-age-count').textContent === 'Will mark 20 articles', 'the preview names the twenty sub-day reads');
 click('#mark-age-apply');
 await settle(120);
-ok($('#toast-text').textContent.includes('Marked 19 articles from a day ago as unread'), 'from-a-day-ago restores exactly the nineteen sub-day reads');
+ok($('#toast-text').textContent.includes('Marked 20 articles from a day ago as unread'), 'from-a-day-ago restores exactly the twenty sub-day reads');
 ok($('#toast-text').textContent.includes('— hidden by the search'), 'the toast names the search that hides every restored row');
 ok($('#toast-action-2').textContent === 'Clear search', 'the one-click Clear-search companion rides along');
 ok(rowCount() === 0, 'the restored rows stay hidden behind the search');
 click($('#toast-action-2'));
 await settle(200);
-ok(rowCount() === 19, 'Clear search reveals the restored sub-day rows');
+ok(rowCount() === 20, 'Clear search reveals the restored sub-day rows');
 click('#badge-all-items');
 await settle(80);
 ok(rowCount() === 0, 're-marked everything read for the wide-window restore');
@@ -323,10 +336,10 @@ click('#btn-mark-all-split');
 await settle(20);
 setAge(window, 30);
 await settle(20);
-ok($('#mark-age-count').textContent === 'Will mark 21 articles', 'a 30-day window covers every read article');
+ok($('#mark-age-count').textContent === 'Will mark 22 articles', 'a 30-day window covers every read article');
 click('#mark-age-apply');
 await settle(120);
-ok($('#toast-text').textContent.includes('Marked 21 articles from 30 days ago as unread'), 'the widest restore window un-reads everything');
+ok($('#toast-text').textContent.includes('Marked 22 articles from 30 days ago as unread'), 'the widest restore window un-reads everything');
 ok(rowCount() === TOTAL, 'every fixture row is back');
 console.log('search');
 click('#search-open');
@@ -425,8 +438,8 @@ setAge(window, 1);
 await settle(20);
 click('#mark-age-apply');
 await settle(80);
-ok($('#toast-text').textContent.includes('Marked 19 articles from a day ago as unread'), 'bulk mark-all-read, then from-a-day-ago: exactly the sub-day news returns');
-ok(rowCount() === 19, 'exactly the nineteen sub-day articles came back');
+ok($('#toast-text').textContent.includes('Marked 20 articles from a day ago as unread'), 'bulk mark-all-read, then from-a-day-ago: exactly the sub-day news returns');
+ok(rowCount() === 20, 'exactly the twenty sub-day articles came back');
 ok($('#btn-mark-all').title === 'Mark all as read', 'with unread articles back, the button offers read again');
 click('#badge-all-items');
 await settle(50);
@@ -444,7 +457,7 @@ click('#btn-mark-all-split');
 await settle(20);
 setAge(window, 30);
 await settle(20);
-ok($('#mark-age-count').textContent === 'Will mark 21 articles', 'the 30-day restore window covers every read article');
+ok($('#mark-age-count').textContent === 'Will mark 22 articles', 'the 30-day restore window covers every read article');
 click('#mark-age-apply');
 await settle(120);
 ok(rowCount() === rowsBeforeMarkAll, 'the widest window restores every read article');
@@ -586,12 +599,12 @@ await settle(50);
 let fRow = $(folderSel);
 ok($('#scope-title').textContent === 'Technology', 'clicking a folder selects it');
 ok(!fRow.closest('.tree-folder').classList.contains('open'), 'selecting the folder does NOT expand it');
-ok(rowCount() === 15, 'folder view shows its feeds\' articles');
+ok(rowCount() === 16, 'folder view shows its feeds\' articles');
 click(fRow.querySelector('.chev'));
 await settle(50);
 fRow = $(folderSel);
 ok(fRow.closest('.tree-folder').classList.contains('open'), 'the chevron toggle expands the folder');
-ok($$('#tree .tree-folder.open .tree-children .tree-item').length === 2, 'feed rows visible inside the folder');
+ok($$('#tree .tree-folder.open .tree-children .tree-item').length === 3, 'feed rows visible inside the folder');
 ok($('#scope-title').textContent === 'Technology', 'expanding keeps the folder selected');
 click($(folderSel).querySelector('.chev'));
 await settle(50);
@@ -810,8 +823,8 @@ console.log('shareable folder/feed links (#folder/…, #feed/…)');
 click('.tree-item[data-scope="folder:tech"]');
 await settle(60);
 ok(window.location.hash === '#folder/Technology', 'clicking a folder puts #folder/<name> in the URL');
-ok(rowCount() === 15, 'the folder link scopes the list to its feeds');
-ok($$('#list .row .feed-name').every((n) => ['Hacker News', 'The Verge'].includes(n.textContent)), 'only the folder\u2019s feeds are listed');
+ok(rowCount() === 16, 'the folder link scopes the list to its feeds');
+ok($$('#list .row .feed-name').every((n) => ['Hacker News', 'The Verge', 'Down YT'].includes(n.textContent)), 'only the folder\u2019s feeds are listed');
 click('.tree-item[data-scope="feed:fixture-verge"]');
 await settle(60);
 ok(window.location.hash === '#feed/The%20Verge', 'clicking a feed puts #feed/<title> in the URL');
@@ -832,7 +845,7 @@ ok(!$('#toast').classList.contains('hidden'), 'an unknown folder link explains i
 window.location.hash = '#folder/technology';
 window.dispatchEvent(new window.Event('hashchange'));
 await settle(60);
-ok(rowCount() === 15, 'lowercase folder name still resolves');
+ok(rowCount() === 16, 'lowercase folder name still resolves');
 click('.tree-item[data-scope="all"]');
 await settle(60);
 ok(!window.location.hash, 'returning to the Newsfeed clears the hash');
@@ -846,7 +859,7 @@ console.log('boot with #folder/… and #feed/… in the URL');
   await settle(1200);
   ok(wF.location.hash === '#folder/Technology', 'the folder hash survives boot');
   ok(!!wF.document.querySelector('.tree-item[data-scope="folder:tech"].active'), 'the folder row is marked active from the URL');
-  ok(wF.document.querySelectorAll('#list .row').length === 15, 'booting on a folder link lists only that folder');
+  ok(wF.document.querySelectorAll('#list .row').length === 16, 'booting on a folder link lists only that folder');
   domF.window.close();
 }
 {
@@ -1567,7 +1580,8 @@ console.log('regression: marking with caught-up (badgeless) feeds in the tree mu
   const readSeed = {};
   for (const a of FIX['fixture-verge'].articles) readSeed[a.id] = now - 3600e3;
   for (const a of FIX['fixture-bbc'].articles) readSeed[a.id] = now - 3600e3;
-  for (const a of FIX['fixture-junk'].articles) readSeed[a.id] = now - 3600e3; 
+  for (const a of FIX['fixture-junk'].articles) readSeed[a.id] = now - 3600e3;
+  for (const a of FIX['fixture-yt-down'].articles) readSeed[a.id] = now - 3600e3;
   w10.localStorage.setItem('ghrss:read', JSON.stringify(readSeed));
   w10.eval(appSrc);
   await settle(1200);
