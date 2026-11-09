@@ -97,6 +97,7 @@ The fetcher derives a stable id from the URL (YouTube feeds become `yt-<channel 
 | `id` | — | Stable slug, derived from the URL when omitted (`yt-<channel id>` for YouTube, host+path otherwise). The feed's data file and article identity are derived from it — changing it later resets read state for that feed's articles. |
 | `title` | — | Display name. Falls back to the feed's own `<title>`. When your title differs from the source's, the feed card shows the source's name as "Original title". |
 | `site` | — | The human website, used for the favicon and links. Falls back to the feed's own channel link. |
+| `image` | — | Feed icon override. Falls back to the channel image in the feed XML, else (YouTube feeds) the newest video's `media:thumbnail`, else the favicon service — the site's host, or the xml host for feeds that never fetched — and finally the initial-letter tile. |
 | `folder` | — | One folder id. For multiple folders, use `folders: ["a", "b"]` instead. |
 | `enabled` | — | `false` pauses the feed: nothing is fetched, existing articles are kept until retention ages them out, and the sidebar shows it as disabled. |
 | `fullText` | — | Per-feed override of `settings.fullTextDefault`. |
@@ -167,7 +168,7 @@ The fetcher scrapes the channel's **public web preview** (`t.me/s/<channel>`, no
 - **Videos** — embedded in the article body in the native browser player (`<video controls>` with the poster frame; the tokened download urls expire within hours — when one does, the reader swaps the dead player for the linked poster).
 - **Link previews, forwards, author signatures** — rendered into the body; `View on Telegram` links to the post's `t.me/s/<channel>/<id>` web-preview page (the full channel feed anchored at the message, not the bare interstitial).
 - **The whole media zoo** — photos, videos, animation GIFs (silent autoplaying loops), stickers (static webp and video/webm ones), voice messages (native audio player), round video messages, and document cards (name + size) all embed; paid/restricted media degrade to a poster or a plain link.
-- **Channel avatar** — the channel's og:image becomes the feed icon in the sidebar and article rows (any feed with an image gets this, YouTube channel art included).
+- **Channel avatar** — the channel's og:image becomes the feed icon in the sidebar and article rows (any feed with an image gets this — see `image` in the feed options above for the full fallback chain).
 
 | Option | What it does |
 |---|---|

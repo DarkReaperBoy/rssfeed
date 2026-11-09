@@ -1,5 +1,26 @@
 # Production-hardening changelog
 
+## YouTube reliability & icons pass (user-requested; three atomic commits, each landing green)
+
+The user's report: *"youtube icons aren't coming when github action did get the youtube feed."* The deployed `data/index.json` told the whole story — 58 of 59 YouTube feeds carried `site: ""`, `image: null`, `lastSuccess: null`, error `HTTP 404` (two feeds `HTTP 500`), with exactly one green feed in the same run: the shared 5-worker pool hammered 59 `videos.xml` requests in a burst, YouTube's feeds endpoint throttles bursts with bare 404/429/500s, and there was no retry — so every YouTube feed failed identically on every Action run, keeping their meta empty and the reader on letter tiles. Reproduced in e2e before the fix: a fake YouTube server that 404s any request arriving inside a 60 ms window saw **5 burst violations with one lucky survivor** from the pool — production's exact signature (56×404 + 2×500 + 1×200).
+
+| Commit | Change | Verify |
+|---|---|---|
+| `18c1be8` | **YouTube feeds ride their own spaced lane.** They leave the parallel pool into a serialized chain like 4chan/telegram, spaced `YT_THROTTLE_MS` (default 1100 ms) between requests; a throttled status (404/429/500/503) retries with backoff (2.5 s, 7 s); **three straight feeds that burn the full retry budget disarm retries for the rest of the run** so a hard-throttled runner IP cannot blow the job's 15-minute clock (the next hourly run re-arms; a success resets the strike count). Test seams: `GHRSS_YT_BASE` (treat local fake-server feeds as YouTube), `GHRSS_YT_THROTTLE_MS`, `GHRSS_YT_RETRY_DELAYS`. | `npm run test:e2e` → run 29 (+14): zero burst violations (was 5), healthy channel = exactly 1 request, first-attempt-404 heals on retry (2 hits), hard-fails burn exactly 3 attempts, the channel after three strikes gets exactly 1 |
+| `76e61e1` | **A YouTube feed icons itself from its newest video thumbnail.** YouTube's Atom feed carries no channel image/logo, so the icon feature (`65e831a`) never lit up for YouTube. The feed now derives `image` from the newest item's `media:thumbnail` (`i*.ytimg.com/vi/<id>/hqdefault.jpg` — real per-channel art, zero extra requests): newest **by published date** (not list position), dropped shorts never become the icon, thumbnail-less channels stay iconless rather than inventing a placeholder. The value sticks in stored meta, so the deployed never-succeeded feeds heal on their next green fetch. The shorts filter now keys on the same `isYouTubeLike` detector the lane uses (production-identical; the e2e fake server can now exercise shorts). | `npm run test:e2e` → run 30 (+6): heal-on-next-fetch, date-based pick with newest-last ordering, no-thumb degradation, shorts skipped for icon and articles |
+| `4304f97` | **A feed with no site yet falls back to its xml host for the favicon.** `faviconHtml` only tried `site`, so the 58 never-succeeded feeds (empty site) rendered bare letter tiles even mid-outage; now `site → xml` for the favicon-service host, and a feed with neither keeps the tile. | `npm run test:ui` → the xml-host fallback section (+3); count pins shifted by the new fixture article (19→20 sub-day, 21→22 30-day, 15→16 folder rows, 2→3 folder feeds) |
+
+**Live verification (real fetches, not fixtures):** two full production runs against the real config — **80 feeds, 0 failures each** (~65 s; the YouTube lane's 59 spaced requests dominate, by design). After the first run: **59/59 YouTube feeds green, site populated, `image` derived** (spot check: AI Explained → `i1.ytimg.com/vi/0Kw6_DTZPrY/hqdefault.jpg`); all values persisted across the second run. Real-Chromium walk on the fetched data: 59/59 tree items carry the ytimg icon (the visible ones fully loaded, 0 broken, 0 degradation tiles, rows too), 19/19 telegram avatars unchanged, folders tile as before, Hacker News unchanged (no site/xml — pre-existing).
+
+**Verify the whole pass:**
+```sh
+npm ci && npm test
+```
+
+The deployed site heals itself on the Action's next hourly run: the lane fetches all 59 YouTube feeds green, populating `site` + `image` per feed (retained stale articles merge by id, read state untouched) — no data surgery needed.
+
+---
+
 Baseline: `main @ d3682d6`. Every change below landed as one atomic commit with the full test suite green before and after. The suite grew from 414 assertions (401 UI + 13 e2e) to **559** across four suites: `test:ui` (behavior contract), `test:char` (known-behavior pins), `test:sec` (client boundary security), `test:e2e` (fetcher end-to-end).
 
 Run everything with `npm test`.
