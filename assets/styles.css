@@ -388,9 +388,9 @@ body.article-open #scroll-nav { display: flex; }
 .reader-body h1 { font-size: 1.5rem; margin: 18px 0 8px; }
 .reader-body h2 { font-size: 1.3rem; margin: 16px 0 8px; }
 .reader-body h3 { font-size: 1.12rem; margin: 14px 0 6px; }
-.reader-body img { max-width: 100%; height: auto; border-radius: 6px; }
-.reader-body video { width: 100%; height: auto; border-radius: 6px; background: #000; }
-.reader-body img.video-fallback { width: 100%; }
+.reader-body img { max-width: 100%; height: auto; max-height: 78vh; border-radius: 6px; }
+.reader-body video { width: 100%; height: auto; max-height: 78vh; object-fit: contain; border-radius: 6px; background: #000; }
+.reader-body img.video-fallback { width: 100%; max-height: 78vh; object-fit: contain; }
 .reader-body figure { margin: 16px 0; }
 .reader-body figcaption { font-size: 12px; color: var(--text-dim); margin-top: 4px; }
 .reader-body pre { overflow-x: auto; background: var(--bg-hover); padding: 12px; border-radius: 6px; font-size: 13px; }

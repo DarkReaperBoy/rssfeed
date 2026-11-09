@@ -120,7 +120,11 @@ console.log('static contract: reader pane layout');
   ok(/width:\s*100%/.test(embedRule) && /aspect-ratio/.test(embedRule), 'embed iframes stay width:100% with an aspect-ratio');
   const videoRule = cssSrc.match(/^\.reader-body video \{([^}]*)\}/m)?.[1] || '';
   ok(/width:\s*100%/.test(videoRule), 'reader videos fill the column width (an intrinsic-sized video would sit small and fixed while the pane resizes)');
+  ok(/max-height:\s*78vh/.test(videoRule) && /object-fit:\s*contain/.test(videoRule), 'reader videos cap at viewport height with object-fit contain (a tall portrait video otherwise towers past the pane — oversized media must fit)');
+  const imgRule = cssSrc.match(/^\.reader-body img \{([^}]*)\}/m)?.[1] || '';
+  ok(/max-width:\s*100%/.test(imgRule) && /max-height:\s*78vh/.test(imgRule), 'reader images cap both width and height (a tall webcomic/screenshot otherwise dwarfs the viewport)');
   ok(/\.reader-body img\.video-fallback/.test(cssSrc) && /width:\s*100%/.test(cssSrc.match(/^\.reader-body img\.video-fallback \{([^}]*)\}/m)?.[1] || ''), 'the expired-token poster fallback matches the video width');
+  ok(/max-height:\s*78vh/.test(cssSrc.match(/^\.reader-body img\.video-fallback \{([^}]*)\}/m)?.[1] || '') && /object-fit:\s*contain/.test(cssSrc.match(/^\.reader-body img\.video-fallback \{([^}]*)\}/m)?.[1] || ''), 'the poster fallback caps its height like a real video (portrait posters otherwise overflow)');
 }
 
 console.log('static contract: fetch cadence copy matches the workflow schedule');
