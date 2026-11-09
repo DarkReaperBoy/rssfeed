@@ -47,7 +47,9 @@ const tgPhoto = (u) => `<a class="tgme_widget_message_photo_wrap 1 2" href="#" s
 const tgVideo = `<a class="tgme_widget_message_video_player js-message_video_player" href="#"><i class="tgme_widget_message_video_thumb" style="background-image:url('https://cdn4.telesco.pe/file/vthumb.jpg')"></i><div class="tgme_widget_message_video_wrap" style="width:100px;padding-top:50%"><video src="https://cdn4.telesco.pe/file/v.mp4?token=expiring" class="tgme_widget_message_video js-message_video" width="100%" height="100%"></video></div><div class="message_video_play js-message_video_play"></div><time class="message_video_duration js-message_video_duration">0:21</time></a>`;
 const tgBigVideo = `<a class="tgme_widget_message_video_player not_supported js-message_video_player" href="https://t.me/bigchan/501"><i class="tgme_widget_message_video_thumb" style="background-image:url('https://cdn4.telesco.pe/file/vbigthumb.jpg')"></i><div class="tgme_widget_message_video_wrap" style="width:880px;padding-top:81.81%"></div><div class="message_video_play js-message_video_play"></div><time class="message_video_duration js-message_video_duration">1:05</time><div class="message_media_not_supported_wrap"><div class="message_media_not_supported"><div class="message_media_not_supported_label">Media is too big</div><span class="message_media_view_in_telegram">VIEW IN TELEGRAM</span></div></div></a>`;
 const tgLinkPreview = (id) => `<a class="tgme_widget_message_link_preview" href="https://howtogeek.com/sysinternals-linux-arrival"><div class="link_preview_site_name accent_color" dir="auto">How-To Geek</div><i class="link_preview_image" style="background-image:url('https://cdn4.telesco.pe/file/lp.jpg');padding-top:52.375%"></i><div class="link_preview_title" dir="auto">Linux finally gets one of Microsoft's most useful Windows utilities</div><div class="link_preview_description" dir="auto">Sysinternals just went cross-platform.</div></a>`;
+const tgGifPlayer = `<a class="tgme_widget_message_video_player blured js-message_video_player" href="#"><i class="tgme_widget_message_video_thumb" style="background-image:url('https://cdn4.telesco.pe/file/gifthumb.jpg')"></i><video src="https://cdn4.telesco.pe/file/gif.mp4?token=looping" class="tgme_widget_message_video blured js-message_video_blured" muted=""></video><div class="tgme_widget_message_video_wrap" style="width:720px;padding-top:133.33333333%"><video src="https://cdn4.telesco.pe/file/gif.mp4?token=looping" class="tgme_widget_message_video js-message_video" width="100%" height="100%"></video></div><div class="message_video_play js-message_video_play"></div><time class="message_video_duration js-message_video_duration">0:01</time></a>`;
 const tgMediaMsgs = () => [
+  { id: 701, mins: 30, inner: tgGifPlayer },
   { id: 708, mins: 40, inner: tgText('read this: sysinternals on linux') + tgLinkPreview(708) },
   { id: 707, mins: 50, inner: tgLinkPreview(707) },
 ];
@@ -688,7 +690,12 @@ console.log('run 23: telegram link previews — the real link_preview markup rid
   await new Promise((r) => setTimeout(r, 1100));
   out = await run({ GHRSS_TG_BASE: TG });
   const media23 = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/feeds/tgmedia.json'), 'utf8')).articles;
-  ok(media23.length === 2, `both preview messages stored (${media23.length})`);
+  ok(media23.length === 3, `every media-zoo message stored (${media23.length})`);
+  const a701 = media23.find((a) => a.link === 'https://t.me/s/mediachan/701');
+  ok(a701?.title === 'GIF', `a gif-only message titles itself GIF (${a701?.title})`);
+  ok((a701?.content.match(/<video/g) || []).length === 1, `a GIF's blurred backdrop layer never double-embeds the video (${(a701?.content.match(/<video/g) || []).length} tag(s))`);
+  ok(/<video autoplay loop muted playsinline preload="metadata" poster="https:\/\/cdn4\.telesco\.pe\/file\/gifthumb\.jpg" src="https:\/\/cdn4\.telesco\.pe\/file\/gif\.mp4\?token=looping"><\/video>/.test(a701?.content || ''), 'gifs embed as a silent autoplaying loop with poster and src');
+  ok(a701?.enclosures.length === 1 && a701.enclosures[0].url === 'https://cdn4.telesco.pe/file/gifthumb.jpg' && a701.enclosures[0].type === 'image/thumbnail', 'the gif poster rides along as the row thumbnail');
   const a707 = media23.find((a) => a.link === 'https://t.me/s/mediachan/707');
   ok(a707?.title === "Linux finally gets one of Microsoft's most useful Windows utilities", `a preview-only message titles itself from the preview (${a707?.title})`);
   ok(/<a href="https:\/\/howtogeek\.com\/sysinternals-linux-arrival"/.test(a707?.content || ''), 'the preview is a clickable block to the shared page');

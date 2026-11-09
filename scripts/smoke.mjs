@@ -716,6 +716,9 @@ console.log('telegram videos play natively; an expired token falls back to the p
     { id: 'tgv-2', title: 'Plain mp4', link: 'https://example.test/mp4post', date: now - 2 * 3600e3, author: null, summary: 's',
       content: '<p><video controls preload="metadata" src="https://example.test/clip.mp4"></video></p>',
       text: null, enclosures: [], fetchedAt: now },
+    { id: 'tgv-3', title: 'GIF', link: tgLink, date: now - 3 * 3600e3, author: null, summary: 's',
+      content: `<p><video autoplay loop muted playsinline preload="metadata" poster="https://cdn4.telesco.pe/file/gifthumb.jpg" src="https://cdn4.telesco.pe/file/gif.mp4?token=expiredlongago"></video></p><p><a href="${tgLink}">View on Telegram</a></p>`,
+      text: null, enclosures: [{ url: 'https://cdn4.telesco.pe/file/gifthumb.jpg', type: 'image/thumbnail' }], fetchedAt: now },
   ];
   const idxT = { generatedAt: now, folders: [], feeds: { 'fixture-tg': { title: 'Tg Videos', site: 'https://t.me/s/demochan', folder: null, folders: [], count: arts.length, newest: now - 3600e3, oldest: now - 2 * 3600e3 } } };
   const domT = new JSDOM(html, { url: 'https://example.test/', runScripts: 'outside-only', pretendToBeVisual: true });
@@ -750,6 +753,16 @@ console.log('telegram videos play natively; an expired token falls back to the p
   vid2.dispatchEvent(new wT.Event('error'));
   await settle(60);
   ok(wT.document.querySelector('#reader-slot .reader-body video') === vid2, 'a dead non-telegram video is NOT swapped for a telegram link (out of scope)');
+  wT.document.querySelector('#reader-slot [data-act="collapse"]').dispatchEvent(new wT.MouseEvent('click', { bubbles: true }));
+  await settle(50);
+  rowT('tgv-3').dispatchEvent(new wT.MouseEvent('click', { bubbles: true }));
+  await settle(80);
+  const vids3 = [...wT.document.querySelectorAll('#reader-slot .reader-body video')];
+  ok(vids3.length === 1 && vids3[0].hasAttribute('autoplay') && vids3[0].hasAttribute('loop') && vids3[0].hasAttribute('muted') && vids3[0].getAttribute('playsinline') !== null, `a gif embed stays a single silent autoplaying loop through the reader (${vids3.length} video(s))`);
+  vids3[0].dispatchEvent(new wT.Event('error'));
+  await settle(60);
+  const gifFallback = wT.document.querySelector('#reader-slot .reader-body a img.video-fallback');
+  ok(!!gifFallback && gifFallback.src === 'https://cdn4.telesco.pe/file/gifthumb.jpg', 'an expired gif token also falls back to the linked poster frame');
   domT.window.close();
 }
 console.log('search is global — it crosses the current feed/folder scope');
@@ -1239,6 +1252,7 @@ console.log('Telegram channel scraping → articles (telegram.mjs)');
         <div class="message_video_play js-message_video_play"></div><time class="message_video_duration js-message_video_duration">0:21</time></a>`, '2026-11-07T09:30:00+00:00');
   const textMsg = msgHtml(102, `<div class="tgme_widget_message_text js-message_text" dir="auto">Plain announcement<br/>two lines</div>`, '2026-11-06T08:00:00+00:00');
   const photoOnlyMsg = msgHtml(101, `<a class="tgme_widget_message_photo_wrap 9 8" href="https://t.me/demochan/101" style="width:400px;background-image:url('https://cdn4.telesco.pe/file/solo.jpg')"><div class="tgme_widget_message_photo" style="padding-top:75%"></div></a>`, '2026-11-05T07:00:00+00:00');
+  const gifMsg = msgHtml(99, `<a class="tgme_widget_message_video_player blured js-message_video_player" href="https://t.me/demochan/99"><i class="tgme_widget_message_video_thumb" style="background-image:url('https://cdn4.telesco.pe/file/gifthumb.jpg')"></i><video src="https://cdn4.telesco.pe/file/gif.mp4?token=looping" class="tgme_widget_message_video blured js-message_video_blured" muted=""></video><div class="tgme_widget_message_video_wrap" style="width:720px;padding-top:133.33333333%"><video src="https://cdn4.telesco.pe/file/gif.mp4?token=looping" class="tgme_widget_message_video js-message_video" width="100%" height="100%"></video></div><div class="message_video_play js-message_video_play"></div><time class="message_video_duration js-message_video_duration">0:01</time></a>`, '2026-11-04T09:00:00+00:00');
   const webpageMsg = msgHtml(100, `<div class="tgme_widget_message_text js-message_text" dir="auto">read this</div>
         <a class="tgme_widget_message_link_preview" href="https://example.com/story">
           <div class="link_preview_site_name accent_color" dir="auto">Example News</div>
@@ -1255,12 +1269,12 @@ console.log('Telegram channel scraping → articles (telegram.mjs)');
     <meta property="og:image" content="https://cdn4.telesco.pe/file/avatar.jpg">
     </head><body><div class="tgme_container"><section class="tgme_channel_history js-message_history">
     <div class="tgme_widget_message_centered js-messages_more_wrap"><a href="/s/demochan?before=98" class="tme_messages_more js-messages_more" data-before="98"></a></div>
-    ${albumMsg}${videoMsg}${textMsg}${photoOnlyMsg}${webpageMsg}${forwardedMsg}${serviceMsg}
+    ${albumMsg}${videoMsg}${textMsg}${photoOnlyMsg}${gifMsg}${webpageMsg}${forwardedMsg}${serviceMsg}
     </section></div></body></html>`;
   const page = tg.tgParsePage(pageHtml);
   ok(page.title === 'Demo Channel' && page.description === 'A channel for tests' && page.image === 'https://cdn4.telesco.pe/file/avatar.jpg', 'og channel meta (title/description/avatar) captured');
   ok(page.moreBefore === 98, 'the more-link data-before drives pagination');
-  ok(page.messages.length === 6, `six real messages parsed, the service message is skipped (${page.messages.length})`);
+  ok(page.messages.length === 7, `seven real messages parsed, the service message is skipped (${page.messages.length})`);
   const m104 = page.messages.find((m) => m.id === 104);
   ok(m104.channel === 'demochan' && m104.link === 'https://t.me/s/demochan/104', 'message ids, channel, and the /s/ web-preview permalink come from data-post');
   ok(m104.date === Date.parse('2026-11-08T10:00:00+00:00'), 'message time comes from the <time datetime> attribute');
@@ -1268,6 +1282,8 @@ console.log('Telegram channel scraping → articles (telegram.mjs)');
   ok(/a link/.test(m104.textHtml) && /<br/.test(m104.textHtml), 'message text keeps its markup for the sanitize pipeline');
   const m103 = page.messages.find((m) => m.id === 103);
   ok(m103.videos.length === 1 && m103.videos[0].thumb === 'https://cdn4.telesco.pe/file/vthumb.jpg' && m103.videos[0].duration === '0:21', 'video thumbs and durations are captured');
+  const m99 = page.messages.find((m) => m.id === 99);
+  ok(m99.videos.length === 1 && m99.videos[0].gif === true && m99.videos[0].src === 'https://cdn4.telesco.pe/file/gif.mp4?token=looping' && m99.videos[0].duration === '0:01', `a GIF player emits the real video once — the blurred backdrop layer is skipped (${m99.videos.length})`);
   const m100 = page.messages.find((m) => m.id === 100);
   ok(m100.webpage?.href === 'https://example.com/story' && m100.webpage?.title === 'A big story' && m100.webpage?.site === 'Example News' && m100.webpage?.description === 'What happened, in short', 'link previews carry site/title/description/href');
   ok(m100.webpage?.photo === 'https://cdn4.telesco.pe/file/lp.jpg', 'the preview image is pulled out of the background-image style');
@@ -1289,6 +1305,10 @@ console.log('Telegram channel scraping → articles (telegram.mjs)');
   ok(/<video controls preload="metadata" poster="https:\/\/cdn4\.telesco\.pe\/file\/vthumb\.jpg" src="https:\/\/cdn4\.telesco\.pe\/file\/v\.mp4\?token=expiring"><\/video>/.test(a103.content), 'videos with a playable src embed natively (controls, metadata preload, poster)');
   ok(fetchModTg.sanitize(a103.content).includes('<video'), 'the native video embed survives the sanitizer');
   ok(a103.content.includes('View on Telegram'), 'the poster footer still links to the post when the token expires');
+  const a99 = tg.tgMessageToArticle(m99, { now: NOW });
+  ok(a99.title === 'GIF', 'a gif-only message titles itself GIF');
+  ok((a99.content.match(/<video/g) || []).length === 1 && /autoplay loop muted playsinline/.test(a99.content) && /poster="https:\/\/cdn4\.telesco\.pe\/file\/gifthumb\.jpg"/.test(a99.content), 'the gif embeds exactly once as a silent autoplaying loop with the poster');
+  ok(fetchModTg.sanitize(a99.content).includes('autoplay loop muted playsinline'), 'the gif autoplay attrs survive the sanitizer');
   const a101 = tg.tgMessageToArticle(page.messages.find((m) => m.id === 101), { now: NOW });
   ok(a101.title === 'Photo' && a101.summary === 'Photo', 'a photo with no caption still has a title');
   const a100 = tg.tgMessageToArticle(m100, { now: NOW });

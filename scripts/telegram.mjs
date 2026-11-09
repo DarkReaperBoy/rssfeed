@@ -93,6 +93,7 @@ export function tgParsePage(html) {
       if (!Number.isFinite(id) || id <= 0 || !channel) continue;
       const dt = el.querySelector('.tgme_widget_message_date time[datetime]')?.getAttribute('datetime') || '';
       const parsedDate = dt ? Date.parse(dt) : NaN;
+      const seenMedia = new Set();
       const msg = {
         id,
         channel,
@@ -111,22 +112,25 @@ export function tgParsePage(html) {
         if (u) msg.photos.push(u);
       }
       for (const v of el.querySelectorAll('.tgme_widget_message_video')) {
+        if (v.classList.contains('blured') || v.classList.contains('js-message_video_blured')) continue;
         const wrap = v.closest('.tgme_widget_message_video_player') || el;
         const thumb = absUrl(bgUrl(wrap.querySelector('.tgme_widget_message_video_thumb')?.getAttribute('style')));
         const src = absUrl(v.getAttribute('src'));
-        if (thumb || src) {
-          msg.videos.push({
-            thumb,
-            src,
-            duration: stripTgHtml(wrap.querySelector('.message_video_duration')?.textContent || '').slice(0, 12),
-          });
-        }
+        const key = src || thumb;
+        if (!key || seenMedia.has(`v|${key}`)) continue;
+        seenMedia.add(`v|${key}`);
+        msg.videos.push({
+          thumb,
+          src,
+          duration: stripTgHtml(wrap.querySelector('.message_video_duration')?.textContent || '').slice(0, 12),
+          gif: wrap.classList.contains('blured') || !!wrap.querySelector('.js-message_video_blured'),
+        });
       }
       for (const player of el.querySelectorAll('.tgme_widget_message_video_player')) {
-        if (player.querySelector('.tgme_widget_message_video')) continue;
+        if (player.querySelector('.tgme_widget_message_video:not(.blured):not(.js-message_video_blured)')) continue;
         const thumb = absUrl(bgUrl(player.querySelector('.tgme_widget_message_video_thumb')?.getAttribute('style')));
         const duration = stripTgHtml(player.querySelector('.message_video_duration')?.textContent || '').slice(0, 12);
-        if (thumb || duration) msg.videos.push({ thumb, src: null, duration });
+        if (thumb || duration) msg.videos.push({ thumb, src: null, duration, gif: player.classList.contains('blured') });
       }
       const wp = el.querySelector('.tgme_widget_message_link_preview');
       if (wp) {
@@ -161,7 +165,11 @@ export function tgMessageToArticle(msg, { now = Date.now(), prevDate } = {}) {
   if (!title) {
     if (msg.photos.length > 1) title = `Photo album (${msg.photos.length})`;
     else if (msg.photos.length) title = 'Photo';
-    else if (msg.videos.length) title = msg.videos[0].duration ? `Video (${msg.videos[0].duration})` : 'Video';
+    else if (msg.videos.length) {
+      const v0 = msg.videos[0];
+      if (v0.gif) title = 'GIF';
+      else title = v0.duration ? `Video (${v0.duration})` : 'Video';
+    }
     else if (msg.webpage?.title) title = msg.webpage.title.slice(0, 140);
     else if (msg.pollText) title = msg.pollText.split('\n')[0].slice(0, 140);
     else title = `Message #${msg.id}`;
@@ -173,7 +181,8 @@ export function tgMessageToArticle(msg, { now = Date.now(), prevDate } = {}) {
   }
   for (const v of msg.videos) {
     if (v.src) {
-      parts.push(`<p><video controls preload="metadata"${v.thumb ? ` poster="${esc(v.thumb)}"` : ''} src="${esc(v.src)}"></video></p>`);
+      const play = v.gif ? 'autoplay loop muted playsinline preload="metadata"' : 'controls preload="metadata"';
+      parts.push(`<p><video ${play}${v.thumb ? ` poster="${esc(v.thumb)}"` : ''} src="${esc(v.src)}"></video></p>`);
     } else if (v.thumb) {
       const alt = v.duration ? `video, ${v.duration}` : 'video';
       parts.push(`<p><a href="${esc(msg.link)}"><img src="${esc(v.thumb)}" alt="${esc(alt)}"></a></p>`);

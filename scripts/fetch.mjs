@@ -30,7 +30,7 @@ const sanitizeOpts = {
     a: ['href', 'title', 'rel', 'target'],
     img: ['src', 'srcset', 'alt', 'title', 'width', 'height', 'loading', 'decoding', 'referrerpolicy'],
     source: ['src', 'type', 'srcset'],
-    video: ['src', 'controls', 'width', 'height', 'poster', 'preload'],
+    video: ['src', 'controls', 'width', 'height', 'poster', 'preload', 'autoplay', 'loop', 'muted', 'playsinline'],
     audio: ['src', 'controls', 'preload'],
     iframe: ['src', 'width', 'height', 'frameborder', 'allow', 'allowfullscreen', 'loading', 'title'],
     div: ['data-blocked-embed'],
