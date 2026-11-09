@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import zlib from 'node:zlib';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import Parser from 'rss-parser';
 import { JSDOM } from 'jsdom';
@@ -1099,7 +1100,9 @@ async function main() {
   for (const feed of feeds) {
     for (const a of written.get(feed.id) || []) allArticles.push({ ...a, _feed: feed.id });
   }
-  await fs.writeFile(path.join(DATA_DIR, 'all-feeds.json'), JSON.stringify({ articles: allArticles }));
+  const allFeedsJson = JSON.stringify({ articles: allArticles });
+  await fs.writeFile(path.join(DATA_DIR, 'all-feeds.json'), allFeedsJson);
+  await fs.writeFile(path.join(DATA_DIR, 'all-feeds.json.gz'), zlib.gzipSync(allFeedsJson, { level: 9 }));
   await fs.writeFile(path.join(DATA_DIR, 'index.json'), JSON.stringify(index));
   console.log(`done: ${Object.keys(index.feeds).length} feeds, ${failures} failure(s), keeping last ${retentionDays} days (no per-feed cap; 4chan feeds are live)`);
 }

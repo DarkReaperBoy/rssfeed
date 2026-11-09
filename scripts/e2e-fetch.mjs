@@ -259,6 +259,21 @@ const idx1 = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/index.json'), '
 ok(one1.articles.length === 3, `feed one stores 3 articles (${one1.articles.length})`);
 ok(two1.articles.length === 1, 'feed two stores 1 article');
 ok(all1.articles.length === 4, `all-feeds.json carries all 4 with _feed (${all1.articles.length})`);
+{
+  const zlib = await import('node:zlib');
+  const gzPath = path.join(SANDBOX, 'data/all-feeds.json.gz');
+  let gzOk = false, gzEqual = false, gzRawOk = false;
+  try {
+    const gzBuf = fs.readFileSync(gzPath);
+    gzOk = gzBuf.length > 2 && gzBuf[0] === 0x1f && gzBuf[1] === 0x8b;
+    const gunzipped = JSON.parse(zlib.gunzipSync(gzBuf).toString('utf8'));
+    gzEqual = gunzipped.articles?.length === 4 && JSON.stringify(gunzipped) === JSON.stringify(all1);
+    gzRawOk = zlib.gunzipSync(fs.readFileSync(gzPath)).toString('utf8') === fs.readFileSync(path.join(SANDBOX, 'data/all-feeds.json'), 'utf8');
+  } catch {}
+  ok(gzOk, `all-feeds.json.gz ships beside the plain file, in gzip format (${gzOk ? 'yes' : 'missing'})`);
+  ok(gzEqual, 'the gz artifact decompresses to the exact same JSON payload');
+  ok(gzRawOk, 'the plain and gz artifacts are byte-identical after decompression (the gz is a pure transport copy)');
+}
 ok(idx1.feeds.one.status.ok === true && idx1.feeds.one.status.etag === '"v1"', 'etag stored in status for conditional GET');
 const first1 = one1.articles.find((a) => a.title === 'First post');
 const undated1 = one1.articles.find((a) => a.title === 'Undated post');
