@@ -128,25 +128,28 @@ const tgRoutes = (req, res) => {
   res.end(`<!DOCTYPE html><html><head><meta property="og:title" content="${chan.title}"><meta property="og:image" content="https://cdn4.telesco.pe/file/${channel}-avatar.jpg"></head><body><div class="tgme_container"><section class="tgme_channel_history js-message_history">${moreBefore ? `<div class="tgme_widget_message_centered js-messages_more_wrap"><a href="/s/${channel}?before=${moreBefore}" class="tme_messages_more js-messages_more" data-before="${moreBefore}"></a></div>` : ''}${body}</section></div></body></html>`);
   return true;
 };
-const ytEntry = (vid, title, hoursAgo) => {
+const ytEntry = (vid, title, hoursAgo, link, noThumb) => {
   const iso = new Date(now - hoursAgo * 3600e3).toISOString();
   return ` <entry>
   <id>yt:video:${vid}</id>
   <yt:videoId>${vid}</yt:videoId>
   <title>${title}</title>
-  <link rel="alternate" href="https://www.youtube.com/watch?v=${vid}"/>
+  <link rel="alternate" href="${link || `https://www.youtube.com/watch?v=${vid}`}"/>
   <published>${iso}</published>
   <updated>${iso}</updated>
   <media:group>
    <media:title>${title}</media:title>
    <media:content url="https://www.youtube.com/v/${vid}?version=3" type="application/x-shockwave-flash" width="640" height="390"/>
-   <media:thumbnail url="https://i.ytimg.com/vi/${vid}/mqdefault.jpg" width="320" height="180"/>
+${noThumb ? '' : `   <media:thumbnail url="https://i.ytimg.com/vi/${vid}/mqdefault.jpg" width="320" height="180"/>`}
   </media:group>
  </entry>`;
 };
 const ytChannels = {
   DEMOA: { title: 'Demo YT Channel', page: 'UCDEMOA', entries: [{ vid: 'NEWA', title: 'Newest video', hoursAgo: 12 }, { vid: 'OLD1', title: 'Older video', hoursAgo: 200 }] },
   RETRY1: { title: 'Retry Channel', page: 'UCRETRY1', entries: [{ vid: 'OLDERR', title: 'Older retry video', hoursAgo: 100 }, { vid: 'NEWER', title: 'Newer retry video', hoursAgo: 5 }] },
+  ORDER2: { title: 'Oldest-First Channel', page: 'UCORDER2', entries: [{ vid: 'OLD2', title: 'Ancient video', hoursAgo: 300 }, { vid: 'NEW2', title: 'Fresh video', hoursAgo: 30 }] },
+  NOTHUMB: { title: 'Thumbless Channel', page: 'UCNOTHUMB', entries: [{ vid: 'NOT1', title: 'Thumbless video', hoursAgo: 20, noThumb: true }] },
+  LATEST1: { title: 'Shorts-Led Channel', page: 'UCLATEST1', entries: [{ vid: 'SHORTX', title: 'A short', hoursAgo: 3, link: 'https://www.youtube.com/shorts/S1' }, { vid: 'VIDOK', title: 'A real video', hoursAgo: 40 }] },
 };
 const ytHardFail = new Set(['HFONE', 'HFTWO', 'HFTHREE']);
 const ytFirstFail = new Set(['RETRY1', 'AFTER1']);
@@ -183,7 +186,7 @@ const ytRoutes = (req, res) => {
   <uri>https://www.youtube.com/channel/${chan.page}</uri>
  </author>
  <published>2023-01-03T15:41:34+00:00</published>
-${chan.entries.map((e) => ytEntry(e.vid, e.title, e.hoursAgo)).join('\n')}
+${chan.entries.map((e) => ytEntry(e.vid, e.title, e.hoursAgo, e.link, e.noThumb)).join('\n')}
 </feed>`);
   return true;
 };
@@ -921,6 +924,28 @@ console.log('run 29: YouTube feeds ride their own spaced lane — no burst, retr
   ok(poolMate.status.ok === true && poolMate.image === 'https://example.test/two.png', 'non-YouTube feeds keep their channel image untouched');
   const plainArts = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/feeds/yt-plain-thumb.json'), 'utf8')).articles;
   ok(plainArts[0]?.enclosures?.some((e) => e.url === 'https://plain.test/thumb-1.jpg' && e.type === 'image/thumbnail'), 'item thumbnails still ride along as enclosures for any feed');
+}
+console.log('run 30: a YouTube feed with no channel image icons itself from the newest video thumbnail');
+{
+  const YT_BASE = `http://127.0.0.1:${port}/feeds`;
+  fs.writeFileSync(path.join(SANDBOX, 'config.json'), JSON.stringify({
+    settings: { retentionDays: 30, fullTextDefault: false },
+    feeds: [
+      { id: 'yt-demo', title: 'YT Demo', url: `${YT_BASE}/videos.xml?channel_id=DEMOA` },
+      { id: 'yt-order', title: 'YT Order', url: `${YT_BASE}/videos.xml?channel_id=ORDER2` },
+      { id: 'yt-nothumb', title: 'YT NoThumb', url: `${YT_BASE}/videos.xml?channel_id=NOTHUMB` },
+      { id: 'yt-shorts-led', title: 'YT Shorts-Led', url: `${YT_BASE}/videos.xml?channel_id=LATEST1` },
+    ],
+  }, null, 2));
+  out = await run({ GHRSS_YT_BASE: YT_BASE, GHRSS_YT_THROTTLE_MS: '120', GHRSS_YT_RETRY_DELAYS: '60,90' });
+  const idx30 = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/index.json'), 'utf8'));
+  ok(idx30.feeds['yt-demo'].image === 'https://i.ytimg.com/vi/NEWA/mqdefault.jpg', `an iconless YouTube feed gains its icon on the next successful fetch — deployed data heals itself (${idx30.feeds['yt-demo'].image})`);
+  ok(idx30.feeds['yt-order'].image === 'https://i.ytimg.com/vi/NEW2/mqdefault.jpg', `the newest item wins by date, not by list position — newest-last ordering picks the fresh thumb (${idx30.feeds['yt-order'].image})`);
+  ok(idx30.feeds['yt-nothumb'].image === null && idx30.feeds['yt-nothumb'].status.ok === true, `a thumbnail-less channel stays iconless, no placeholder invented (${idx30.feeds['yt-nothumb'].image})`);
+  const shortsFeed = idx30.feeds['yt-shorts-led'];
+  ok(shortsFeed.image === 'https://i.ytimg.com/vi/VIDOK/mqdefault.jpg', `a dropped short never becomes the icon — the newest real video does (${shortsFeed.image})`);
+  ok(shortsFeed.count === 1, `the short itself is dropped from the articles (${shortsFeed.count})`);
+  ok(idx30.feeds['yt-demo'].site === 'https://www.youtube.com/channel/UCDEMOA', 'the site survives the icon pass unchanged');
 }
 console.log('id-migration matchers (unit)');
 {

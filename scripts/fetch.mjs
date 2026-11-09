@@ -293,6 +293,20 @@ function feedMetaFor(feed, prevMeta, parsed = null) {
   const image = httpOr(parsed?.image?.url || parsed?.icon || parsed?.logo, httpOr(prevMeta?.image, null));
   return { title, origTitle, site, xml: feed.url || null, image };
 }
+function newestItemThumb(parsed) {
+  let best = null;
+  let bestDate = -Infinity;
+  for (const item of parsed?.items || []) {
+    const t = item?.mediaThumbnail?.$?.url
+      || (Array.isArray(item?.mediaGroup?.['media:thumbnail']) ? item.mediaGroup['media:thumbnail'][0]?.$?.url : item?.mediaGroup?.['media:thumbnail']?.$?.url)
+      || null;
+    if (!t) continue;
+    if (isShortItem(item.link, item.title, item.contentSnippet || '')) continue;
+    const d = pickDate(item) ?? -Infinity;
+    if (d >= bestDate) { bestDate = d; best = String(t); }
+  }
+  return httpOr(best, null);
+}
 function summarizeFeed(feed, articles) {
   const sorted = [...articles].sort((a, b) => b.date - a.date);
   const folders = feedFolders(feed);
@@ -927,7 +941,7 @@ async function main() {
         status.error = null;
         if (ytLike) ytThrottleMisses = 0;
         const kept = purgePrev(prev, {
-          ytShorts: isYouTubeFeed(feed.url) && (feed.dropShorts ?? dropShortsDefault),
+          ytShorts: isYouTubeLike(feed.url) && (feed.dropShorts ?? dropShortsDefault),
           feedBlocks,
           cf: cList,
         });
@@ -983,9 +997,10 @@ async function main() {
     status.error = null;
     if (ytLike) ytThrottleMisses = 0;
     const fmeta = feedMetaFor(feed, prevMeta, parsed);
+    if (ytLike && !fmeta.image) fmeta.image = newestItemThumb(parsed);
     const wantText = feed.fullText ?? fullTextDefault;
     let textBudget = wantText ? TEXT_EXTRACT_BUDGET : 0;
-    const ytShorts = isYouTubeFeed(feed.url) && (feed.dropShorts ?? dropShortsDefault);
+    const ytShorts = isYouTubeLike(feed.url) && (feed.dropShorts ?? dropShortsDefault);
     const articles = [];
     let shortsDropped = 0;
     let filterDropped = 0;
