@@ -1,5 +1,22 @@
 # Production-hardening changelog
 
+## Avatar scrape window: scan what YouTube actually serves (production-verified follow-up to the frontend load pass; one atomic commit)
+
+The frontend load pass shipped `3fb2733` and the Action deployed it 3 minutes later — yet the live `data/index.json` came back with **all 60 YouTube feeds healthy but iconless** (`image: null`, `status.ok: true`). Measured against the real site, not guessed:
+
+- The deployed run **did** execute the new code (fix landed 16:23:11Z, data generated 16:24:34Z, deployed 16:26:46Z) and **did** fetch every channel page — `ytChannelAvatar`'s `res.text()` succeeded — but the og:image hunt ran on `(await res.text()).slice(0, 262144)`: **the first 256 KB only**.
+- A real channel page (`youtube.com/channel/UC…`, fetched with the fetcher's own UA from a clean network) is **1,105,097–1,120,891 bytes**, and `og:image` sits at byte **828,303–835,581** — about 75% in, with just **2 of 91** `<meta>` tags inside the first 256 KB. The page was downloaded whole, the tag was thrown away by the scan window, and every feed resolved iconless. The e2e fakes were tiny pages, so the suite stayed green while production failed — a classic test-realism gap, now closed by a real-sized fake.
+
+| Commit | Change | Verify |
+|---|---|---|
+| `19c8fbf` | **The scan window is `YT_PAGE_SCAN_MAX = 4 MiB`** — ~3.6× the largest observed real page (1.12 MB), still a bounded guard on the regex input. `res.text()` already materializes the full body, so the wire cost is unchanged; only the discarded region shrinks to zero. | `npm run test:e2e` → run 30 (+2): a new `UCBIG` channel serves a **real-sized ~0.9 MB page with `og:image` buried ~900 KB in** — reproduced the production failure first (avatar `null`, page fetched once), then the avatar resolves and downscales to `=s96-…`, one page fetch, and every neighboring avatar behavior stays green. Full suite: **965 ✓ / 0 ✗** across ui 607, e2e 257 (+2), characterization 34, security 18, static 44, chaos 5 — `npm test` exits 0. |
+
+**Verify:** `npm ci && npm test`
+
+**Live healing:** on the Action's next run every iconless YouTube feed pays its one cached-in-meta page fetch and keeps the avatar (the downscaled `=s96` URL was verified to serve a 5,611-byte JPEG over the live CDN). Feeds whose channel pages genuinely die stay iconless and ride the reader's classic-YouTube-logo fallback — never a video thumbnail, in any state.
+
+---
+
 ## Frontend load pass: gzipped transport + real channel avatars (user-reported; three atomic commits, each landing green)
 
 The user's report: *"the frontend is very slow loading, used to be blazing fast… now, it is like stuck, or one by one, or slow"* and *"youtube thumbnail as pfp is [bad]. i want either the original yt icon or fetching the channel icon itself. not video thumbnail as icon."* Recon over the whole source (Phase 0) found both root causes measured, not guessed:
