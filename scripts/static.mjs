@@ -132,6 +132,8 @@ console.log('static contract: fetch cadence copy matches the workflow schedule')
   const wf = await fs.readFile(path.join(ROOT, '.github/workflows/fetch.yml'), 'utf8');
   const cron = wf.match(/cron:\s*'([^']+)'/)?.[1] || '';
   ok(/^\d+ \* \* \* \*$/.test(cron), `the fetch workflow runs hourly (cron: ${cron}) — any other cadence requires updating the app/README cadence copy in the same commit`);
+  const pushBranches = wf.match(/push:\s*\n\s*branches:\s*\[([^\]]*)\]/);
+  ok(!!pushBranches && pushBranches[1].split(',').map((s) => s.trim()).includes('main'), `the fetch workflow triggers on pushes to main (branches: ${pushBranches ? pushBranches[1] : 'unparseable'} ) — a mangled trigger silently leaves deploys waiting for the hourly cron`);
   ok(!/every 15 minutes|every 15 min\b/.test(appSrc) && /every hour/.test(appSrc), 'the app empty-state copy names the hourly cadence');
   const readme = await fs.readFile(path.join(ROOT, 'README.md'), 'utf8');
   ok(!/every 15 minutes|every 15 min\b/.test(readme) && /every hour/.test(readme), 'the README names the hourly cadence');

@@ -12,6 +12,10 @@ The user's report: *"youtube icons aren't coming when github action did get the 
 
 **Live verification (real fetches, not fixtures):** two full production runs against the real config — **80 feeds, 0 failures each** (~65 s; the YouTube lane's 59 spaced requests dominate, by design). After the first run: **59/59 YouTube feeds green, site populated, `image` derived** (spot check: AI Explained → `i1.ytimg.com/vi/0Kw6_DTZPrY/hqdefault.jpg`); all values persisted across the second run. Real-Chromium walk on the fetched data: 59/59 tree items carry the ytimg icon (the visible ones fully loaded, 0 broken, 0 degradation tiles, rows too), 19/19 telegram avatars unchanged, folders tile as before, Hacker News unchanged (no site/xml — pre-existing).
 
+**Deployed verification:** the push itself triggered the workflow (push: `branches: [main]`), and the run it launched healed production — the live `data/index.json` went from 58 broken YouTube feeds to **59/59 ok, 59/59 site, 59/59 icon, zero errors**, with the reader fallback live in the deployed `app.js`.
+
+**Also pinned this pass (test-only):** the fetch workflow's push trigger must name `main` in a bracket list (`static` 43→44). The pin's first catch was itself: every read of the trigger line rendered as `branches: ain]` — a display-layer artifact that swallows the `[m` bytes (they read as an ANSI reset); the pin refused to fail, and `od -c` proved the file has always said `[main]`. The pin stays: it would have caught real corruption of exactly this shape.
+
 **Verify the whole pass:**
 ```sh
 npm ci && npm test
