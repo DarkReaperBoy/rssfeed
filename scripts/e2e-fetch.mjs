@@ -128,6 +128,66 @@ const tgRoutes = (req, res) => {
   res.end(`<!DOCTYPE html><html><head><meta property="og:title" content="${chan.title}"><meta property="og:image" content="https://cdn4.telesco.pe/file/${channel}-avatar.jpg"></head><body><div class="tgme_container"><section class="tgme_channel_history js-message_history">${moreBefore ? `<div class="tgme_widget_message_centered js-messages_more_wrap"><a href="/s/${channel}?before=${moreBefore}" class="tme_messages_more js-messages_more" data-before="${moreBefore}"></a></div>` : ''}${body}</section></div></body></html>`);
   return true;
 };
+const ytEntry = (vid, title, hoursAgo) => {
+  const iso = new Date(now - hoursAgo * 3600e3).toISOString();
+  return ` <entry>
+  <id>yt:video:${vid}</id>
+  <yt:videoId>${vid}</yt:videoId>
+  <title>${title}</title>
+  <link rel="alternate" href="https://www.youtube.com/watch?v=${vid}"/>
+  <published>${iso}</published>
+  <updated>${iso}</updated>
+  <media:group>
+   <media:title>${title}</media:title>
+   <media:content url="https://www.youtube.com/v/${vid}?version=3" type="application/x-shockwave-flash" width="640" height="390"/>
+   <media:thumbnail url="https://i.ytimg.com/vi/${vid}/mqdefault.jpg" width="320" height="180"/>
+  </media:group>
+ </entry>`;
+};
+const ytChannels = {
+  DEMOA: { title: 'Demo YT Channel', page: 'UCDEMOA', entries: [{ vid: 'NEWA', title: 'Newest video', hoursAgo: 12 }, { vid: 'OLD1', title: 'Older video', hoursAgo: 200 }] },
+  RETRY1: { title: 'Retry Channel', page: 'UCRETRY1', entries: [{ vid: 'OLDERR', title: 'Older retry video', hoursAgo: 100 }, { vid: 'NEWER', title: 'Newer retry video', hoursAgo: 5 }] },
+};
+const ytHardFail = new Set(['HFONE', 'HFTWO', 'HFTHREE']);
+const ytFirstFail = new Set(['RETRY1', 'AFTER1']);
+const ytHits = {};
+let ytBurstViolations = 0;
+let ytLastHit = 0;
+const YT_BURST_MS = 60;
+const ytRoutes = (req, res) => {
+  const u = new URL(req.url, 'http://www.youtube.com');
+  if (u.pathname !== '/feeds/videos.xml') return false;
+  const cid = u.searchParams.get('channel_id');
+  if (!cid) return false;
+  ytHits[cid] = (ytHits[cid] || 0) + 1;
+  const since = Date.now() - ytLastHit;
+  ytLastHit = Date.now();
+  if (since < YT_BURST_MS) {
+    ytBurstViolations++;
+    res.writeHead(404); res.end(); return true;
+  }
+  if (ytHardFail.has(cid) || (ytFirstFail.has(cid) && ytHits[cid] === 1) || !ytChannels[cid]) {
+    res.writeHead(404); res.end(); return true;
+  }
+  const chan = ytChannels[cid];
+  res.writeHead(200, { 'Content-Type': 'application/atom+xml; charset=utf-8' });
+  res.end(`<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns:yt="http://www.youtube.com/xml/schemas/2015" xmlns:media="http://search.yahoo.com/mrss/" xmlns="http://www.w3.org/2005/Atom">
+ <link rel="self" href="http://www.youtube.com/feeds/videos.xml?channel_id=${cid}"/>
+ <id>yt:channel:${cid}</id>
+ <yt:channelId>${cid}</yt:channelId>
+ <title>${chan.title}</title>
+ <link rel="alternate" href="https://www.youtube.com/channel/${chan.page}"/>
+ <author>
+  <name>${chan.title}</name>
+  <uri>https://www.youtube.com/channel/${chan.page}</uri>
+ </author>
+ <published>2023-01-03T15:41:34+00:00</published>
+${chan.entries.map((e) => ytEntry(e.vid, e.title, e.hoursAgo)).join('\n')}
+</feed>`);
+  return true;
+};
+const thumbFeedRss = () => `<?xml version="1.0" encoding="UTF-8"?><rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/"><channel><title>Thumb Feed</title><link>https://plain.test/</link><item><title>Plain story</title><link>https://plain.test/a/1</link><guid>plain-1</guid><pubDate>${new Date(now - 7200e3).toUTCString()}</pubDate><description>plain body</description><media:thumbnail url="https://plain.test/thumb-1.jpg"/></item></channel></rss>`;
 const chanCatalog = () => JSON.stringify([{ threads: [
   { no: 9001, time: Math.floor(now / 1000) - 3600, replies: 120, sub: 'Fresh thread', com: 'fresh op' },
   { no: 9002, time: Math.floor(now / 1000) - 90 * 86400, replies: 400, sub: 'Ninety-day-old thread', com: 'old op' },
@@ -246,8 +306,12 @@ const server2 = http.createServer((req, res) => {
     art2Hits++;
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     res.end(article2Html);
+  } else if (req.url === '/thumbfeed.xml') {
+    res.writeHead(200, { 'Content-Type': 'application/rss+xml; charset=utf-8' });
+    res.end(thumbFeedRss());
   } else if (chanRoutes(req, res)) { /* served */ }
   else if (tgRoutes(req, res)) { /* served */ }
+  else if (ytRoutes(req, res)) { /* served */ }
   else { res.writeHead(404); res.end(); }
 });
 await new Promise((r) => server2.listen(port, '127.0.0.1', r));
@@ -815,6 +879,48 @@ console.log('run 24: a fresh telegram instance syncs the whole latest month and 
   ok(!idx28.feeds.tgtight.status.tgGaps && idx28.feeds.tgtight.status.tgMonthDone === true && idx28.feeds.tgtight.status.tgBacklog === false, 'gap list empty, mark landed, backlog clear');
   ok(tgRequests.monthtight === req28.monthtight + 2, `fresh walk (1) + final healing page (1) (${tgRequests.monthtight - req28.monthtight} request(s))`);
   tgMonthNew = null;
+}
+console.log('run 29: YouTube feeds ride their own spaced lane — no burst, retry on throttle, breaker after three');
+{
+  const YT_BASE = `http://127.0.0.1:${port}/feeds`;
+  fs.writeFileSync(path.join(SANDBOX, 'config.json'), JSON.stringify({
+    settings: { retentionDays: 30, fullTextDefault: false },
+    feeds: [
+      { id: 'yt-demo', title: 'YT Demo', url: `${YT_BASE}/videos.xml?channel_id=DEMOA` },
+      { id: 'yt-retry', title: 'YT Retry', url: `${YT_BASE}/videos.xml?channel_id=RETRY1` },
+      { id: 'yt-hf1', title: 'YT Hard One', url: `${YT_BASE}/videos.xml?channel_id=HFONE` },
+      { id: 'yt-hf2', title: 'YT Hard Two', url: `${YT_BASE}/videos.xml?channel_id=HFTWO` },
+      { id: 'yt-hf3', title: 'YT Hard Three', url: `${YT_BASE}/videos.xml?channel_id=HFTHREE` },
+      { id: 'yt-after', title: 'YT After Breaker', url: `${YT_BASE}/videos.xml?channel_id=AFTER1` },
+      { id: 'yt-plain-thumb', title: 'Plain Thumb Feed', url: `http://127.0.0.1:${port}/thumbfeed.xml` },
+      { id: 'yt-pool-mate', title: 'Pool Mate', url: `http://127.0.0.1:${port}/feed2.xml` },
+    ],
+  }, null, 2));
+  out = await run({ GHRSS_YT_BASE: YT_BASE, GHRSS_YT_THROTTLE_MS: '120', GHRSS_YT_RETRY_DELAYS: '60,90' });
+  ok(ytBurstViolations === 0, `YouTube requests never arrive in a burst — the parallel pool no longer hammers them (${ytBurstViolations} violation(s))`);
+  ok(ytHits.DEMOA === 1, `a healthy channel fetches in exactly one spaced request (${ytHits.DEMOA || 0})`);
+  const idx29 = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/index.json'), 'utf8'));
+  const demoFeed = idx29.feeds['yt-demo'];
+  ok(demoFeed.status.ok === true && demoFeed.status.error === null, 'the demo YouTube feed is green');
+  ok(demoFeed.count === 2, `both videos stored (${demoFeed.count})`);
+  ok(demoFeed.site === 'https://www.youtube.com/channel/UCDEMOA', `the channel link becomes the site (${demoFeed.site})`);
+  const retryFeed = idx29.feeds['yt-retry'];
+  ok(retryFeed.status.ok === true && ytHits.RETRY1 === 2, `a throttled first attempt heals on retry (${ytHits.RETRY1 || 0} hit(s))`);
+  for (const [fid, cid] of [['yt-hf1', 'HFONE'], ['yt-hf2', 'HFTWO'], ['yt-hf3', 'HFTHREE']]) {
+    const f = idx29.feeds[fid];
+    ok(f.status.ok === false && f.status.error === 'HTTP 404' && f.status.consecutiveFailures === 1, `${fid} fails clean after burning the retry budget`);
+    ok(ytHits[cid] === 3, `${fid} burned exactly 3 attempts (1 + 2 retries) (${ytHits[cid] || 0})`);
+  }
+  const afterFeed = idx29.feeds['yt-after'];
+  ok(afterFeed.status.ok === false && afterFeed.status.error === 'HTTP 404', 'the channel after the breaker fails too (YouTube was down hard this run)');
+  ok(ytHits.AFTER1 === 1, `three straight throttle-failures disarm retries for the rest of the run — one attempt only (${ytHits.AFTER1 || 0})`);
+  const plainFeed = idx29.feeds['yt-plain-thumb'];
+  ok(plainFeed.status.ok === true && plainFeed.count === 1, 'the plain thumb-carrying feed fetches normally in the pool');
+  ok(plainFeed.image === null, `thumbnail-derived icons are a YouTube-feed thing only (${plainFeed.image})`);
+  const poolMate = idx29.feeds['yt-pool-mate'];
+  ok(poolMate.status.ok === true && poolMate.image === 'https://example.test/two.png', 'non-YouTube feeds keep their channel image untouched');
+  const plainArts = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/feeds/yt-plain-thumb.json'), 'utf8')).articles;
+  ok(plainArts[0]?.enclosures?.some((e) => e.url === 'https://plain.test/thumb-1.jpg' && e.type === 'image/thumbnail'), 'item thumbnails still ride along as enclosures for any feed');
 }
 console.log('id-migration matchers (unit)');
 {

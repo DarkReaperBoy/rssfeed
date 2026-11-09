@@ -437,6 +437,26 @@ async function tgThrottle() {
   if (wait > 0) await sleep(wait);
   tgLastReq = Date.now();
 }
+// YouTube lane: the feeds endpoint throttles rapid parallel requests with
+// bare 404/429/500s, so YouTube feeds never ride the shared concurrency pool —
+// they fetch in one serialized chain, spaced by YT_THROTTLE_MS, and a throttled
+// status retries with backoff. Three straight feeds that burn the full retry
+// budget disarm retries for the rest of the run (a hard-throttled IP does not
+// recover mid-run; the next run re-arms) so an outage can't blow the job's clock.
+const YT_THROTTLE_MS = Number(process.env.GHRSS_YT_THROTTLE_MS) || 1100;
+const YT_RETRY_DELAYS = String(process.env.GHRSS_YT_RETRY_DELAYS || '2500,7000')
+  .split(',').map((s) => Number(s)).filter((n) => Number.isFinite(n) && n >= 0);
+const YT_RETRYABLE = new Set([404, 429, 500, 503]);
+const YT_TEST_BASE = process.env.GHRSS_YT_BASE || '';
+const isYouTubeLike = (url) => isYouTubeFeed(url) || (YT_TEST_BASE !== '' && String(url || '').startsWith(YT_TEST_BASE));
+let ytLastReq = 0;
+async function ytThrottle() {
+  const wait = ytLastReq + YT_THROTTLE_MS - Date.now();
+  if (wait > 0) await sleep(wait);
+  ytLastReq = Date.now();
+}
+let ytThrottleMisses = 0;
+
 const tgDoFetch = async (url) => {
   await tgThrottle();
   return fetch(url, {
@@ -880,16 +900,32 @@ async function main() {
       return;
     }
     let xml;
+    const ytLike = isYouTubeLike(feed.url);
+    let ytExhausted = false;
     try {
       const headers = { ...parser.options.headers };
       if (prevStatus.etag) headers['If-None-Match'] = prevStatus.etag;
       else if (prevStatus.lastModified) headers['If-Modified-Since'] = prevStatus.lastModified;
-      const res = await fetch(feed.url, { headers, signal: AbortSignal.timeout(35000), redirect: 'follow' });
+      const ytFetch = async () => {
+        if (ytLike) await ytThrottle();
+        return fetch(feed.url, { headers, signal: AbortSignal.timeout(35000), redirect: 'follow' });
+      };
+      let res = await ytFetch();
+      if (ytLike && YT_RETRYABLE.has(res.status)) {
+        for (const delay of ytThrottleMisses >= 3 ? [] : YT_RETRY_DELAYS) {
+          try { await res.body?.cancel(); } catch {}
+          await sleep(delay);
+          res = await ytFetch();
+          if (!YT_RETRYABLE.has(res.status)) break;
+        }
+        if (YT_RETRYABLE.has(res.status)) ytExhausted = true;
+      }
       if (res.status === 304) {
         status.ok = true;
         status.lastSuccess = now;
         status.consecutiveFailures = 0;
         status.error = null;
+        if (ytLike) ytThrottleMisses = 0;
         const kept = purgePrev(prev, {
           ytShorts: isYouTubeFeed(feed.url) && (feed.dropShorts ?? dropShortsDefault),
           feedBlocks,
@@ -908,6 +944,7 @@ async function main() {
       status.etag = res.headers.get('etag') || null;
       status.lastModified = res.headers.get('last-modified') || null;
     } catch (err) {
+      if (ytLike && ytExhausted) ytThrottleMisses++;
       failures++;
       status.ok = false;
       status.error = err.message;
@@ -944,6 +981,7 @@ async function main() {
     status.lastSuccess = now;
     status.consecutiveFailures = 0;
     status.error = null;
+    if (ytLike) ytThrottleMisses = 0;
     const fmeta = feedMetaFor(feed, prevMeta, parsed);
     const wantText = feed.fullText ?? fullTextDefault;
     let textBudget = wantText ? TEXT_EXTRACT_BUDGET : 0;
@@ -1010,17 +1048,19 @@ async function main() {
   };
   const chanFeeds = feeds.filter((f) => f.type === '4chan');
   const tgFeeds = feeds.filter((f) => isTelegramFeed(f));
-  const poolFeeds = feeds.filter((f) => f.type !== '4chan' && !isTelegramFeed(f));
+  const ytFeeds = feeds.filter((f) => f.type !== '4chan' && !isTelegramFeed(f) && isYouTubeLike(f.url));
+  const poolFeeds = feeds.filter((f) => f.type !== '4chan' && !isTelegramFeed(f) && !isYouTubeLike(f.url));
   const runOne = async (feed) => {
     try { await processFeed(feed); }
     catch (err) { failures++; console.error(`[${feed.id}] FAILED: ${err.message}`); }
   };
   const chanChain = (async () => { for (const feed of chanFeeds) await runOne(feed); })();
   const tgChain = (async () => { for (const feed of tgFeeds) await runOne(feed); })();
+  const ytChain = (async () => { for (const feed of ytFeeds) await runOne(feed); })();
   const pool = Array.from({ length: Math.min(FETCH_CONCURRENCY, poolFeeds.length) }, async () => {
     while (poolFeeds.length) await runOne(poolFeeds.shift());
   });
-  await Promise.all([...pool, chanChain, tgChain]);
+  await Promise.all([...pool, chanChain, tgChain, ytChain]);
   for (const [oldId] of Object.entries(prevFeedMeta)) {
     if (!currentFeedIds.has(oldId)) {
       try {
