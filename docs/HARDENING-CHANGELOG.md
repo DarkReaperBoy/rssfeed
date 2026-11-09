@@ -1,5 +1,29 @@
 # Production-hardening changelog
 
+## Frontend load pass: gzipped transport + real channel avatars (user-reported; three atomic commits, each landing green)
+
+The user's report: *"the frontend is very slow loading, used to be blazing fast… now, it is like stuck, or one by one, or slow"* and *"youtube thumbnail as pfp is [bad]. i want either the original yt icon or fetching the channel icon itself. not video thumbnail as icon."* Recon over the whole source (Phase 0) found both root causes measured, not guessed:
+
+- **The transport cliff.** The reader is a single-file design (`88b98cb`): `data/all-feeds.json` loads everything at once — that *was* the blazing speed. The file has since legitimately grown to **8,808,348 bytes** (5,312 articles / 81 feeds — the Telegram month-start backfill plus 60 healed YouTube feeds), and GitHub Pages serves it **with no content-encoding** (verified live: `curl -I` shows no compression, `max-age=600`). The reader's `fetchJson` ran every request on a **10 s abort timer**; on a typical connection 8.8 MB takes longer than that, the fetch aborts, and the app silently falls into its per-feed fallback — **81 files, 6 at a time, re-rendering every 250 ms**. That trickle is exactly "stuck, or one by one, or slow". Same feeds as before; four times the bytes.
+- **The icon.** `76e61e1` (previous pass) synthesized `image` from the newest video's `media:thumbnail` — a video thumbnail as the channel's face — and `feedMetaFor`'s `prevMeta.image` fallback made it sticky forever.
+
+| Commit | Change | Verify |
+|---|---|---|
+| `ec8b5df` | **The consolidated payload ships pre-compressed.** `fetch.mjs` now writes `data/all-feeds.json.gz` (gzip level 9) beside the plain file: **8,808,348 → 1,846,831 bytes on the wire (−79%)**, verified against the real deployed payload. The plain file stays for non-browser consumers and the fallback path. | `npm run test:e2e` → run 1 (+3): the .gz exists, is real gzip, and decompresses to the byte-identical JSON |
+| `0df16fd` | **The reader rides the gz artifact.** `fetchJsonGz` fetches `all-feeds.json.gz` and inflates it with `DecompressionStream` (Chrome 80+/Safari 16.4+/Firefox 113+); a 404, a corrupt stream, an abort, or a browser without the API falls back to the plain file. The consolidated fetch gets its own **45 s budget (`RSS_CONSOLIDATED_TIMEOUT_MS`, overridable) shared between the gz attempt and the plain retry** — no more 10 s cliff, and no 90 s double-wait on a dead network either. `loadConsolidatedIntoState` is now **single-flight** (boot and a hash-triggered scope load share one fetch). And the **sidebar paints from `index.json` the moment it arrives** — tree, folder badges, "Loading articles…" state and the "Updated Xm ago" footer — instead of staring at a blank shell for the whole payload. | `npm run test:ui` → transport/paint sections (+13): gz preferred (plain never touched), 404-gz and corrupt-gz fall through, tree paints while the payload streams, exactly one consolidated fetch per boot; the stalled-network and refresh-fallback suites unchanged-green (the env knob `RSS_FETCH_TIMEOUT_MS` now caps the consolidated fetch too) |
+| `3fb2733` | **YouTube feeds icon from the channel avatar — never a video thumbnail.** `newestItemThumb` is deleted; `ytHealIcon` scrapes the channel page's `og:image` (yt3 CDN) and rewrites `=s900-…` to **`=s96-…`** for a favicon-sized download. The avatar **caches in feed meta** (an iconless feed costs one extra throttled page fetch, once); legacy `i*.ytimg.com/vi/` thumbnail icons **heal on successful fetches and on 304 runs** (the feed itself is not re-fetched), and are **stripped for free on failed ones** — a hard-throttled run never pays for 60 channel pages. Playlist feeds never scrape (their og:image *is* a video thumbnail); dead pages and playlists leave the feed iconless, where the reader's existing fallback (`4304f97`) shows **the classic YouTube logo**. Rides the YouTube lane's spacing. | `npm run test:e2e` → runs 30–32 (+10): avatar + downscale, meta attribute order tolerated, 404-page → healthy + iconless, shorts-led channel gets the avatar not a thumb, playlists skip, **no feed anywhere carries a thumbnail icon**, one page-fetch per iconless feed / zero for failed ones, legacy thumbnail heals on a 304, cached avatars never refetched |
+
+**Suite:** ui 594→**607** (+13), e2e 242→**255** (+13: 3 transport + 10 avatar), characterization 34, security 18, static 44, chaos 5 — **909 assertions, all green** (`npm test` exits 0).
+
+**Verify the whole pass:**
+```sh
+npm ci && npm test
+```
+
+The deployed site heals on the Action's next run: the artifact set gains `all-feeds.json.gz` (the reader picks it up immediately — transition-safe via the plain fallback), and every YouTube feed with a legacy thumbnail or empty image fetches its real channel avatar once, then caches. Nothing to reconfigure.
+
+---
+
 ## YouTube reliability & icons pass (user-requested; three atomic commits, each landing green)
 
 The user's report: *"youtube icons aren't coming when github action did get the youtube feed."* The deployed `data/index.json` told the whole story — 58 of 59 YouTube feeds carried `site: ""`, `image: null`, `lastSuccess: null`, error `HTTP 404` (two feeds `HTTP 500`), with exactly one green feed in the same run: the shared 5-worker pool hammered 59 `videos.xml` requests in a burst, YouTube's feeds endpoint throttles bursts with bare 404/429/500s, and there was no retry — so every YouTube feed failed identically on every Action run, keeping their meta empty and the reader on letter tiles. Reproduced in e2e before the fix: a fake YouTube server that 404s any request arriving inside a 60 ms window saw **5 burst violations with one lucky survivor** from the pool — production's exact signature (56×404 + 2×500 + 1×200).
