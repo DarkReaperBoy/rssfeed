@@ -101,6 +101,9 @@ export function tgParsePage(html) {
         textHtml: el.querySelector('.tgme_widget_message_text')?.innerHTML.trim() || '',
         photos: [],
         videos: [],
+        stickers: [],
+        voices: [],
+        documents: [],
         webpage: null,
         forwarded: stripTgHtml(el.querySelector('.tgme_widget_message_forwarded_from')?.textContent || '').slice(0, 200),
         signature: stripTgHtml(el.querySelector('.tgme_widget_message_signature')?.textContent || '').slice(0, 120),
@@ -132,6 +135,51 @@ export function tgParsePage(html) {
         const duration = stripTgHtml(player.querySelector('.message_video_duration')?.textContent || '').slice(0, 12);
         if (thumb || duration) msg.videos.push({ thumb, src: null, duration, gif: player.classList.contains('blured') });
       }
+      for (const rv of el.querySelectorAll('video.js-message_roundvideo, .js-message_roundvideo')) {
+        const player = rv.closest('[class*="roundvideo_player"]') || el;
+        const src = absUrl(rv.getAttribute('src'));
+        const thumb = absUrl(bgUrl(player.querySelector('[class*="roundvideo_thumb"]')?.getAttribute('style')));
+        const key = src || thumb;
+        if (!key || seenMedia.has(`v|${key}`)) continue;
+        seenMedia.add(`v|${key}`);
+        msg.videos.push({
+          thumb,
+          src,
+          duration: stripTgHtml(player.querySelector('[class*="roundvideo_duration"]')?.textContent || '').slice(0, 12),
+          gif: false,
+          round: true,
+        });
+      }
+      for (const sw of el.querySelectorAll('.tgme_widget_message_sticker_wrap')) {
+        const holder = sw.querySelector('.js-sticker_image, .js-tgsticker_image, .js-sticker_thumb, .js-videosticker');
+        const fallbackImg = sw.querySelector('img');
+        const webp = absUrl(holder?.getAttribute('data-webp') || fallbackImg?.getAttribute('data-webp') || fallbackImg?.getAttribute('src'));
+        const vsrc = absUrl(sw.querySelector('video')?.getAttribute('src'));
+        const key = vsrc || webp;
+        if (!key || seenMedia.has(`s|${key}`)) continue;
+        seenMedia.add(`s|${key}`);
+        if (vsrc) msg.stickers.push({ src: vsrc, poster: webp, video: true });
+        else if (webp) msg.stickers.push({ src: webp, poster: null, video: false });
+        else {
+          const bg = absUrl(bgUrl(holder?.getAttribute('style')));
+          if (bg) msg.stickers.push({ src: bg, poster: null, video: false });
+        }
+      }
+      for (const vp of el.querySelectorAll('.tgme_widget_message_voice_player, .js-message_voice_player')) {
+        const audioEl = vp.querySelector('audio, .js-message_voice');
+        const src = absUrl(audioEl?.getAttribute('src') || audioEl?.getAttribute('data-ogg'));
+        const duration = stripTgHtml(vp.querySelector('[class*="voice_duration"]')?.textContent || '').slice(0, 12);
+        const key = src || `d|${duration}`;
+        if (seenMedia.has(`a|${key}`)) continue;
+        seenMedia.add(`a|${key}`);
+        if (src || duration) msg.voices.push({ src, duration });
+      }
+      for (const d of el.querySelectorAll('.tgme_widget_message_document_wrap')) {
+        const title = stripTgHtml(d.querySelector('.tgme_widget_message_document_title')?.textContent || '').slice(0, 300);
+        const extra = stripTgHtml(d.querySelector('.tgme_widget_message_document_extra')?.textContent || '').slice(0, 80);
+        if (!title && !extra) continue;
+        msg.documents.push({ href: absUrl(d.getAttribute('href')) || msg.link, title, extra });
+      }
       const wp = el.querySelector('.tgme_widget_message_link_preview');
       if (wp) {
         const img = wp.querySelector('.link_preview_image, .link_preview_right_image');
@@ -159,6 +207,9 @@ export function tgArticleId(msg) {
 }
 
 export function tgMessageToArticle(msg, { now = Date.now(), prevDate } = {}) {
+  const stickers = msg.stickers || [];
+  const voices = msg.voices || [];
+  const documents = msg.documents || [];
   const plain = stripTgHtml(msg.textHtml);
   const firstLine = plain.split('\n').map((s) => s.trim()).filter(Boolean)[0] || '';
   let title = firstLine.slice(0, 140);
@@ -168,8 +219,12 @@ export function tgMessageToArticle(msg, { now = Date.now(), prevDate } = {}) {
     else if (msg.videos.length) {
       const v0 = msg.videos[0];
       if (v0.gif) title = 'GIF';
+      else if (v0.round) title = v0.duration ? `Video message (${v0.duration})` : 'Video message';
       else title = v0.duration ? `Video (${v0.duration})` : 'Video';
     }
+    else if (stickers.length) title = 'Sticker';
+    else if (voices.length) title = voices[0].duration ? `Voice message (${voices[0].duration})` : 'Voice message';
+    else if (documents.length) title = documents[0].title || 'Document';
     else if (msg.webpage?.title) title = msg.webpage.title.slice(0, 140);
     else if (msg.pollText) title = msg.pollText.split('\n')[0].slice(0, 140);
     else title = `Message #${msg.id}`;
@@ -191,6 +246,17 @@ export function tgMessageToArticle(msg, { now = Date.now(), prevDate } = {}) {
       parts.push(`<p><a href="${esc(msg.link)}">${esc(label)}</a></p>`);
     }
   }
+  for (const s of stickers) {
+    if (s.video) parts.push(`<p><video autoplay loop muted playsinline preload="metadata"${s.poster ? ` poster="${esc(s.poster)}"` : ''} src="${esc(s.src)}"></video></p>`);
+    else parts.push(`<p><a href="${esc(msg.link)}"><img src="${esc(s.src)}" alt="Sticker"></a></p>`);
+  }
+  for (const v of voices) {
+    if (v.src) parts.push(`<p><audio controls preload="none" src="${esc(v.src)}"></audio></p>`);
+    else parts.push(`<p><a href="${esc(msg.link)}">Voice message${v.duration ? ` (${esc(v.duration)})` : ''}</a></p>`);
+  }
+  for (const d of documents) {
+    parts.push(`<p><a href="${esc(d.href)}">${esc(d.title || 'Document')}</a>${d.extra ? ` — ${esc(d.extra)}` : ''}</p>`);
+  }
   if (msg.textHtml) {
     for (const p of msg.textHtml.split(/<br\s*\/?>\s*<br\s*\/?>/i)) {
       if (p.trim()) parts.push(`<p>${p.trim()}</p>`);
@@ -208,6 +274,7 @@ export function tgMessageToArticle(msg, { now = Date.now(), prevDate } = {}) {
   const media = [
     ...msg.photos.map((u) => ({ url: u, type: 'image/jpeg' })),
     ...msg.videos.filter((v) => v.thumb).map((v) => ({ url: v.thumb, type: 'image/jpeg' })),
+    ...stickers.map((s) => ({ url: s.poster || s.src, type: 'image/webp' })).filter((m) => m.url),
   ];
   if (media.length) media[0] = { ...media[0], type: 'image/thumbnail' };
   return {

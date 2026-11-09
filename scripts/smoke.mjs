@@ -1319,7 +1319,6 @@ console.log('Telegram channel scraping → articles (telegram.mjs)');
   const aNoText = tg.tgMessageToArticle({ id: 77, channel: 'demochan', date: null, textHtml: '', photos: [], videos: [], webpage: null, forwarded: '', signature: '', pollText: '', link: 'https://t.me/demochan/77' }, { now: NOW });
   ok(aNoText.title === 'Message #77', 'a media-less, text-less message still gets a stable fallback title');
   ok(aNoText.date === NOW && tg.tgMessageToArticle({ ...aNoText, raw: 1, id: 77, date: null, textHtml: '', photos: [], videos: [], webpage: null, forwarded: '', signature: '', pollText: '', link: 'https://t.me/demochan/77' }, { now: NOW, prevDate: 12345 }).date === 12345, 'an undated message keeps its first-seen date across runs (prevDate)');
-
   const mkPages = (pages) => {
     const calls = [];
     const doFetch = async (url) => {
@@ -1418,6 +1417,50 @@ console.log('Telegram channel scraping → articles (telegram.mjs)');
   }
   ok(tg.TG_DEFAULT_MAX_PAGES === 12, 'the default page budget (12 pages ≈ 240 messages/hour/channel) is exported and pinned');
   ok(fetchModTg.feedFilterDrop(tg.tgMessageToArticle(page.messages.find((m) => m.id === 102), { now: NOW }), { include: null, exclude: fetchModTg.compileBlockSrv({ title: ['announcement'] }) }) === true, 'word filters work on telegram messages like any feed');
+}
+  console.log('telegram media zoo — stickers, video stickers, voice, round video, and documents all embed');
+  {
+    const tg = await import('./telegram.mjs');
+    const fetchModTg = await import('./fetch.mjs');
+    const NOW = now;
+    const zooMsg = (id, inner) => `<div class="tgme_widget_message_wrap js-widget_message_wrap"><div class="tgme_widget_message js-widget_message" data-post="zoochan/${id}" data-view="x"><div class="tgme_widget_message_bubble">${inner}<div class="tgme_widget_message_footer compact js-message_footer"><div class="tgme_widget_message_info short js-message_info"><span class="tgme_widget_message_meta"><a class="tgme_widget_message_date" href="https://t.me/zoochan/${id}"><time datetime="${new Date(NOW - id * 60000).toISOString()}" class="time">10:00</time></a></span></div></div></div></div></div>`;
+    const stickerStatic = `<div class="tgme_widget_message_sticker_wrap media_supported_cont"><i class="tgme_widget_message_sticker js-sticker_image" style="background-image:url('data:image/svg+xml;base64,PHN2ZyB2aWV3Qm94PSIwIDAgNTEyIDUxMiI+PC9zdmc+');width:256px" data-webp="https://cdn4.telesco.pe/file/sticker.webp?token=t"><div style="padding-top:75%"></div></i></div>`;
+    const stickerVideo = `<div class="tgme_widget_message_sticker_wrap media_supported_cont js-videosticker"><video src="https://cdn4.telesco.pe/file/vsticker.webm?token=t" autoplay="" loop="" muted=""><img data-webp="https://cdn4.telesco.pe/file/vsthumb.webp?token=t" src="https://cdn4.telesco.pe/file/vsthumb.jpg"></video><div style="padding-top:75%"></div></div>`;
+    const stickerTgs = `<div class="tgme_widget_message_sticker_wrap media_supported_cont"><i class="tgme_widget_message_sticker js-tgsticker_image" style="background-image:url('data:image/svg+xml;base64,PHN2ZyB2aWV3Qm94PSIwIDAgNTEyIDUxMiI+PC9zdmc+');width:256px" data-frames="30"><div style="padding-top:100%"></div></i></div>`;
+    const voicePlayer = `<div class="tgme_widget_message_voice_player js-message_voice_player"><audio class="js-message_voice" data-ogg="https://cdn4.telesco.pe/file/voice.ogg?token=t" preload="none"></audio><div class="tgme_widget_message_voice_duration js-message_voice_duration">1:23</div></div>`;
+    const voiceBare = `<div class="tgme_widget_message_voice_player js-message_voice_player"><div class="tgme_widget_message_voice_duration js-message_voice_duration">0:34</div></div>`;
+    const roundVideo = `<a class="tgme_widget_message_roundvideo_player js-message_roundvideo_player" href="#"><video class="tgme_widget_message_roundvideo js-message_roundvideo" src="https://cdn4.telesco.pe/file/round.mp4?token=t" muted="" loop=""></video><div class="tgme_widget_message_roundvideo_play js-message_roundvideo_play"></div><time class="tgme_widget_message_roundvideo_duration js-message_roundvideo_duration">0:12</time></a>`;
+    const documentCard = `<a class="tgme_widget_message_document_wrap" href="https://t.me/zoochan/60"><div class="tgme_widget_message_document_icon accent_bg"></div><div class="tgme_widget_message_document"><div class="tgme_widget_message_document_title accent_color" dir="auto">HashCalc_Gooyban.apk</div><div class="tgme_widget_message_document_extra" dir="auto">9.1 MB</div></div></a>`;
+    const pageHtmlZoo = `<!DOCTYPE html><html><body><div class="tgme_container"><section class="tgme_channel_history js-message_history">
+      ${zooMsg(56, stickerStatic)}${zooMsg(55, stickerVideo)}${zooMsg(54, stickerTgs)}${zooMsg(53, voicePlayer)}${zooMsg(52, voiceBare)}${zooMsg(51, roundVideo)}${zooMsg(50, documentCard)}
+      </section></div></body></html>`;
+    const zoo = tg.tgParsePage(pageHtmlZoo);
+    const zooById = (n) => zoo.messages.find((m) => m.id === n);
+    ok(zoo.messages.length === 7, `all seven zoo messages parsed (${zoo.messages.length})`);
+    ok(zooById(56).stickers.length === 1 && zooById(56).stickers[0].src === 'https://cdn4.telesco.pe/file/sticker.webp?token=t' && zooById(56).stickers[0].video === false, 'static stickers take the real image from data-webp behind the svg placeholder');
+    ok(zooById(55).stickers.length === 1 && zooById(55).stickers[0].src === 'https://cdn4.telesco.pe/file/vsticker.webm?token=t' && zooById(55).stickers[0].poster === 'https://cdn4.telesco.pe/file/vsthumb.webp?token=t' && zooById(55).stickers[0].video === true, 'video stickers carry the webm src plus the webp poster');
+    ok(zooById(54).stickers.length === 0, 'a lottie-only sticker (svg data-uri, no data-webp) embeds nothing — the placeholder never leaks');
+    ok(zooById(53).voices.length === 1 && zooById(53).voices[0].src === 'https://cdn4.telesco.pe/file/voice.ogg?token=t' && zooById(53).voices[0].duration === '1:23', 'voice players capture the data-ogg url and duration');
+    ok(zooById(52).voices.length === 1 && zooById(52).voices[0].src === null && zooById(52).voices[0].duration === '0:34', 'a voice player without a url still records its duration');
+    ok(zooById(51).videos.length === 1 && zooById(51).videos[0].round === true && zooById(51).videos[0].src === 'https://cdn4.telesco.pe/file/round.mp4?token=t' && zooById(51).videos[0].duration === '0:12', 'round video messages parse as videos with the round flag');
+    ok(zooById(50).documents.length === 1 && zooById(50).documents[0].title === 'HashCalc_Gooyban.apk' && zooById(50).documents[0].extra === '9.1 MB' && zooById(50).documents[0].href === 'https://t.me/zoochan/60', 'document cards carry name, size, and the post link');
+    const az56 = tg.tgMessageToArticle(zooById(56), { now: NOW });
+    ok(az56.title === 'Sticker' && /<a href="https:\/\/t\.me\/s\/zoochan\/56"><img src="https:\/\/cdn4\.telesco\.pe\/file\/sticker\.webp\?token=t" alt="Sticker"><\/a>/.test(az56.content), 'static stickers render as a linked image with an honest title');
+    ok(az56.enclosures.length === 1 && az56.enclosures[0].type === 'image/thumbnail', 'the sticker becomes the row thumbnail');
+    const az55 = tg.tgMessageToArticle(zooById(55), { now: NOW });
+    ok(/<video autoplay loop muted playsinline preload="metadata" poster="https:\/\/cdn4\.telesco\.pe\/file\/vsthumb\.webp\?token=t" src="https:\/\/cdn4\.telesco\.pe\/file\/vsticker\.webm\?token=t"><\/video>/.test(az55.content), 'video stickers render as autoplaying loops like gifs');
+    ok(az55.enclosures[0].url === 'https://cdn4.telesco.pe/file/vsthumb.webp?token=t', 'the video sticker poster is the enclosure');
+    const az54 = tg.tgMessageToArticle(zooById(54), { now: NOW });
+    ok(az54.title === 'Message #54' && !/data:image/.test(az54.content), 'an unembeddable sticker degrades to the plain message form — the svg placeholder never renders');
+    const az53 = tg.tgMessageToArticle(zooById(53), { now: NOW });
+    ok(az53.title === 'Voice message (1:23)' && /<audio controls preload="none" src="https:\/\/cdn4\.telesco\.pe\/file\/voice\.ogg\?token=t"><\/audio>/.test(az53.content), 'voice messages render the native audio player');
+    ok(fetchModTg.sanitize(az53.content).includes('<audio'), 'the audio embed survives the sanitizer');
+    const az52 = tg.tgMessageToArticle(zooById(52), { now: NOW });
+    ok(az52.title === 'Voice message (0:34)' && /<a href="https:\/\/t\.me\/s\/zoochan\/52">Voice message \(0:34\)<\/a>/.test(az52.content), 'a url-less voice degrades to a duration link');
+    const az51 = tg.tgMessageToArticle(zooById(51), { now: NOW });
+    ok(az51.title === 'Video message (0:12)' && /<video controls preload="metadata" src="https:\/\/cdn4\.telesco\.pe\/file\/round\.mp4\?token=t"><\/video>/.test(az51.content), 'round videos render with controls (they carry audio, unlike a gif)');
+    const az50 = tg.tgMessageToArticle(zooById(50), { now: NOW });
+    ok(az50.title === 'HashCalc_Gooyban.apk' && /<a href="https:\/\/t\.me\/zoochan\/60">HashCalc_Gooyban\.apk<\/a> — 9\.1 MB/.test(az50.content) && az50.content.includes('View on Telegram'), 'documents render as a named card with the size, and the post link still closes the body');
 }
 console.log('fetch.mjs pure helpers (entity decode, linkify, ids, matchers)');
 {

@@ -658,6 +658,17 @@ function upgradeEmbeds(root, articleLink) {
     }, { once: true });
   }
 
+  for (const au of $$('audio', root)) {
+    const src = au.getAttribute('src') || '';
+    if (!src || !/\.telesco\.pe\//.test(src)) continue;
+    au.addEventListener('error', () => {
+      const a = document.createElement('a');
+      a.href = articleLink; a.target = '_blank'; a.rel = 'noopener noreferrer';
+      a.textContent = 'Listen on Telegram';
+      au.replaceWith(a);
+    }, { once: true });
+  }
+
   for (const a of $$('a[href]', root)) {
     const url = a.href;
     if (!/^https?:/.test(url)) continue;
