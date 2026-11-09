@@ -388,6 +388,29 @@ then serve any `data/` (`npm run serve`) and walk `docs/GUI-CHECKLIST.md`.
 
 ---
 
+## Media-zoo & month-start pass (user-requested; five atomic commits, each landing green)
+
+Suite at the end of this pass: **902 assertions** — `test:ui` 593, `test:char` 34, `test:sec` 18, `test:static` 43, `test:chaos` 5, `test:e2e` 218 — `npm test` exits 0. Everything below was verified against live t.me markup first (fetched pages from all 19 configured channels), then pinned in fixtures that mirror the real DOM.
+
+| Commit | Change | Verify |
+|---|---|---|
+| `6f32bbb` | **Link previews ride along again.** The parser still queried `tgme_widget_message_webpage`/`_site`/`_title`/`_description` — classes the current `t.me/s/` pages no longer emit. Every shared-article card (site, title, description, photo) was silently dropped. Live pages emit `.tgme_widget_message_link_preview` with `link_preview_*` children (plus a `link_preview_right_image` side-thumb variant); the parser now reads that markup, and the fixtures mirror it. | Live: gentoomemes + gooyban pages parse 1/20 and 5/17 previews (0 before); `npm run test:ui` (+2), `npm run test:e2e` → run 23 (+8) |
+| `fa72188` | **A GIF's blurred backdrop stops double-embedding the video** (live case: vidyamemes/8998 — the article the user saw as two stacked players). t.me renders animation-GIF players with TWO `<video>` tags sharing one src: a decorative `blured js-message_video_blured` backdrop plus the real player; the parser collected both. The blured layer is skipped and videos dedupe by src; a blured-flagged player now marks its video `gif:true`, which renders as a silent autoplaying loop (`autoplay loop muted playsinline`) — how a GIF should behave. Sanitizer whitelists the four attrs. | Live 8998: 1 video, gif-flagged, title `GIF`; `npm run test:ui` (+5 incl. the reader keeping one loop through sanitize + fallback), `npm run test:e2e` (+4) |
+| `3d0a655` | **The whole media zoo embeds.** Static stickers: the preview serves a shimmering svg placeholder but the real webp hides in `data-webp` on `js-sticker_image` (live: gentoomemes/185) — embeds as a linked image and doubles as the row thumbnail. Video (webm) stickers (`js-videosticker` wrap: `<video>` with an `<img data-webp>` fallback inside): autoplaying silent loop with poster. Lottie (tgs) stickers: nothing embeddable in static markup — the placeholder never leaks, the message degrades to plain form. Voice messages (`js-message_voice` audio, `src` or `data-ogg`): native `<audio>` player with a duration title; url-less players degrade to a duration link. Round video messages (`js-message_roundvideo`): embedded with controls (they carry audio, unlike gifs). Documents: the card renders name + size linked to the post (live: patt_channel_x/205 `PattN-windows-64.zip — 187.1 MB`). Reader: an expired telesco.pe audio token swaps to a `Listen on Telegram` link, same contract as the video poster fallback. | Live walks of gentoomemes/gooyban/patt_channel_x; `npm run test:ui` → the media-zoo section (+18), `npm run test:e2e` → run 23 (+6) |
+| `c414e6c` | **A fresh instance starts with the whole latest month.** New telegram feeds used to inherit the steady-state rules on their first run (60-day cutoff + `maxPages` budget) — the "start" was wherever the budget ran out. Now a brand-new channel walks its whole latest month (31-day cutoff, `freshMaxPages` budget, default 200 pages ≈ 4000 messages, per-feed knob) and records the completed sync as `status.tgMonthDone` — that mark IS the start; later runs never walk below it. A month that outlives even the fresh budget leaves its tail as a tracked gap that heals over later runs — nothing lost, same as the flood guarantee. The healing note names the right knob (`freshMaxPages`) during initial sync. | `npm run test:e2e` → runs 24–28 (+27): exact 31-day boundary (11 pages of 3), the mark, incremental one-page walks, budget-stopped month healing `{0,489}`→`{0,483}`→`{0,477}`→`{0,471}`→gone, convergence at the same cutoff; run 15's cold-crawl expectations updated (a new channel covers its whole history — `maxPages` is a steady-state budget only); `CONFIGURATION.md` documents the knob |
+| `ee60651` | **Oversized media fits.** A portrait GIF at column width stood 983px tall in a 737px pane; a 1080×2280 meme image towered ~1500px — both past the viewport. Reader videos (and the expired-token poster fallback) keep filling the column width but cap at `78vh` with `object-fit: contain` (landscape 16:9 videos never near the cap, so nothing visible changes for them); images cap both dimensions at the same height. | `npm run test:static` → the reader-layout contract (+3 pins) |
+
+Also verified this pass (already true, now pinned so it stays true): an author editing a message that's still on the newest page updates that article **quietly in place** — same id, same link, new content; no new post (e2e run 16 since the follow-up pass).
+
+**Reset note:** clearing gh-pages `data/` is the "new instance" trigger — the Action's next run re-fetches every feed with no previous state, so telegram channels perform the initial month sync and everything re-lands under the new parser (link previews, gifs, stickers, voice, documents). Non-telegram feeds just re-fetch their current windows as on any first run.
+
+**Verify the whole pass:**
+```sh
+npm ci && npm test
+```
+
+---
+
 ## How to verify the whole thing in one command
 
 ```sh
