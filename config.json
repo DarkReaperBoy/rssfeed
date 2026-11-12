@@ -43,7 +43,16 @@
       "title": "Hacker News",
       "folder": "tech-news",
       "minPoints": 150,
-      "minComments": 100
+      "minComments": 150,
+      "filter": {
+        "exclude": [
+          {
+            "title": [
+              "vulnerability"
+            ]
+          }
+        ]
+      }
     },
     {
       "type": "4chan",
