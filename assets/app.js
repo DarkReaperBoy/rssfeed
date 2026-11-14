@@ -407,11 +407,25 @@ function scopeTitle() {
   return 'Articles';
 }
 
+const MEDIA_ICON = { photo: '🖼', video: '🎞', sticker: '🏷', voice: '🎙', audio: '🔊', document: '📄', webpage: '🔗', poll: '📊' };
+const mediaKindsUi = (a) => (Array.isArray(a.media) ? a.media : mediaKindsOfUi(a.content, a.enclosures));
+function mediaKindsOfUi(content, enc) {
+  const c = String(content || '');
+  const es = enc || [];
+  const kinds = [];
+  if (es.some((e) => /^image\//.test(e.type || '')) || /<img\b/i.test(c)) kinds.push('photo');
+  if (es.some((e) => /^video\//.test(e.type || '')) || /<video\b/i.test(c)) kinds.push('video');
+  if (es.some((e) => /^audio\//.test(e.type || '')) || /<audio\b/i.test(c)) kinds.push('audio');
+  return kinds;
+}
 function thumbFor(a) {
   const isImgUrl = (u) => typeof u === 'string' && /^https?:\/\//i.test(stripCtrl(u));
   const enc = (a.enclosures || []).find((e) => isImgUrl(e.url) && (/^image\//.test(e.type || '') || /\.(jpe?g|png|webp|gif)(\?|$)/i.test(e.url)));
   if (enc) return enc.url;
-  const m = String(a.content || '').match(/<img[^>]+src=["']([^"']+)/i);
+  const content = String(a.content || '');
+  const vm = content.match(/<video[^>]+poster=["']([^"']+)/i);
+  if (vm && isImgUrl(vm[1])) return vm[1];
+  const m = content.match(/<img[^>]+src=["']([^"']+)/i);
   const url = m ? m[1] : null;
   return isImgUrl(url) ? url : null;
 }
@@ -420,6 +434,7 @@ function rowHtml(a) {
   const read = isRead(a);
   const kept = isKept(a);
   const thumb = thumbFor(a);
+  const badge = mediaKindsUi(a).map((k) => MEDIA_ICON[k]).filter(Boolean).join('');
   const isExpanded = state.expandedId === a.id;
   const timeHtml = ui.absoluteDates ? absTime(a.date) : relTime(a.date);
   const showAuthor = a.author && a.author.toLowerCase() !== String(feed.title || '').toLowerCase();
@@ -429,8 +444,9 @@ function rowHtml(a) {
       <div class="row-meta">
         ${faviconHtml(feed)}<span class="feed-name">${esc(feed.title)}</span>
         ${showAuthor ? `<span class="author">${esc(a.author)}</span>` : ''}
+        ${badge ? `<span class="row-media" title="${esc(mediaKindsUi(a).join(', '))}">${badge}</span>` : ''}
       </div>
-      <div class="row-title">${esc(a.title)}</div>
+      <div class="row-title" dir="auto">${esc(a.title)}</div>
       <span class="time" title="${esc(fullTime(a.date))}">${esc(timeHtml)}</span>
     </div>
     <div class="row-actions">
@@ -454,7 +470,7 @@ function articleBody(a) {
   return html;
 }
 function readerBodyHtml(a) {
-  return `<div class="reader-body">${articleBody(a)}</div>`;
+  return `<div class="reader-body" dir="auto">${articleBody(a)}</div>`;
 }
 function readerHtml(a) {
   const feed = feedMeta(a._feed);
@@ -472,7 +488,7 @@ function readerHtml(a) {
       <a class="icon-btn" href="${esc(link)}" target="_blank" rel="noopener noreferrer" title="Open original (o)" data-act="open-original"><svg><use href="#i-external"/></svg></a>
       <button class="icon-btn" data-act="collapse" title="Close reader"><svg><use href="#i-close"/></svg></button>
     </div>
-    <h2 class="reader-title">${link !== '#' ? `<a href="${esc(link)}" target="_blank" rel="noopener noreferrer" title="Open original article">${esc(a.title)}</a>` : esc(a.title)}</h2>
+    <h2 class="reader-title" dir="auto">${link !== '#' ? `<a href="${esc(link)}" target="_blank" rel="noopener noreferrer" title="Open original article">${esc(a.title)}</a>` : esc(a.title)}</h2>
     <div class="reader-sub">
       <span class="sub-feed" data-scope="feed:${esc(a._feed)}" title="Show this feed">${esc(feed.title)}</span>
       ${showAuthor ? `<span>by ${esc(a.author)}</span>` : ''}
@@ -707,6 +723,20 @@ function upgradeEmbeds(root, articleLink) {
     }, { once: true });
   }
 
+  for (const img of $$('img', root)) {
+    img.addEventListener('error', () => {
+      const wrap = img.closest('a[href]');
+      const link = wrap && /^https?:/i.test(wrap.getAttribute('href') || '') ? wrap.getAttribute('href') : articleLink;
+      const a = document.createElement('a');
+      a.href = link; a.target = '_blank'; a.rel = 'noopener noreferrer';
+      a.className = 'media-missing';
+      a.textContent = '🖼 Media unavailable — open the original post';
+      if (img.classList.contains('video-fallback') && img.closest('a')) img.closest('a').replaceWith(a);
+      else if (wrap) { wrap.textContent = a.textContent; wrap.className = `media-missing ${wrap.className || ''}`.trim(); }
+      else img.replaceWith(a);
+    }, { once: true });
+  }
+
   for (const a of $$('a[href]', root)) {
     const url = a.href;
     if (!/^https?:/.test(url)) continue;
@@ -796,6 +826,7 @@ function sanitizeReaderDom(root) {
       if (name.startsWith('on') || name === 'srcdoc') el.removeAttribute(attr.name);
     }
     const tag = el.tagName;
+    if (BLOCK_TAGS.has(tag) && !el.hasAttribute('dir')) el.setAttribute('dir', 'auto');
     if (tag === 'A') {
       const href = (el.getAttribute('href') || '').trim();
 
@@ -811,6 +842,7 @@ function sanitizeReaderDom(root) {
 }
 
 let forceAllowed = false;
+const BLOCK_TAGS = new Set(['P', 'LI', 'BLOCKQUOTE', 'FIGCAPTION', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'TD', 'TH', 'DD', 'DT', 'PRE']);
 const rowEl = (id) => {
   const safe = (window.CSS && CSS.escape) ? CSS.escape(id) : String(id).replace(/"/g, '\\"');
   return $(`.row[data-id="${safe}"]`);

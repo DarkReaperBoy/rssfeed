@@ -14,6 +14,46 @@ The user's reports: *"rtl/ltr isn't working properly for non-english"* (Persian 
 
 ---
 
+## issues.md pass: RTL/LTR, dead Telegram media, stale duplicate pages, media-typed previews (user-reported; one atomic change per issue, suite green after each)
+
+Verified against production data and live `t.me` responses before touching anything.
+
+### 1. RTL/LTR for non-English content (issue: "rtl/ltr isn't working properly for non-english")
+
+Persian/Arabic channels (`azadi_az_inja_migzare`, `localhost_ir`, `ThMahiar`, …) rendered forced-LTR: no direction handling existed anywhere in the UI.
+
+| Change | Verify |
+|---|---|
+| `dir="auto"` on `.row-title`, `.reader-title` and `.reader-body`; the reader's sanitizer now stamps `dir="auto"` on every block element that lacks one (`p`, `li`, `blockquote`, headings, `td/th`, `dd/dt`, `pre`) so each paragraph self-orients — mixed English-in-Persian paragraphs keep their own direction. | jsdom harness: Persian row + reader render `dir="auto"`; full suite green (ui 607 ✓). |
+
+### 2. Telegram picture/media not displaying (issue: "telegram picture/media not displaying")
+
+Root cause measured, not guessed: `t.me` preview CDN URLs (`cdn*.telesco.pe/...`) embed **short-lived tokens**. The same video URL returns `206 video/mp4` fresh from the page and `200 text/html` (an error page) from data fetched hours earlier; old photos return `404`. Stored articles can't re-token (static site, no CORS on t.me), so media dies with age. The reader already degraded video/audio failures to "open on Telegram" links — but **images had no failure path at all**: dead photos, sticker webp, webpage previews and video posters left broken-image artifacts.
+
+| Change | Verify |
+|---|---|
+| `upgradeEmbeds` now attaches a one-shot error fallback to every reader-body image: a failed image (photo, sticker, webpage preview, video poster, or the poster img the video fallback spawns) is replaced by a styled "Media unavailable — open the original post" link to the post, never a broken icon. New `.media-missing` style. | jsdom harness renders the reader with an expiring-token URL; the fallback link replaces the img (video/audio fallbacks were already covered and now compose with it). Full suite green. |
+
+### 3. Old duplicate news pages never updated/removed (issue: "updating old dup news pages if it is any new/modified")
+
+Confirmed in live published data: `hackernews` stores the same link twice under different ids (HN reposts the same story, e.g. `anthropic.com/claude-fable-and-mythos-5-2` ×2, Apple newsroom `/in/` vs bare URL ×2). The merge deduped by `id` only — never by link — so reposts and guid/link drift left the old copy as a permanent duplicate page.
+
+| Change | Verify |
+|---|---|
+| New `mergeArticles()` (exported) applies the id-merge (fresh walk wins, unchanged) plus a link-level dedupe keeping the newest article per unique http(s) link (ties → the fresh walk, so media tokens re-freshen). Applied to the Telegram, HN and generic feed merges; 4chan (rebuild-from-catalog, unique thread links) untouched. Articles without an http link pass through. | Next fetch run collapses all historical link-dups in one pass (the dedupe runs over `prev + fresh`). Full suite green (e2e 257 ✓). |
+
+### 4. Complete previews: scrape media types (user follow-up: "scrape to see video/image/sticker/... type; using that, the preview would be complete")
+
+Previews only surfaced for posts with a literal `<img>`: video posts (poster only), voice, document and poll messages got no preview marker at all.
+
+| Change | Verify |
+|---|---|
+| The fetcher now scrapes and tags each article with a `media` kinds array: Telegram messages get authoritative kinds (`photo`, `video`, `sticker`, `voice`, `document`, `webpage`, `poll`) from the parser; every other feed gets generic kinds scraped from enclosures/content (`photo`/`video`/`audio`). The list row then (a) picks a thumbnail from the first `<video poster>` too — video posts now preview their frame — and (b) shows the scraped kinds as a badge row (`🎞 🎙 📄 …`) next to the feed name, so voice/document/poll posts are identified without a thumbnail. Reader remains unchanged. | jsdom harness: video post → row thumb from poster + `video` badge; voice post → `voice` badge; live `t.me/s/vidyamemes` walk → `['photo']`, `['video']`+poster, `['webpage']` as expected. Full suite green. |
+
+**Verify:** `npm ci && npm test` — all suites exit 0 (ui 607, e2e 257, characterization 34, static 45, security, chaos 5).
+
+---
+
 ## Avatar scrape window: scan what YouTube actually serves (production-verified follow-up to the frontend load pass; one atomic commit)
 
 The frontend load pass shipped `3fb2733` and the Action deployed it 3 minutes later — yet the live `data/index.json` came back with **all 60 YouTube feeds healthy but iconless** (`image: null`, `status.ok: true`). Measured against the real site, not guessed:

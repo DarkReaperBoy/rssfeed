@@ -185,6 +185,31 @@ export function applyConfigFilters(list, feedId, folders, rules) {
   }
   return { list: out, hidden };
 }
+const dedupeByLink = (list) => {
+  const winners = new Map();
+  const noLink = [];
+  for (const a of list) {
+    const link = typeof a?.link === 'string' && /^https?:\/\//i.test(a.link) ? a.link : null;
+    if (!link) { noLink.push(a); continue; }
+    const prev = winners.get(link);
+    if (!prev || (a.date ?? 0) >= (prev.date ?? 0)) winners.set(link, a);
+  }
+  return [...noLink, ...winners.values()];
+};
+export function mediaKindsOf(a) {
+  const content = String(a.content || '');
+  const enc = a.enclosures || [];
+  const kinds = [];
+  if (enc.some((e) => /^image\//.test(e.type || '')) || /<img\b/i.test(content)) kinds.push('photo');
+  if (enc.some((e) => /^video\//.test(e.type || '')) || /<video\b/i.test(content)) kinds.push('video');
+  if (enc.some((e) => /^audio\//.test(e.type || '')) || /<audio\b/i.test(content)) kinds.push('audio');
+  return kinds;
+}
+export function mergeArticles(prevList, freshList) {
+  const byId = new Map();
+  for (const a of [...prevList, ...freshList]) byId.set(a.id, a);
+  return dedupeByLink([...byId.values()]);
+}
 const feedFolders = (feed) => (Array.isArray(feed.folders) ? feed.folders.filter(Boolean) : feed.folder ? [feed.folder] : []);
 async function fetchText(url, { maxBytes = 5_000_000 } = {}) {
   const res = await fetch(url, {
@@ -740,6 +765,7 @@ async function main() {
         if (r.hidden) { cfgHidden++; continue; }
         applyActions(a, r);
         a.content = sanitize(a.content);
+        a.media = mediaKindsOf(a);
         articles.push(a);
       }
       const live = articles.filter(inWindow);
@@ -871,7 +897,7 @@ async function main() {
       const byId = new Map();
       const prevList = keepRetained();
       for (const a of [...prevList, ...articles]) byId.set(a.id, a);
-      const merged = [...byId.values()].sort((a, b) => b.date - a.date).filter(inWindow);
+      const merged = mergeArticles(prevList, articles).sort((a, b) => b.date - a.date).filter(inWindow);
       await fs.writeFile(file, JSON.stringify({ articles: merged }));
       index.feeds[feed.id] = { ...summarizeFeed({ ...effFeed, ...fmeta }, merged), status };
       written.set(feed.id, merged);
@@ -932,6 +958,7 @@ async function main() {
         if (r.hidden) { cfgHidden++; continue; }
         applyActions(a, r);
         a.content = sanitize(a.content);
+        a.media = mediaKindsOf(a);
         articles.push(a);
       }
       let prevList = keepRetained();
@@ -950,7 +977,7 @@ async function main() {
       }
       const byId = new Map();
       for (const a of [...prevList, ...articles]) byId.set(a.id, a);
-      const merged = [...byId.values()].sort((a, b) => b.date - a.date).filter(inWindow);
+      const merged = mergeArticles(prevList, articles).sort((a, b) => b.date - a.date).filter(inWindow);
       await fs.writeFile(file, JSON.stringify({ articles: merged }));
       index.feeds[feed.id] = { ...summarizeFeed({ ...effFeed, ...fmeta }, merged), status };
       written.set(feed.id, merged);
@@ -1096,16 +1123,14 @@ async function main() {
       const r = configFilterActions(art, feed.id, folders, configRules);
       if (r.hidden) { cfgHidden++; continue; }
       applyActions(art, r);
+      art.media = mediaKindsOf(art);
       articles.push(art);
     }
     if (shortsDropped) console.log(`[${feed.id}] dropped ${shortsDropped} YouTube short(s)`);
     if (filterDropped) console.log(`[${feed.id}] dropped ${filterDropped} article(s) by the feed's word filter`);
     if (cfgHidden) console.log(`[${feed.id}] dropped ${cfgHidden} article(s) by the config filter`);
-    const byId = new Map();
     const prevList = purgePrev(prev, { ytShorts, feedBlocks, cf: cList });
-    for (const a of [...prevList, ...articles]) byId.set(a.id, a);
-    let merged = [...byId.values()].sort((a, b) => b.date - a.date);
-    merged = merged.filter(inWindow);
+    const merged = mergeArticles(prevList, articles).sort((a, b) => b.date - a.date).filter(inWindow);
     await fs.writeFile(file, JSON.stringify({ articles: merged }));
     index.feeds[feed.id] = {
       ...summarizeFeed({ ...feed, ...fmeta }, merged),

@@ -319,6 +319,7 @@ body.article-open #scroll-nav { display: flex; }
 .view-list .row:hover { background: var(--bg-row-hover); }
 .view-list .row.highlight { background: var(--highlight-bg); }
 .view-list .row-thumb { width: 86px; height: 48px; border-radius: 5px; object-fit: cover; flex: none; background: var(--bg-hover); }
+.row-media { font-size: 12px; opacity: .75; letter-spacing: 2px; }
 .view-list .row-main {
   flex: 1; min-width: 0;
   display: flex; flex-direction: column; gap: 2px; padding-right: 100px; 
@@ -398,6 +399,7 @@ body.article-open #scroll-nav { display: flex; }
 .reader-body blockquote:dir(rtl) { border-left: 0; border-right: 3px solid var(--accent); }
 .reader-body table { display: block; width: max-content; max-width: 100%; overflow-x: auto; border-collapse: collapse; margin: 12px 0; }
 .reader-body td, .reader-body th { border: 1px solid var(--border); padding: 4px 8px; }
+.reader-body a.media-missing { display: inline-block; padding: 10px 14px; border-radius: var(--radius); background: var(--bg-hover); color: var(--fg); }
 .reader-body audio { width: 100%; margin: 8px 0; }
 .reader-body a.ts { font-variant-numeric: tabular-nums; }
 .reader-attachments { margin-top: 14px; display: flex; flex-direction: column; gap: 6px; }

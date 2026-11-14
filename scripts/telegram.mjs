@@ -280,6 +280,15 @@ export function tgMessageToArticle(msg, { now = Date.now(), prevDate } = {}) {
     ...stickers.map((s) => ({ url: s.poster || s.src, type: 'image/webp' })).filter((m) => m.url),
   ];
   if (media.length) media[0] = { ...media[0], type: 'image/thumbnail' };
+  const kinds = [
+    ...(msg.photos.length ? ['photo'] : []),
+    ...(msg.videos.length ? ['video'] : []),
+    ...(stickers.length ? ['sticker'] : []),
+    ...(voices.length ? ['voice'] : []),
+    ...(documents.length ? ['document'] : []),
+    ...(msg.webpage ? ['webpage'] : []),
+    ...(msg.pollText ? ['poll'] : []),
+  ];
   return {
     id: tgArticleId(msg),
     title,
@@ -290,6 +299,7 @@ export function tgMessageToArticle(msg, { now = Date.now(), prevDate } = {}) {
     content: parts.join('\n'),
     text: null,
     enclosures: media,
+    media: kinds,
     fetchedAt: now,
   };
 }
