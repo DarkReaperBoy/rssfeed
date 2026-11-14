@@ -1,2 +1,3 @@
 - rtl/ltr isn't working properly for non-english
 - telegram picture/media not displaying.
+- updating old dup news pages if it is any new/modified, you will get it.
