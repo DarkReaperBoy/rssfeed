@@ -1,0 +1,2 @@
+- rtl/ltr isn't working properly for non-english
+- telegram picture/media not displaying.
