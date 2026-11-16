@@ -42,8 +42,8 @@
       "type": "hackernews",
       "title": "Hacker News",
       "folder": "tech-news",
-      "minPoints": 150,
-      "minComments": 150,
+      "minPoints": 250,
+      "minComments": 140,
       "filter": {
         "exclude": [
           {
