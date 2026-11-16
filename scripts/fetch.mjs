@@ -8,7 +8,7 @@ import { JSDOM } from 'jsdom';
 import { Readability } from '@mozilla/readability';
 import sanitizeHtml from 'sanitize-html';
 import { chanThreadsFromCatalog, chanThreadPasses, chanThreadToArticle } from './4chan.mjs';
-import { hnHitToArticle, hnFeedOptions, hnFetchAllPages } from './hackernews.mjs';
+import { hnHitToArticle, hnFeedOptions, hnFetchAllPages, hnPassesThresholds } from './hackernews.mjs';
 import { isTelegramFeed, tgChannelOf, tgFetchChannel, tgArticleId, tgMessageToArticle, TG_DEFAULT_MAX_PAGES, TG_FRESH_MAX_PAGES, TG_FRESH_MONTH_MS } from './telegram.mjs';
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const DATA_DIR = path.join(ROOT, 'data');
@@ -885,7 +885,9 @@ async function main() {
     if (isHnFeed(feed)) {
       const effFeed = { ...feed, title: feed.title || 'Hacker News', site: feed.site || 'https://news.ycombinator.com/' };
       const { minPoints, minComments } = hnFeedOptions(feed);
-      let hits;
+      let hits = [];
+      let hnComplete = false;
+      let hnStartSec = 0;
       try {
         const res = await hnFetchAllPages(
           (url) => fetch(url, {
@@ -895,6 +897,8 @@ async function main() {
           feed, { retentionDays, now },
         );
         hits = res.hits;
+        hnComplete = res.complete;
+        hnStartSec = res.startSec;
         if (res.requests > 1) console.log(`[${feed.id}] ${retentionDays}-day window needed ${res.requests} ranged requests (Algolia's 1000-hit response cap)`);
         if (res.truncated) console.log(`[${feed.id}] note: request cap hit — window partially covered, the next run heals the rest`);
       } catch (err) {
@@ -902,11 +906,15 @@ async function main() {
         status.ok = false;
         status.error = err.message;
         status.consecutiveFailures = (prevStatus.consecutiveFailures || 0) + 1;
-        const keptFail = keepRetained().filter(inWindow);
+        let keptFail = keepRetained();
+        const beforeFail = keptFail.length;
+        if (minPoints || minComments) keptFail = keptFail.filter((a) => hnPassesThresholds(a, { minPoints, minComments }));
+        const retroDroppedFail = beforeFail - keptFail.length;
+        keptFail = keptFail.filter(inWindow);
         await fs.writeFile(file, JSON.stringify({ articles: keptFail }));
         index.feeds[feed.id] = { ...summarizeFeed({ ...effFeed, ...feedMetaFor(effFeed, prevMeta) }, keptFail), status };
         written.set(feed.id, keptFail);
-        console.error(`[${feed.id}] FETCH FAILED: ${err.message} — keeping ${keptFail.length} stories from last ${retentionDays} days`);
+        console.error(`[${feed.id}] FETCH FAILED: ${err.message} — keeping ${keptFail.length} stories from last ${retentionDays} days${retroDroppedFail ? ` (retro-dropped ${retroDroppedFail} stored stories)` : ''}`);
         return;
       }
       status.ok = true;
@@ -926,8 +934,21 @@ async function main() {
         a.content = sanitize(a.content);
         articles.push(a);
       }
+      let prevList = keepRetained();
+      let retroDropped = 0;
+      if (minPoints || minComments) {
+        const beforeRetro = prevList.length;
+        prevList = prevList.filter((a) => hnPassesThresholds(a, { minPoints, minComments }));
+        retroDropped += beforeRetro - prevList.length;
+        if (hnComplete) {
+          const seenHnIds = new Set(hits.map((h) => String(h?.objectID || '')).filter(Boolean));
+          const floorMs = hnStartSec * 1000;
+          const beforePurge = prevList.length;
+          prevList = prevList.filter((a) => !(a.hnId && a.date > floorMs && !seenHnIds.has(String(a.hnId))));
+          retroDropped += beforePurge - prevList.length;
+        }
+      }
       const byId = new Map();
-      const prevList = keepRetained();
       for (const a of [...prevList, ...articles]) byId.set(a.id, a);
       const merged = [...byId.values()].sort((a, b) => b.date - a.date).filter(inWindow);
       await fs.writeFile(file, JSON.stringify({ articles: merged }));
@@ -936,7 +957,7 @@ async function main() {
       const capsDesc = minPoints && minComments
         ? `${minPoints}+ points and ${minComments}+ comments`
         : minPoints ? `${minPoints}+ points` : minComments ? `${minComments}+ comments` : 'front page';
-      console.log(`[${feed.id}] ${merged.length} stories (${capsDesc}, last ${retentionDays} days)${filtered ? ` (dropped ${filtered} by word filter)` : ''}${cfgHidden ? ` (dropped ${cfgHidden} by config filter)` : ''}`);
+      console.log(`[${feed.id}] ${merged.length} stories (${capsDesc}, last ${retentionDays} days)${filtered ? ` (dropped ${filtered} by word filter)` : ''}${cfgHidden ? ` (dropped ${cfgHidden} by config filter)` : ''}${retroDropped ? ` (retro-dropped ${retroDropped} stored stories)` : ''}`);
       return;
     }
     let xml;

@@ -123,7 +123,7 @@ Removing a feed from the config deletes its data file on the next run — includ
 | `minPoints` | Only stories with at least this many points. |
 | `minComments` | Only stories with at least this many comments. |
 
-With neither cap set, it follows the HN front page. With one or both set, it pulls everything within the retention window that clears the bar(s), paging past Algolia's response cap. Running **several** Hacker News feeds with different caps requires explicit `id`s to tell them apart.
+With neither cap set, it follows the HN front page. With one or both set, it pulls everything within the retention window that clears the bar(s), paging past Algolia's response cap. The caps also apply to the **stored** set every run: raise a cap and stories already saved under the old one drop on the next fetch; a story that gets re-received with a new score/comment count has its stored copy refreshed in place (same id); and a story that fell below the bar vanishes from a **fully covered** window, which purges its stored copy too. If a run's window is only partially covered (request cap hit or a failed range), absent stories are **never** purged — the next complete run heals the set instead. Running **several** Hacker News feeds with different caps requires explicit `id`s to tell them apart.
 
 ### 4chan boards
 

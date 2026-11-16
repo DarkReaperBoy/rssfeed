@@ -33,6 +33,7 @@ const ftRss = () => `<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><c
 const article1Html = `<!doctype html><html><head><title>FT Article One</title></head><body><article><h1>FT Article One</h1><p>This is the extracted body of article one. It carries the READABILITY_MARKER_PHRASE deep inside a paragraph so the pipeline can prove the text landed. Around it sit more sentences with ordinary words so the extractor sees enough content to keep the page. The quick brown fox jumps over the lazy dog again and again while the reader keeps counting words toward the extraction threshold.</p><p>A second paragraph with more plain prose ensures the result comfortably clears the one hundred twenty character minimum imposed on extracted text.</p><script>EVIL_SCRIPT_BODY()</script></article></body></html>`;
 const article2Html = '<!doctype html><html><head><title>FT Two</title></head><body><p>tiny</p></body></html>';
 let chanMode = 'ok';
+let hnRoutes = null;
 const CHAN_LM = 'Mon, 01 Jan 2024 00:00:00 GMT';
 const tgMsg = (channel, m) => `
     <div class="tgme_widget_message_wrap js-widget_message_wrap"><div class="tgme_widget_message js-widget_message" data-post="${channel}/${m.id}" data-view="x">
@@ -361,6 +362,7 @@ const server2 = http.createServer((req, res) => {
   } else if (chanRoutes(req, res)) { /* served */ }
   else if (tgRoutes(req, res)) { /* served */ }
   else if (ytRoutes(req, res)) { /* served */ }
+  else if (hnRoutes && hnRoutes(req, res)) { /* served */ }
   else { res.writeHead(404); res.end(); }
 });
 await new Promise((r) => server2.listen(port, '127.0.0.1', r));
@@ -1035,6 +1037,127 @@ console.log('run 32: a dead YouTube channel drops its legacy thumbnail without p
   ok(idx32.feeds['av-dead'].status.ok === false, 'the dead channel fails its own fetch');
   ok(idx32.feeds['av-dead'].image === null, `its legacy thumbnail icon is stripped, not kept (${idx32.feeds['av-dead'].image})`);
   ok(!ytPageHits.UCAVDEAD, `a failing feed never pays for a channel-page fetch (${ytPageHits.UCAVDEAD || 0})`);
+}
+console.log('run 33: HN caps filter the STORED set too — re-received scores heal in place, absent stories purge, incomplete windows never purge');
+{
+  const hnFile = path.join(SANDBOX, 'data/feeds/hackernews.json');
+  const hnNowSec = Math.floor(now / 1000);
+  const HN_BASE = `http://127.0.0.1:${port}/api/v1`;
+  const { pathToFileURL } = await import('node:url');
+  const hnMod = await import(pathToFileURL(path.join(ROOT, 'scripts/hackernews.mjs')).href);
+  let hnStories = [];
+  let hnForceSplit = false;
+  let hnFailOlderHalf = false;
+  const hnReqs = [];
+  const hnStats = { requests: 0, fails: 0 };
+  const hnHitOf = (s) => ({ objectID: s.oid, title: s.title, url: `https://example.test/hn/${s.oid}`, author: `author${s.oid}`, points: s.points, num_comments: s.comments, created_at: new Date((hnNowSec - s.ageSec) * 1000).toISOString(), story_text: `<p>Body of ${s.title}</p>` });
+  const hnSeedStories = () => [
+    { oid: 9001, points: 300, comments: 45, title: 'HN Story One', ageSec: 2 * 3600 },
+    { oid: 9002, points: 150, comments: 12, title: 'HN Story Two', ageSec: 25 * 86400 },
+    { oid: 9003, points: 50, comments: 3, title: 'HN Story Three', ageSec: 3600 },
+  ];
+  const seedArt = (s) => hnMod.hnHitToArticle(hnHitOf(s), { now });
+  const hnConfig = (minPoints) => fs.writeFileSync(path.join(SANDBOX, 'config.json'), JSON.stringify({
+    settings: { retentionDays: 30, fullTextDefault: false },
+    feeds: [{ type: 'hackernews', title: 'HN Test', minPoints }],
+  }, null, 2));
+  hnRoutes = (req, res) => {
+    const u = new URL(req.url, 'http://hn.algolia.com');
+    if (!/\/search(_by_date)?$/.test(u.pathname)) return false;
+    hnStats.requests++;
+    const nf = decodeURIComponent(u.searchParams.get('numericFilters') || '');
+    const fromSec = Number(nf.match(/created_at_i>(\d+)/)?.[1] || 0);
+    const toSec = Number(nf.match(/created_at_i<=(\d+)/)?.[1] || 0);
+    const minP = Number(nf.match(/points>=(\d+)/)?.[1] || 0);
+    const minC = Number(nf.match(/num_comments>=(\d+)/)?.[1] || 0);
+    hnReqs.push(nf);
+    if (hnFailOlderHalf && toSec > 0) { hnStats.fails++; res.writeHead(500); res.end(); return true; }
+    const isRoot = !toSec && hnNowSec - fromSec > 25 * 86400;
+    const pool = hnStories.filter((s) => {
+      const created = hnNowSec - s.ageSec;
+      return created > fromSec && (!toSec || created <= toSec) && (!minP || s.points >= minP) && (!minC || s.comments >= minC);
+    });
+    let page = pool;
+    let nbHits = pool.length;
+    if (hnForceSplit && isRoot) {
+      const halfFloor = Math.floor((fromSec + hnNowSec) / 2);
+      page = pool.filter((s) => hnNowSec - s.ageSec > halfFloor);
+      nbHits = Math.max(pool.length, 3);
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ hits: page.map(hnHitOf), nbHits }));
+    return true;
+  };
+  const hnReset = () => { hnReqs.length = 0; hnStats.requests = 0; hnStats.fails = 0; };
+  const hnRead = () => JSON.parse(fs.readFileSync(hnFile, 'utf8'));
+
+  hnConfig(100);
+  hnStories = hnSeedStories();
+  hnForceSplit = false; hnFailOlderHalf = false;
+  hnReset();
+  out = await run({ GHRSS_HN_BASE: HN_BASE });
+  const hnA = hnRead();
+  const hnA1 = hnA.articles.find((a) => a.hnId === '9001');
+  const hnA2 = hnA.articles.find((a) => a.hnId === '9002');
+  ok(hnA.articles.length === 2, `cold run stores the two stories clearing the cap (${hnA.articles.length})`);
+  ok(!hnA.articles.some((a) => a.hnId === '9003'), 'the 50-point story is excluded server-side, never stored');
+  ok(hnA1.points === 300 && hnA1.comments === 45, 'stored stories carry a stats snapshot (points/comments) for later retro-filtering');
+  ok(hnReqs.length === 1 && hnReqs[0].includes('points>=100') && hnReqs[0].includes('created_at_i>'), 'the cap rides numericFilters over the retention window');
+  const idxA = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/index.json'), 'utf8'));
+  ok(idxA.feeds.hackernews.count === 2 && idxA.feeds.hackernews.status.ok === true, 'the index summarizes the stored set under the derived id');
+
+  hnStories = hnSeedStories();
+  hnStories[0].points = 320;
+  hnStories[1].points = 50;
+  hnStories[2].points = 50;
+  hnReset();
+  out = await run({ GHRSS_HN_BASE: HN_BASE });
+  const hnB = hnRead();
+  const hnB1 = hnB.articles.find((a) => a.hnId === '9001');
+  ok(hnB.articles.length === 1, 'the collapsed story is gone — absent from a complete window it purges from storage');
+  ok(!!hnB1 && hnB1.id === hnA1.id, 'the surviving story keeps its id');
+  ok(hnB1.points === 320 && hnB1.content.includes('320 points'), `the re-received copy reflects the updated score (${hnB1.points} points)`);
+  ok(/retro-dropped 1 stored stories/.test(out), 'the log names the retro drop');
+
+  hnConfig(400);
+  hnReset();
+  out = await run({ GHRSS_HN_BASE: HN_BASE });
+  const hnC = hnRead();
+  ok(hnC.articles.length === 0, `raising the cap to 400 empties stored stories retroactively (${hnC.articles.length})`);
+  ok(/retro-dropped 1 stored stories/.test(out), 'the retro cap filter dropped the stored 320-point story');
+
+  hnConfig(100);
+  hnStories = hnSeedStories();
+  hnForceSplit = true; hnFailOlderHalf = true;
+  fs.writeFileSync(hnFile, JSON.stringify({ articles: hnSeedStories().filter((s) => s.oid !== 9003).map(seedArt) }));
+  hnReset();
+  out = await run({ GHRSS_HN_BASE: HN_BASE });
+  const hnD = hnRead();
+  const hnD2 = hnD.articles.find((a) => a.hnId === '9002');
+  ok(hnStats.fails === 1, 'the older half of the split window failed — coverage is incomplete');
+  ok(hnD.articles.length === 2, 'an incomplete window never purges: the absent story waits for the healing run');
+  ok(!!hnD2 && hnD2.content.includes('150 points'), 'the story missing from the partial window stays stored');
+  ok(!/retro-dropped/.test(out), 'nothing retro-dropped — both stories clear the cap');
+  ok(hnD.articles.find((a) => a.hnId === '9001').id === hnA1.id, 'the re-received story heals in place under its id');
+
+  hnConfig(400);
+  hnReset();
+  out = await run({ GHRSS_HN_BASE: HN_BASE });
+  const hnE = hnRead();
+  ok(hnStats.fails === 1, 'the window is incomplete again — the absence purge cannot fire');
+  ok(hnE.articles.length === 0, 'the retro cap filter alone empties storage even on an incomplete window');
+  ok(/retro-dropped 2 stored stories/.test(out), 'both stored stories are named as retro-dropped');
+
+  hnConfig(100);
+  hnStories = hnSeedStories();
+  hnForceSplit = false; hnFailOlderHalf = false;
+  hnReset();
+  out = await run({ GHRSS_HN_BASE: HN_BASE });
+  const hnF = hnRead();
+  const hnF1 = hnF.articles.find((a) => a.hnId === '9001');
+  const hnF2 = hnF.articles.find((a) => a.hnId === '9002');
+  ok(hnF.articles.length === 2, 'caps back to 100 with a complete window — both stories return');
+  ok(hnF1.id === hnA1.id && hnF2.id === hnA2.id, 'ids are hnId-keyed: stories keep their identity across purge/refetch cycles');
 }
 console.log('id-migration matchers (unit)');
 {

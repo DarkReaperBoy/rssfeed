@@ -5,9 +5,18 @@ export function hnFeedOptions(feed) {
   const minComments = Number(feed?.minComments) > 0 ? Number(feed.minComments) : 0;
   return { minPoints, minComments };
 }
+export function hnPassesThresholds(a, feed) {
+  const { minPoints, minComments } = hnFeedOptions(feed);
+  if (!minPoints && !minComments) return true;
+  const points = Number(a?.points);
+  const comments = Number(a?.comments);
+  if (minPoints && Number.isFinite(points) && points < minPoints) return false;
+  if (minComments && Number.isFinite(comments) && comments < minComments) return false;
+  return true;
+}
 export function hnApiUrl(feed, { retentionDays = 30, now = Date.now(), fromSec = 0, toSec = 0 } = {}) {
   const { minPoints, minComments } = hnFeedOptions(feed);
-  const base = 'https://hn.algolia.com/api/v1';
+  const base = String(process.env.GHRSS_HN_BASE || 'https://hn.algolia.com/api/v1').replace(/\/+$/, '');
   if (!minPoints && !minComments) {
     return `${base}/search?tags=front_page&hitsPerPage=100`;
   }
@@ -26,6 +35,7 @@ export async function hnFetchAllPages(doFetch, feed, { retentionDays = 30, now =
   const hits = [];
   let requests = 0;
   let truncated = false;
+  let partialRange = false;
   const fetchRange = async (fromSec, toSec = 0, root = false) => {
     if (requests >= maxRequests) { truncated = true; return; }
     requests++;
@@ -34,11 +44,13 @@ export async function hnFetchAllPages(doFetch, feed, { retentionDays = 30, now =
       const res = await doFetch(hnApiUrl(feed, { now, fromSec, toSec }));
       if (!res.ok) {
         if (root) { const err = new Error(`HTTP ${res.status}`); err.code = 'HTTP'; throw err; }
+        partialRange = true;
         return;
       }
       json = await res.json();
     } catch (err) {
       if (root) throw err;
+      partialRange = true;
       return;
     }
     const pageHits = Array.isArray(json?.hits) ? json.hits : [];
@@ -61,7 +73,7 @@ export async function hnFetchAllPages(doFetch, feed, { retentionDays = 30, now =
     seen.add(h.objectID);
     unique.push(h);
   }
-  return { hits: unique, requests, truncated };
+  return { hits: unique, requests, truncated, complete: !truncated && !partialRange, startSec };
 }
 const stripHnHtml = (html) =>
   String(html || '')
@@ -90,6 +102,9 @@ export function hnHitToArticle(hit, { now = Date.now() } = {}) {
   if (storyText) parts.push(/<p[\s>]/i.test(storyText) ? storyText : `<p>${storyText}</p>`); 
   return {
     id: sha1(`hn|${oid}`).slice(0, 16),
+    hnId: oid,
+    points,
+    comments,
     title,
     link,
     author: hit?.author || null,
