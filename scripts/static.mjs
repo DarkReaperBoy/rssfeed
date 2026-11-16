@@ -125,6 +125,8 @@ console.log('static contract: reader pane layout');
   ok(/max-width:\s*100%/.test(imgRule) && /max-height:\s*78vh/.test(imgRule), 'reader images cap both width and height (a tall webcomic/screenshot otherwise dwarfs the viewport)');
   ok(/\.reader-body img\.video-fallback/.test(cssSrc) && /width:\s*100%/.test(cssSrc.match(/^\.reader-body img\.video-fallback \{([^}]*)\}/m)?.[1] || ''), 'the expired-token poster fallback matches the video width');
   ok(/max-height:\s*78vh/.test(cssSrc.match(/^\.reader-body img\.video-fallback \{([^}]*)\}/m)?.[1] || '') && /object-fit:\s*contain/.test(cssSrc.match(/^\.reader-body img\.video-fallback \{([^}]*)\}/m)?.[1] || ''), 'the poster fallback caps its height like a real video (portrait posters otherwise overflow)');
+  const bqRtlRule = cssSrc.match(/^\.reader-body blockquote:dir\(rtl\) \{([^}]*)\}/m)?.[1] || '';
+  ok(/border-right:\s*3px solid var\(--accent\)/.test(bqRtlRule) && /border-left:\s*0/.test(bqRtlRule), 'the blockquote accent bar flips with :dir(rtl) so Persian quotes mirror the LTR accent');
 }
 
 console.log('static contract: fetch cadence copy matches the workflow schedule');

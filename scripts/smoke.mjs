@@ -2235,6 +2235,58 @@ console.log('config.json contract — the shipped feed list itself');
     ok(blocks.every((b) => Object.keys(b).every((k) => FIELDS.has(k))), 'no unknown field names in the ban list');
   }
 }
+console.log('RTL/LTR: every reader text block carries dir=auto — Persian flips, English stays put, the browser decides');
+{
+  const faArticle = {
+    id: 'fa-1', title: 'هوش مصنوعی: مدل زبانی جدید معرفی شد', link: 'https://example.test/fa/1',
+    date: now - 30 * 60e3, author: 'نویسنده', summary: 'خلاصه خبر فارسی',
+    content: '<p style="color:red" class="evil">این یک متن فارسی است که باید راست‌به‌چپ نمایش داده شود.</p><blockquote><p>این نقل قول فارسی است.</p></blockquote><p>An English tail keeps its own direction.</p><ul><li>فارسی در فهرست</li></ul>',
+    text: null, enclosures: [{ url: 'https://example.test/file.pdf', type: 'application/pdf' }], fetchedAt: now,
+  };
+  const enArticle = {
+    id: 'en-1', title: 'Plain English story', link: 'https://example.test/en/1',
+    date: now - 60 * 60e3, author: 'Jane Doe', summary: 'English summary',
+    content: '<p>A plain English paragraph.</p>',
+    text: null, enclosures: [], fetchedAt: now,
+  };
+  const bidiIndex = {
+    generatedAt: now, folders: [{ id: 'world', name: 'World' }],
+    feeds: { 'bidi-fa': { title: 'Persian Feed', site: 'https://fa.test', xml: 'https://fa.test/rss', folder: 'world', folders: ['world'], count: 2, newest: faArticle.date, oldest: enArticle.date } },
+  };
+  const bidiAll = { articles: [{ ...faArticle, _feed: 'bidi-fa' }, { ...enArticle, _feed: 'bidi-fa' }] };
+  const domBi = new JSDOM(html, { url: 'https://example.test/', runScripts: 'outside-only', pretendToBeVisual: true });
+  const wBi = domBi.window;
+  wBi.fetch = async (reqUrl) => {
+    const p = String(reqUrl).split('?')[0];
+    if (p === 'config.json') return { ok: true, status: 200, json: async () => structuredClone({ settings: { siteName: 'My RSSFeed', theme: 'dark', refreshMinutes: 60 }, folders: [], feeds: [{ id: 'bidi-fa', title: 'Persian Feed', url: 'https://fa.test/rss', site: 'https://fa.test', folder: 'world' }] }) };
+    if (p === 'data/index.json') return { ok: true, status: 200, json: async () => structuredClone(bidiIndex) };
+    if (p === 'data/all-feeds.json') return { ok: true, status: 200, json: async () => structuredClone(bidiAll) };
+    return { ok: false, status: 404, statusText: 'Not Found', json: async () => { throw new Error('404'); } };
+  };
+  wBi.eval(appSrc);
+  await settle(1200);
+  wBi.document.querySelector('#list .row[data-id="fa-1"]').dispatchEvent(new wBi.MouseEvent('click', { bubbles: true }));
+  await settle(150);
+  const reader = wBi.document.querySelector('#reader-slot .reader');
+  ok(!!reader && reader.dataset.id === 'fa-1', 'the Persian article opens in the reader pane');
+  ok(reader.querySelector('.reader-title').getAttribute('dir') === 'auto', 'the Persian title carries dir=auto — the browser resolves it right-to-left');
+  const subs = [...reader.querySelectorAll('.reader-sub > *')];
+  ok(subs.length > 0 && subs.every((el) => el.getAttribute('dir') === 'auto'), `every sub line (feed/author/date) carries dir=auto (${subs.length})`);
+  const body = reader.querySelector('.reader-body');
+  ok(body.getAttribute('dir') === 'auto', 'the reader body resolves its own direction');
+  const ps = [...body.querySelectorAll('p')];
+  ok(ps.length === 3 && ps.every((el) => el.getAttribute('dir') === 'auto'), 'every paragraph — Persian or English — resolves its own direction');
+  ok(ps[0].getAttribute('dir') === 'auto' && !ps[0].getAttribute('style') && !ps[0].getAttribute('class'), 'the bidi pass runs after sanitize: dir survives, style/class stay gone');
+  ok(body.querySelector('blockquote').getAttribute('dir') === 'auto', 'the blockquote carries dir=auto (the stylesheet flips its accent bar with :dir(rtl))');
+  ok(body.querySelector('li').getAttribute('dir') === 'auto' && body.querySelector('ul').getAttribute('dir') === null, 'list items resolve per item; the ul keeps the LTR marker rail');
+  const att = reader.querySelector('.reader-attachments');
+  ok(!!att && att.getAttribute('dir') === null, 'the attachments block keeps its layout untouched');
+  wBi.document.querySelector('#list .row[data-id="en-1"]').dispatchEvent(new wBi.MouseEvent('click', { bubbles: true }));
+  await settle(150);
+  const readerEn = wBi.document.querySelector('#reader-slot .reader');
+  ok(readerEn.dataset.id === 'en-1' && readerEn.querySelector('.reader-title').getAttribute('dir') === 'auto' && readerEn.querySelector('.reader-body p').getAttribute('dir') === 'auto', 'an English article gets the same treatment and resolves left-to-right');
+  domBi.window.close();
+}
 console.log('');
 console.log(`${pass} passed, ${fail} failed`);
 dom.window.close();

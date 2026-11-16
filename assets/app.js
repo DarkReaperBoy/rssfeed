@@ -585,7 +585,7 @@ function maybeAppendListChunk() {
   while (renderedCount < state.visible.length && guard++ < 8
     && list.scrollTop + list.clientHeight >= list.scrollHeight - 1600) appendListChunk();
 }
-let readerKey = ''; 
+let readerKey = '';
 function syncReaderControls(slot, a) {
 
   const i = state.visible.indexOf(a);
@@ -607,6 +607,18 @@ function syncReaderControls(slot, a) {
     if (u) u.setAttribute('href', kept ? '#i-bookmark-on' : '#i-bookmark');
   }
 }
+function applyReaderBidi(root) {
+  if (!root) return;
+  const pane = root.querySelector('.reader');
+  if (!pane) return;
+  const title = pane.querySelector('.reader-title');
+  if (title) title.setAttribute('dir', 'auto');
+  pane.querySelectorAll('.reader-sub > *').forEach((el) => el.setAttribute('dir', 'auto'));
+  const body = pane.querySelector('.reader-body');
+  if (!body) return;
+  body.setAttribute('dir', 'auto');
+  body.querySelectorAll('p, div, li, h1, h2, h3, h4, h5, h6, blockquote, pre, figcaption, dt, dd, td, th').forEach((el) => el.setAttribute('dir', 'auto'));
+}
 function renderReaderPane(visible) {
 
   const slot = $('#reader-slot');
@@ -622,6 +634,7 @@ function renderReaderPane(visible) {
       const tpl = document.createElement('template');
       tpl.innerHTML = readerHtml(open);
       tpl.content.querySelectorAll('.reader-body').forEach((el) => { sanitizeReaderDom(el); upgradeEmbeds(el, open.link); linkifyTimestamps(el, open.link); });
+      applyReaderBidi(tpl.content);
       slot.replaceChildren(tpl.content);
       slot.classList.remove('hidden');
       document.body.classList.add('article-open');
