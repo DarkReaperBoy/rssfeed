@@ -18,11 +18,11 @@ The user's reports: *"rtl/ltr isn't working properly for non-english"* (Persian 
 
 ### 1. Opening a folder grows the page instead of scrolling the sidebar
 
-Measured root cause, not guessed: `#wrapper` is a grid with `height: 100vh/100dvh` but declared **no row track**, so its single implicit `auto` row sized to the sidebar's content. With all folders collapsed the tree fit the viewport; opening one (Telegram alone was 20 feeds) pushed the tree past the viewport and the row grew with it — `#tree_pane`'s `height: 100%` resolved against the content-sized grid item, so `.nav-panel`'s `overflow-y: auto` never engaged and the whole document scrolled. No real browser was available in this sandbox, so the fix is pinned in the static layout contract (same mechanism the reader-pane layout pins use).
+Measured root cause, not guessed: `#wrapper` is a grid with `height: 100vh/100dvh` but declared **no row track**, so its single implicit `auto` row sized to the sidebar's content. With all folders collapsed the tree fit the viewport; opening one (Telegram alone was 20 feeds) pushed the tree past the viewport and the row grew with it — `#tree_pane`'s `height: 100%` resolved against the content-sized grid item, so `.nav-panel`'s `overflow-y: auto` never engaged and the whole document scrolled. Reproduced and verified in **real Chromium** (playwright headless shell 159, synthetic 35-feed folder) against the pre-fix and post-fix builds — the user's failure report was the stale deployed site (the commits had not been pushed), not a wrong fix.
 
 | Change | Verify |
 |---|---|
-| `dcf62c5` | `#wrapper` gains `grid-template-rows: minmax(0, 1fr)` — the row is now exactly the viewport height regardless of tree content, the pane keeps its definite height, and the nav panel is the scroll container. | `npm run test:static` → new sidebar-layout section (+3 pins: constrained row track, definite pane height, scroll container properties). Full suite green. Browser check on deploy: expand a large folder on the live site — the page must not grow. |
+| `dcf62c5` | `#wrapper` gains `grid-template-rows: minmax(0, 1fr)` — the row is now exactly the viewport height regardless of tree content, the pane keeps its definite height, and the nav panel is the scroll container. | Real Chromium A/B: pre-fix, expanding the folder grows the document 800→1439 px at 1280 px and 1100 px viewports, the nav is unscrollable (1390 px in 1390 px) and a wheel over the sidebar scrolls the page (scrollY moves, nav scrollTop stays 0); post-fix, the document stays 800/844 px at 1280/1100/390 px, the nav scrolls internally (1390 px in 751 px, wheel reaches scrollTop 500), collapse restores, the reader opens with the page still fitting, zero local 4xx and zero app console errors (the only 4xx is the external favicon service refusing the synthetic domains — the app's letter-tile fallback covers that path). 20/20 checks pass post-fix; 390 px (off-canvas fixed drawer) was never affected. `npm run test:static` → sidebar-layout section (+3 pins). |
 
 ### 2. Telegram reset for expired media tokens
 
@@ -34,7 +34,7 @@ Stored Telegram articles carry tokened `cdn*.telesco.pe` media URLs that die wit
 
 ### 3. Eight sources removed
 
-`gooyban`, `DASGeek`, `Destination Linux`, `NixCon`, `TestingCatalog`, `APPXA`, `MiRZaM`, `ErfJab` — `config.json` 81 → 73 feeds. The fetcher already purges feed data for feeds absent from config (`data/feeds/<id>.json` unlinked, `index.json` rebuilt from current config), so the deployed sidebar drops them on the next run with no extra steps.
+`gooyban`, `DASGeek`, `Destination Linux`, `NixCon`, `TestingCatalog`, `APPXA`, `MiRZaM`, `ErfJab` — `config.json` 81 → 73 feeds. The fetcher already purges feed data for feeds absent from config (`data/feeds/<id>.json` unlinked, `index.json` rebuilt from current config), so the deployed sidebar drops them on the next run with no extra steps. The user's follow-up "their feed still appears" was the stale deployed data — nothing had been pushed; the purge itself is long-pinned.
 
 | Change | Verify |
 |---|---|
