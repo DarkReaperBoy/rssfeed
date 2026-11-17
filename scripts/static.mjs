@@ -107,6 +107,16 @@ console.log('static contract: stylesheet liveness');
   ok(orphanCssIds.length === 0, `no dead id selectors in styles.css (orphans: ${orphanCssIds.join(', ') || 'none'})`);
 }
 
+console.log('static contract: sidebar layout');
+{
+  const wrapperRule = cssSrc.match(/^#wrapper \{([^}]*)\}/m)?.[1] || '';
+  ok(/grid-template-rows:\s*minmax\(0,\s*1fr\)/.test(wrapperRule), 'the app grid constrains its row track (minmax(0, 1fr)) — an unconstrained auto row sizes to the sidebar content, so opening a folder taller than the viewport grows the whole page instead of scrolling the sidebar');
+  const paneRule = cssSrc.match(/^#tree_pane \{([^}]*)\}/m)?.[1] || '';
+  ok(/height:\s*100%/.test(paneRule) && /overflow:\s*hidden/.test(paneRule), 'the sidebar pane keeps its definite height + hidden overflow');
+  const navRule = cssSrc.match(/^\.nav-panel \{([^}]*)\}/m)?.[1] || '';
+  ok(/overflow-y:\s*auto/.test(navRule) && /flex:\s*1/.test(navRule) && /min-height:\s*0/.test(navRule), 'the nav panel is the scroll container (flex:1 + min-height:0 + overflow-y:auto)');
+}
+
 console.log('static contract: reader pane layout');
 {
   const readerRule = cssSrc.match(/^\.reader \{([^}]*)\}/m)?.[1] || '';
