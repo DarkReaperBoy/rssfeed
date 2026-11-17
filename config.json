@@ -457,16 +457,6 @@
       "folder": "linux-news"
     },
     {
-      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCIme1suHyN7cAGrTy8RBdhQ",
-      "title": "DASGeek",
-      "folder": "linux-news"
-    },
-    {
-      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCWJUSpXVHTaHErtGWC5qPlQ",
-      "title": "Destination Linux",
-      "folder": "linux-news"
-    },
-    {
       "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCVls1GmFKf6WlTraIb_IaJg",
       "title": "DistroTube",
       "folder": "linux-news"
@@ -474,11 +464,6 @@
     {
       "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCONH73CdRXUjlh3-DdLGCPw",
       "title": "Niccolò Ve",
-      "folder": "linux-news"
-    },
-    {
-      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCjqkNrQ8F3OhKSCfCgagWLg",
-      "title": "NixCon",
       "folder": "linux-news"
     },
     {
@@ -572,11 +557,6 @@
       "folder": "telegram-channels"
     },
     {
-      "url": "https://t.me/gooyban",
-      "title": "gooyban",
-      "folder": "telegram-channels"
-    },
-    {
       "url": "https://t.me/DeamNet",
       "title": "DeamNet",
       "folder": "telegram-channels"
@@ -612,11 +592,6 @@
       "folder": "telegram-channels"
     },
     {
-      "url": "https://t.me/testingcatalog",
-      "title": "TestingCatalog",
-      "folder": "telegram-channels"
-    },
-    {
       "url": "https://t.me/nixmms",
       "title": "nixmms",
       "folder": "telegram-channels"
@@ -627,23 +602,8 @@
       "folder": "telegram-channels"
     },
     {
-      "url": "https://t.me/appxa",
-      "title": "APPXA",
-      "folder": "telegram-channels"
-    },
-    {
-      "url": "https://t.me/miirzam",
-      "title": "MiRZaM",
-      "folder": "telegram-channels"
-    },
-    {
       "url": "https://t.me/s_for_smark",
       "title": "s better than k",
-      "folder": "telegram-channels"
-    },
-    {
-      "url": "https://t.me/ErfJabs",
-      "title": "ErfJab",
       "folder": "telegram-channels"
     },
     {
