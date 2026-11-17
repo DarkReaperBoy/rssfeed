@@ -48,7 +48,7 @@ Name matching is forgiving: `#folder/japslop`, `#folder/Japslop`, and `#folder/j
 1. **Fork or clone this repo.**
 2. **Edit `config.json`** — set a site name, add folders, and paste in the feeds you follow. See [CONFIGURATION.md](CONFIGURATION.md) for every option.
 3. **Enable GitHub Pages** — Settings → Pages → Source: `gh-pages` branch. (The workflow creates and maintains this branch for you.)
-4. **Run the workflow** — Actions → "Fetch feeds & publish" → Run workflow. The first run publishes the site; from then on the workflow checks in every hour and fetches whenever the published data is more than 40 minutes old (and on every push to `main`).
+4. **Run the workflow** — Actions → "Fetch feeds & publish" → Run workflow. The first run publishes the site; from then on the workflow checks in every hour and fetches whenever the published data is more than 40 minutes old (and on every push to `main`). The dispatch form has an optional **Telegram reset** toggle: check it once to wipe every stored Telegram message and re-scrape the channels fresh — stored Telegram media URLs expire within hours, so old cached posts show dead images until a reset. Article ids are message-keyed, so your read state survives the reset.
 
 That's it — your reader is live at `https://<you>.github.io/rssfeed/`.
 

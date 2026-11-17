@@ -48,6 +48,7 @@ Run against a local static serve of the working tree with generated fixture data
 - [ ] An article shipped with `keepUnread: true` stays unread when opened, survives Mark-all-as-read, and the confirm dialog only promises "Articles kept unread are skipped".
 - [ ] Explicit un-read of an autoRead article sticks across reloads (the guard beats the flag re-materializing).
 - [ ] Folder and feed click scope the list; folder chevron expands/collapse without changing selection.
+- [ ] Expanding a large folder (e.g. Telegram, 15+ feeds) never grows the page: the sidebar scrolls internally, the article list and page height stay viewport-sized; collapse restores.
 - [ ] `#folder/<Name>` / `#feed/<Title>` links: exact, slug, lowercase, with/without spaces all resolve; URL updates on click; back/forward moves scopes.
 - [ ] Unknown folder/feed link: hash clears, toast explains.
 - [ ] Unknown `#article/<id>`: hash clears, toast explains, list renders.

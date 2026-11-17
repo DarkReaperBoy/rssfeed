@@ -14,6 +14,36 @@ The user's reports: *"rtl/ltr isn't working properly for non-english"* (Persian 
 
 ---
 
+## User pass: sidebar scroll bug, Telegram reset mechanism, 8 sources removed (user-reported; three atomic commits, each landing green)
+
+### 1. Opening a folder grows the page instead of scrolling the sidebar
+
+Measured root cause, not guessed: `#wrapper` is a grid with `height: 100vh/100dvh` but declared **no row track**, so its single implicit `auto` row sized to the sidebar's content. With all folders collapsed the tree fit the viewport; opening one (Telegram alone was 20 feeds) pushed the tree past the viewport and the row grew with it — `#tree_pane`'s `height: 100%` resolved against the content-sized grid item, so `.nav-panel`'s `overflow-y: auto` never engaged and the whole document scrolled. No real browser was available in this sandbox, so the fix is pinned in the static layout contract (same mechanism the reader-pane layout pins use).
+
+| Change | Verify |
+|---|---|
+| `dcf62c5` | `#wrapper` gains `grid-template-rows: minmax(0, 1fr)` — the row is now exactly the viewport height regardless of tree content, the pane keeps its definite height, and the nav panel is the scroll container. | `npm run test:static` → new sidebar-layout section (+3 pins: constrained row track, definite pane height, scroll container properties). Full suite green. Browser check on deploy: expand a large folder on the live site — the page must not grow. |
+
+### 2. Telegram reset for expired media tokens
+
+Stored Telegram articles carry tokened `cdn*.telesco.pe` media URLs that die within hours (measured in the earlier media pass: same URL → fresh `206 video/mp4`, hours-old → `404`/error page). Steady-state walks only re-scrape the newest pages, so the stored pile keeps dead photos/videos forever; the reader already degrades them to "Media unavailable" links, but the user asked for a real reset.
+
+| Change | Verify |
+|---|---|
+| `5200a62` | New supported reset path: `GHRSS_RESET_TELEGRAM=1` makes the fetcher drop every stored Telegram message and re-scrape cold — the fresh month walk (`freshMaxPages`, default 200 pages ≈ whole month) recovers the last ~31 days per channel with fresh media tokens. Message-keyed ids mean read state, kept-unread flags, and deep links survive the reset. Adoption of old feed files is suppressed during a reset so nothing resurrects. The workflow exposes a `reset_telegram` boolean dispatch input (default **off** — scheduled and push runs never reset) that sets the env var. | `npm run test:e2e` → run 16b (+7): stored cache wiped and re-scraped (6 messages), exact fresh-walk page counts (demochan +3, burstchan +4 — not the 1-page overlap stop), out-of-window message stays out, ids unchanged, the run after a reset is a normal incremental one-page walk, `npm run test:static` (+3: dispatch input exists, boolean default off, fetch step honors it). **To run it: Actions → Fetch feeds & publish → Run workflow → check "Telegram reset".** Messages older than ~31 days are not recoverable by a reset — that history is gone once the tokens die. |
+
+### 3. Eight sources removed
+
+`gooyban`, `DASGeek`, `Destination Linux`, `NixCon`, `TestingCatalog`, `APPXA`, `MiRZaM`, `ErfJab` — `config.json` 81 → 73 feeds. The fetcher already purges feed data for feeds absent from config (`data/feeds/<id>.json` unlinked, `index.json` rebuilt from current config), so the deployed sidebar drops them on the next run with no extra steps.
+
+| Change | Verify |
+|---|---|
+| `41d176b` | Eight feed entries removed; every remaining folder reference still resolves. | `npm run test:static` → config-shape section green; grep confirms none of the eight remain; the Action's next run logs `[<id>] removed from config - purged feed data` per removed feed. |
+
+**Verify the whole pass:** `npm ci && npm test` — ui 607, char 34, static 51, chaos 5, e2e 264, sec — all green, `npm test` exits 0.
+
+---
+
 ## issues.md pass: RTL/LTR, dead Telegram media, stale duplicate pages, media-typed previews (user-reported; one atomic change per issue, suite green after each)
 
 Verified against production data and live `t.me` responses before touching anything.
