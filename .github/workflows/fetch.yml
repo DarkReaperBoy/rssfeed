@@ -5,6 +5,11 @@ on:
     # Runs at minute 23 of every hour to avoid top-of-the-hour queue gridlock
     - cron: '23 * * * *'
   workflow_dispatch:
+    inputs:
+      reset_telegram:
+        description: 'Telegram reset: wipe stored Telegram messages and re-scrape fresh (their media URLs expire with age)'
+        type: boolean
+        default: false
   push:
     branches: [main]
 
@@ -66,6 +71,8 @@ jobs:
       - name: Fetch feeds
         if: env.SKIP_FETCH != 'true'
         run: npm run fetch
+        env:
+          GHRSS_RESET_TELEGRAM: ${{ inputs.reset_telegram == true && '1' || '' }}
 
       - name: Assemble site
         if: env.SKIP_FETCH != 'true'

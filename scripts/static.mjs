@@ -146,6 +146,10 @@ console.log('static contract: fetch cadence copy matches the workflow schedule')
   ok(/^\d+ \* \* \* \*$/.test(cron), `the fetch workflow runs hourly (cron: ${cron}) — any other cadence requires updating the app/README cadence copy in the same commit`);
   const pushBranches = wf.match(/push:\s*\n\s*branches:\s*\[([^\]]*)\]/);
   ok(!!pushBranches && pushBranches[1].split(',').map((s) => s.trim()).includes('main'), `the fetch workflow triggers on pushes to main (branches: ${pushBranches ? pushBranches[1] : 'unparseable'} ) — a mangled trigger silently leaves deploys waiting for the hourly cron`);
+  ok(/workflow_dispatch:\s*\n\s*inputs:\s*\n\s*reset_telegram:/.test(wf), 'the workflow exposes a reset_telegram dispatch input (a one-time telegram re-scrape for expired media tokens)');
+  const wfInputs = wf.match(/workflow_dispatch:[\s\S]*?push:/)?.[0] || '';
+  ok(/type:\s*boolean/.test(wfInputs) && /default:\s*false/.test(wfInputs), 'the reset input is boolean and defaults to off — scheduled and push runs never reset');
+  ok(/GHRSS_RESET_TELEGRAM:\s*\$\{\{\s*inputs\.reset_telegram == true && '1' \|\| ''\s*\}\}/.test(wf), 'the fetch step honors the reset input via GHRSS_RESET_TELEGRAM');
   ok(!/every 15 minutes|every 15 min\b/.test(appSrc) && /every hour/.test(appSrc), 'the app empty-state copy names the hourly cadence');
   const readme = await fs.readFile(path.join(ROOT, 'README.md'), 'utf8');
   ok(!/every 15 minutes|every 15 min\b/.test(readme) && /every hour/.test(readme), 'the README names the hourly cadence');

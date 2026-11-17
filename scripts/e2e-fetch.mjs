@@ -717,6 +717,24 @@ console.log('run 15: telegram channels — every message is an article, images r
   const idxDeep = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/index.json'), 'utf8'));
   ok(idxDeep.feeds.tgdeep.status.tgBacklog === false, 'the backlog flag stays clear while the walk keeps up');
 
+  console.log('run 16b: telegram reset — GHRSS_RESET_TELEGRAM wipes the stored cache and re-scrapes fresh');
+  await new Promise((r) => setTimeout(r, 1100));
+  const demoPre = tgFeed('tgdemo').articles;
+  const idsPre = Object.fromEntries(demoPre.map((a) => [a.link, a.id]));
+  const reqReset = { ...tgRequests };
+  out = await run({ GHRSS_TG_BASE: TG, GHRSS_RESET_TELEGRAM: '1' });
+  const demoR = tgFeed('tgdemo').articles;
+  ok(demoR.length === 6, `the reset wipes the stored cache and re-scrapes the visible history (${demoR.length} messages, not the retained pile)`);
+  ok(demoR.every((a) => idsPre[a.link] === a.id), 'message-keyed ids survive a reset — read state and deep links survive too');
+  ok(!demoR.some((a) => a.link === 'https://t.me/s/demochan/99'), 'the out-of-window message stays out after the reset');
+  ok(/RESET: dropping 6 stored message/.test(out), 'the reset log names the dropped message count');
+  ok(tgRequests.demochan === reqReset.demochan + 3, `the reset re-walks the whole visible month (3 pages, not the 1-page overlap stop: ${tgRequests.demochan - reqReset.demochan})`);
+  ok(tgRequests.burstchan === reqReset.burstchan + 4, `every configured telegram channel resets, not just one (${tgRequests.burstchan - reqReset.burstchan} pages)`);
+  await new Promise((r) => setTimeout(r, 1100));
+  out = await run({ GHRSS_TG_BASE: TG });
+  const demoAfter = tgFeed('tgdemo').articles;
+  ok(demoAfter.length === 6 && tgRequests.demochan === reqReset.demochan + 3 + 1, `the run after a reset is a normal incremental one-page walk again (${tgRequests.demochan - reqReset.demochan - 3} request)`);
+
   await new Promise((r) => setTimeout(r, 1100));
   out = await run({ GHRSS_TG_BASE: 'http://127.0.0.1:9' });
   ok(/FETCH FAILED/.test(out), 'the network died (connection refused)');

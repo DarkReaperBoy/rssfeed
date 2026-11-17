@@ -643,7 +643,14 @@ async function main() {
     let prev = await loadJson(file, { articles: [] });
     let prevStatus = prevFeedMeta[feed.id]?.status || {};
     let prevMeta = prevFeedMeta[feed.id] || null;
-    if (!(prev.articles || []).length) {
+    const tgReset = ['1', 'true'].includes(String(process.env.GHRSS_RESET_TELEGRAM || '').toLowerCase()) && isTelegramFeed(feed);
+    if (tgReset && (prev.articles || []).length) {
+      console.log(`[${feed.id}] RESET: dropping ${prev.articles.length} stored message(s) — re-scraped fresh (stored media URLs expire with age)`);
+      prev = { articles: [] };
+      prevStatus = {};
+      prevMeta = null;
+    }
+    if (!(prev.articles || []).length && !tgReset) {
       const adoptId = findPrevIdFor(feed, prevFeedMeta);
       if (adoptId) {
         const adopted = await loadJson(path.join(FEEDS_DIR, `${adoptId}.json`), { articles: [] });
