@@ -120,7 +120,7 @@ function updateTitleCounter() {
 function faviconHtml(feed) {
 
   const initial = Array.from(String(feed?.title || '?'))[0] || '?';
-  const selfImg = /^https?:\/\//i.test(String(feed?.image || '')) ? String(feed.image) : '';
+  const selfImg = /^(https?:\/\/|data\/)/i.test(String(feed?.image || '')) ? String(feed.image) : '';
   if (selfImg) return `<span class="favicon-wrap" aria-hidden="true"><img class="favicon" loading="lazy" src="${esc(selfImg)}" alt=""><span class="favicon-tile" data-initial="${esc(initial)}" hidden></span></span>`;
   const site = feed?.site || feed?.xml || '';
   let host = '';
@@ -1742,8 +1742,9 @@ function feedInfoHtml(feedId) {
     : 'Success';
   const crawl = `${crawlState} · ${crawlTs ? ago(crawlTs) : 'never'}${st.ok === false && st.lastSuccess ? ` (last success ${ago(st.lastSuccess)})` : ''}`;
   const link = (u) => (/^https?:\/\//i.test(stripCtrl(String(u))) ? String(u) : '');
+  const selfImg = (u) => (/^(https?:\/\/|data\/)/i.test(stripCtrl(String(u))) ? String(u) : '');
   const site = link(meta.site), xml = link(meta.xml);
-  const pfpImg = link(meta.image);
+  const pfpImg = selfImg(meta.image);
   const row = (k, v) => `<div class="fi-row"><span class="fi-k">${k}</span><span class="fi-v">${v}</span></div>`;
   const rowLink = (k, u) => row(k, `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(u)}</a>`);
   return `<div class="fi-head">

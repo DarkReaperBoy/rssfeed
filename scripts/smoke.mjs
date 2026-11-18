@@ -69,7 +69,7 @@ const index = {
   feeds: Object.fromEntries(Object.entries(FIX).map(([id, f]) => [id, {
     title: f.title, site: f.site, xml: urlOf[id] || null,
     origTitle: id === 'fixture-verge' ? 'The Verge (source self-title)' : null,
-    image: id === 'fixture-bbc' ? 'https://www.bbc.test/logo.png' : null,
+    image: id === 'fixture-bbc' ? 'https://www.bbc.test/logo.png' : (id === 'fixture-verge' ? 'data/avatars/fixture-verge.jpg' : null),
     folder: f.folder, folders: [f.folder],
     count: f.articles.length, newest: f.articles[0].date, oldest: f.articles.at(-1).date,
     status: id === 'fixture-junk'
@@ -166,6 +166,10 @@ console.log('feed images (channel avatars) are the icons when present');
   ok(hnTree?.src.includes('google.com/s2/favicons'), 'a feed without an image keeps the site favicon service');
   const bbcRow = [...window.document.querySelectorAll('#list .row')].find((r) => r.dataset.id.startsWith('fixture-bbc'));
   ok(bbcRow?.querySelector('.row-meta .favicon')?.src === 'https://www.bbc.test/logo.png', 'article rows use the feed image as the row icon too');
+  const vergeTree = $('.tree-item[data-scope="feed:fixture-verge"] .favicon');
+  ok(vergeTree?.src.endsWith('data/avatars/fixture-verge.jpg'), `a self-hosted (relative-path) avatar renders as the icon, never falling back to the favicon service (${vergeTree?.src})`);
+  const vergeRow = [...window.document.querySelectorAll('#list .row')].find((r) => r.dataset.id.startsWith('fixture-verge'));
+  ok(vergeRow?.querySelector('.row-meta .favicon')?.src.endsWith('data/avatars/fixture-verge.jpg'), 'article rows use the self-hosted avatar path too');
   console.log('a feed with no site yet still shows its xml host favicon');
   {
     const ytDownTree = $('.tree-item[data-scope="feed:fixture-yt-down"] .favicon');
