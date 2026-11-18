@@ -561,6 +561,29 @@ npm ci && npm test
 
 ---
 
+## Telegram media refresh pass (user-requested)
+
+**Problem, measured on live data:** every media URL Telegram bakes into `t.me/s/` embeds is a tokened `cdn*.telesco.pe` link that dies with age — 3 of 17 stored photo tokens were already 404 within **5.1 h** of scraping (while others from the same batch lived 20+ days; deaths are stochastic per file), and 5 of 14 channel avatars died within ~5–7 h. GitHub's hourly cron skips under load (real gaps: 4–10 h between scheduled runs), so old posts below the newest pages accumulated dead links, which the reader degrades to "Media unavailable — open the original post".
+
+**The restore primitive, verified against production t.me:** `t.me/s/<channel>?before=<id+1>` serves the full message-list markup anchored at any historical id *including* the target message, parseable by the existing `tgParsePage` — and the tokens it serves are fresh (a message whose stored URL 404'd got a working replacement URL, confirmed HTTP 200). One request refreshes a ~20-message window. No new scraping infrastructure was needed — `tgFetchChannel` already speaks `startBefore` + `?before=`, and the e2e fake t.me server already serves `?before=` windows.
+
+**The mechanism (`scripts/fetch.mjs`):** after a feed's normal walk, a **media sweep** re-walks stored history oldest-token-first through bounded anchored walks (one `?before=` page per walk) and re-derives those articles through the exact same pipeline (`tgMessageToArticle` with `prevDate`, word/config filters, sanitizer) — same message-keyed ids, original dates, read state, no new posts. Messages the current run already re-walked are excluded (no double work); a persistent per-feed `status.tgMediaCursor` parks at the lowest covered message so each run sweeps a fresh slice downward and wraps to the top when the corpus is covered; a transport error or deleted window just parks or wraps without failing the feed; gap bookkeeping is untouched.
+
+- Budget: `GHRSS_TG_MEDIA_PAGES` anchored pages/run, **global across all 14 channels** (default 40 ≈ 800 messages ≈ 45 s of throttled walking on top of a run that costs ~15 s — the 2 213 media-bearing messages of the live corpus cycle in ~3 runs; `0` disables).
+- Fresh-scrape guard: `GHRSS_TG_MEDIA_MIN_AGE_MS` (default 12 h) — tokens younger than that are never re-walked just for the sake of it.
+- Observability: `status.tgMediaRefreshed` / `tgMediaPages` / `tgMediaCursor` in `data/index.json`, plus a `— refreshed N media message(s) via M sweep page(s)` log line.
+
+**Verify:**
+```sh
+npm run test:e2e        # run 22b (+25): token generations re-stamped below the walk depth,
+                        # one-page budget honesty, cursor persistence 604 → wrap, disabled knob,
+                        # default budget sweeping the whole corpus; ids/dates/fetchedAt/gaps pinned
+npm test                # whole suite green
+```
+Live rollout: push to main → the Action run's log shows `refreshed N media message(s)` per channel; dead `telesco.pe` links in old posts come back within a few hourly runs without touching t.me rate limits (the sweep shares the existing 1.1 s serialized chain).
+
+---
+
 ## How to verify the whole thing in one command
 
 ```sh

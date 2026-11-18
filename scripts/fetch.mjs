@@ -536,6 +536,20 @@ const tgDoFetch = async (url) => {
 // ceil the lowest id known fetched above it. Gaps survive runs and failures in
 // status.tgGaps; each run chews the newest hole first until the list empties.
 const TG_NATURAL_STOPS = new Set(['caught up with stored messages', 'start of history', 'retention window covered', 'pagination stalled']);
+// Media refresh: telesco.pe file URLs are tokened and expire with age, so each run
+// sweeps a slice of stored history through anchored re-walks (one page per walk,
+// oldest-token-first via a persistent cursor) to hand old messages fresh tokens.
+const TG_TOKEN_MEDIA_RE = /telesco\.pe\//i;
+const tgHasTokenMedia = (a) => (a.enclosures || []).some((e) => TG_TOKEN_MEDIA_RE.test(e.url || '')) || TG_TOKEN_MEDIA_RE.test(a.content || '');
+const TG_MEDIA_PAGES = (() => {
+  const raw = Number(process.env.GHRSS_TG_MEDIA_PAGES);
+  return Number.isFinite(raw) ? Math.max(0, Math.floor(raw)) : 40;
+})();
+// freshly scraped tokens are not worth a re-walk yet
+const TG_MEDIA_MIN_AGE_MS = (() => {
+  const raw = Number(process.env.GHRSS_TG_MEDIA_MIN_AGE_MS);
+  return Number.isFinite(raw) ? Math.max(0, Math.floor(raw)) : 12 * 3600000;
+})();
 const tgDeepest = (msgs) => (msgs.length ? Math.min(...msgs.map((m) => m.id)) : 0);
 function tgMergeGaps(raw) {
   const cleaned = [];
@@ -625,6 +639,7 @@ async function main() {
   const prevFeedMeta = prevIndex.feeds || {};
   const index = { generatedAt: now, folders: folderDefs, feeds: {} };
   let failures = 0;
+  let tgMediaBudget = TG_MEDIA_PAGES;
   const configRules = compileConfigFilters(config.filters);
   if (configRules.length) console.log(`config filters: ${configRules.length} rule(s) applied at fetch time (server-side)`);
   const currentFeedIds = new Set();
@@ -904,6 +919,48 @@ async function main() {
       const byId = new Map();
       const prevList = keepRetained();
       for (const a of [...prevList, ...articles]) byId.set(a.id, a);
+      let mediaRefreshed = 0;
+      let mediaPages = 0;
+      if (TG_MEDIA_PAGES > 0 && !initialMonth && tgMediaBudget > 0) {
+        const artId = (a) => { const m = knownLink.exec(a.link || ''); return m ? Number(m[1]) : 0; };
+        const mediaIds = new Set([...prevList, ...articles].filter((a) => now - (a.fetchedAt || 0) >= TG_MEDIA_MIN_AGE_MS && tgHasTokenMedia(a)).map(artId).filter((n) => n > 0));
+        const covered = new Set(walked.map((m) => m.id));
+        // cursor: targets live strictly below it; 0 means the sweep starts from the corpus top
+        let cursor = Number(prevStatus.tgMediaCursor) > 0 ? Math.floor(Number(prevStatus.tgMediaCursor)) : 0;
+        for (;;) {
+          const targets = [...mediaIds].filter((n) => !covered.has(n) && (cursor === 0 || n < cursor));
+          if (!targets.length) { cursor = 0; break; }
+          let walk;
+          try {
+            walk = await tgFetchChannel(tgDoFetch, channel, { cutoffMs: 0, knownMaxId: Math.min(...targets), maxPages: tgMediaBudget, startBefore: Math.max(...targets) + 1 });
+          } catch (err) {
+            if (err.code === 'NO_POSTS' && cursor !== 0) { cursor = 0; continue; }
+            break;
+          }
+          if (!walk.pages || !walk.messages.length) break;
+          tgMediaBudget -= walk.pages;
+          mediaPages += walk.pages;
+          cursor = walk.messages[0].id;
+          for (const msg of walk.messages) {
+            const id = tgArticleId(msg);
+            const a = tgMessageToArticle(msg, { now, prevDate: prevById.get(id)?.date });
+            if (feedBlocks && feedFilterDrop(a, feedBlocks)) { continue; }
+            const r = configFilterActions(a, feed.id, folders, configRules);
+            if (r.hidden) { cfgHidden++; continue; }
+            applyActions(a, r);
+            a.content = sanitize(a.content);
+            articles.push(a);
+            mediaRefreshed++;
+          }
+          if (TG_NATURAL_STOPS.has(walk.stopReason)) break;
+          if (tgMediaBudget <= 0) break;
+        }
+        if (mediaPages || mediaRefreshed) {
+          status.tgMediaCursor = [...mediaIds].some((n) => n < cursor) ? cursor : null;
+          status.tgMediaRefreshed = mediaRefreshed;
+          status.tgMediaPages = mediaPages;
+        }
+      }
       const merged = mergeArticles(prevList, articles).sort((a, b) => b.date - a.date).filter(inWindow);
       await fs.writeFile(file, JSON.stringify({ articles: merged }));
       index.feeds[feed.id] = { ...summarizeFeed({ ...effFeed, ...fmeta }, merged), status };
@@ -912,7 +969,8 @@ async function main() {
       const budgetNote = gaps.length ? ` — ${missing} message(s) in ${gaps.length} unfetched gap(s): raise "${initialMonth ? 'freshMaxPages' : 'maxPages'}" (now ${initialMonth ? freshCap : pageCap}) or later runs keep healing` : '';
       const healNote = chewPages ? ` — healed ${chewMsgs.length} message(s) from tracked gap(s) (${chewPages} page(s), ${chewedGaps} walk(s))` : '';
       const monthNote = initialMonth ? (gaps.length ? ' — initial month sync still healing' : ' — initial month sync done, marked as the start') : '';
-      console.log(`[${feed.id}] t.me/${channel}: ${merged.length} messages (${result.pages} fresh page(s)${chewPages ? ` + ${chewPages} gap page(s)` : ''}, stopped: ${result.stopReason}${budgetNote})${monthNote}${healNote}${filtered ? ` (dropped ${filtered} by word filter)` : ''}${cfgHidden ? ` (dropped ${cfgHidden} by config filter)` : ''}`);
+      const sweepNote = mediaPages || mediaRefreshed ? ` — refreshed ${mediaRefreshed} media message(s) via ${mediaPages} sweep page(s)` : '';
+      console.log(`[${feed.id}] t.me/${channel}: ${merged.length} messages (${result.pages} fresh page(s)${chewPages ? ` + ${chewPages} gap page(s)` : ''}, stopped: ${result.stopReason}${budgetNote})${monthNote}${healNote}${sweepNote}${filtered ? ` (dropped ${filtered} by word filter)` : ''}${cfgHidden ? ` (dropped ${cfgHidden} by config filter)` : ''}`);
       return;
     }
     if (isHnFeed(feed)) {

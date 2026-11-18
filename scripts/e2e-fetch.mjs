@@ -44,7 +44,8 @@ const tgMsg = (channel, m) => `
       </div>
     </div></div>`;
 const tgText = (t) => `<div class="tgme_widget_message_text js-message_text" dir="auto">${t}</div>`;
-const tgPhoto = (u) => `<a class="tgme_widget_message_photo_wrap 1 2" href="#" style="width:653px;background-image:url('${u}')"><div class="tgme_widget_message_photo" style="padding-top:100%"></div></a>`;
+let tgMediaGen = 1;
+const tgPhoto = (u) => `<a class="tgme_widget_message_photo_wrap 1 2" href="#" style="width:653px;background-image:url('${u}${tgMediaGen > 1 ? `?gen=${tgMediaGen}` : ''}')"><div class="tgme_widget_message_photo" style="padding-top:100%"></div></a>`;
 const tgVideo = `<a class="tgme_widget_message_video_player js-message_video_player" href="#"><i class="tgme_widget_message_video_thumb" style="background-image:url('https://cdn4.telesco.pe/file/vthumb.jpg')"></i><div class="tgme_widget_message_video_wrap" style="width:100px;padding-top:50%"><video src="https://cdn4.telesco.pe/file/v.mp4?token=expiring" class="tgme_widget_message_video js-message_video" width="100%" height="100%"></video></div><div class="message_video_play js-message_video_play"></div><time class="message_video_duration js-message_video_duration">0:21</time></a>`;
 const tgBigVideo = `<a class="tgme_widget_message_video_player not_supported js-message_video_player" href="https://t.me/bigchan/501"><i class="tgme_widget_message_video_thumb" style="background-image:url('https://cdn4.telesco.pe/file/vbigthumb.jpg')"></i><div class="tgme_widget_message_video_wrap" style="width:880px;padding-top:81.81%"></div><div class="message_video_play js-message_video_play"></div><time class="message_video_duration js-message_video_duration">1:05</time><div class="message_media_not_supported_wrap"><div class="message_media_not_supported"><div class="message_media_not_supported_label">Media is too big</div><span class="message_media_view_in_telegram">VIEW IN TELEGRAM</span></div></div></a>`;
 const tgLinkPreview = (id) => `<a class="tgme_widget_message_link_preview" href="https://howtogeek.com/sysinternals-linux-arrival"><div class="link_preview_site_name accent_color" dir="auto">How-To Geek</div><i class="link_preview_image" style="background-image:url('https://cdn4.telesco.pe/file/lp.jpg');padding-top:52.375%"></i><div class="link_preview_title" dir="auto">Linux finally gets one of Microsoft's most useful Windows utilities</div><div class="link_preview_description" dir="auto">Sysinternals just went cross-platform.</div></a>`;
@@ -97,6 +98,10 @@ const tgChannels = () => {
     mediachan: {
       title: 'Media Zoo Channel',
       messages: tgMediaMsgs(),
+    },
+    tgmedchan: {
+      title: 'Media Stair Channel',
+      messages: Array.from({ length: 9 }, (_, i) => ({ id: 601 + i, mins: 60 + i * 1440, inner: tgPhoto(`https://cdn4.telesco.pe/file/m${601 + i}.jpg`) + tgText(`Media stair ${601 + i}`) })),
     },
     monthchan: {
       title: 'Month Channel',
@@ -830,6 +835,78 @@ console.log('run 15: telegram channels — every message is an article, images r
   tgNewMessage = null;
   tgEdited108 = false;
   tgDeepExtra = [];
+}
+
+console.log('run 22b: telegram media refresh — stale telesco.pe tokens re-tokenized by bounded anchored re-walks');
+{
+  const TG = `http://127.0.0.1:${port}`;
+  fs.writeFileSync(path.join(SANDBOX, 'config.json'), JSON.stringify({
+    settings: { retentionDays: 30, fullTextDefault: false },
+    feeds: [ { id: 'tgmed', url: 'https://t.me/tgmedchan', maxPages: 1 } ],
+  }, null, 2));
+  const medAt = (arts, n) => arts.find((a) => a.link === `https://t.me/s/tgmedchan/${n}`);
+  const medFeed = () => JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/feeds/tgmed.json'), 'utf8')).articles;
+  const medIdx = () => JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/index.json'), 'utf8')).feeds.tgmed.status;
+  tgMediaGen = 1;
+  await new Promise((r) => setTimeout(r, 1100));
+  out = await run({ GHRSS_TG_BASE: TG, GHRSS_TG_MEDIA_PAGES: '0', GHRSS_TG_MEDIA_MIN_AGE_MS: '0' });
+  const med1 = medFeed();
+  ok(med1.length === 9, `the cold crawl stores the whole nine-message history (${med1.length})`);
+  ok(medAt(med1, 601)?.enclosures[0]?.url === 'https://cdn4.telesco.pe/file/m601.jpg' && medAt(med1, 609)?.enclosures[0]?.url === 'https://cdn4.telesco.pe/file/m609.jpg', 'first-generation tokens stored');
+  ok(tgRequests.tgmedchan === 3, `the cold walk covered all 3 pages (${tgRequests.tgmedchan})`);
+
+  tgMediaGen = 2;
+  await new Promise((r) => setTimeout(r, 1100));
+  const req22b = { ...tgRequests };
+  out = await run({ GHRSS_TG_BASE: TG, GHRSS_TG_MEDIA_PAGES: '2', GHRSS_TG_MEDIA_MIN_AGE_MS: '0' });
+  const med2 = medFeed();
+  ok(tgRequests.tgmedchan === req22b.tgmedchan + 3, `1 fresh page + 2 sweep pages (${tgRequests.tgmedchan - req22b.tgmedchan})`);
+  ok(medAt(med2, 609)?.enclosures[0]?.url.endsWith('gen=2'), 'the newest page re-walked with fresh tokens as always');
+  ok([601, 604, 606].every((n) => medAt(med2, n)?.enclosures[0]?.url.endsWith('gen=2')), 'the sweep re-tokenized the six messages below the walk depth');
+  ok(medAt(med2, 604)?.content.includes('gen=2'), 'refresh rewrites the body HTML, not just enclosures');
+  ok(medAt(med2, 604)?.id === medAt(med1, 604)?.id && medAt(med2, 604)?.date === medAt(med1, 604)?.date, 'refresh keeps the article id and the original date');
+  ok(medAt(med2, 604)?.fetchedAt > medAt(med1, 604)?.fetchedAt, 'refresh resets the token age');
+  ok(medIdx().tgMediaRefreshed === 6, `status counts the sweep-fetched messages (${medIdx().tgMediaRefreshed})`);
+  ok(medIdx().tgMediaCursor === null, `the cursor wrapped after covering the corpus (${medIdx().tgMediaCursor})`);
+  ok(/refreshed 6 media message/.test(out), 'the log names the refresh work');
+  ok(medIdx().tgGaps === undefined && medIdx().tgBacklog === false, 'the sweep never disturbs gap bookkeeping');
+
+  tgMediaGen = 3;
+  await new Promise((r) => setTimeout(r, 1100));
+  const req22c = { ...tgRequests };
+  out = await run({ GHRSS_TG_BASE: TG, GHRSS_TG_MEDIA_PAGES: '1', GHRSS_TG_MEDIA_MIN_AGE_MS: '0' });
+  const med3 = medFeed();
+  ok(tgRequests.tgmedchan === req22c.tgmedchan + 2, `1 fresh page + 1 sweep page (${tgRequests.tgmedchan - req22c.tgmedchan})`);
+  ok([604, 606].every((n) => medAt(med3, n)?.enclosures[0]?.url.endsWith('gen=3')) && medAt(med3, 601)?.enclosures[0]?.url.endsWith('gen=2'), `a one-page budget honestly stops: 604–606 re-tokenized, 601–603 wait (${medAt(med3, 601)?.enclosures[0]?.url})`);
+  ok(medIdx().tgMediaRefreshed === 3, `the sweep fetched only three (${medIdx().tgMediaRefreshed})`);
+  ok(medIdx().tgMediaCursor === 604, `the cursor persists at the lowest covered message (${medIdx().tgMediaCursor})`);
+
+  tgMediaGen = 4;
+  await new Promise((r) => setTimeout(r, 1100));
+  const req22d = { ...tgRequests };
+  out = await run({ GHRSS_TG_BASE: TG, GHRSS_TG_MEDIA_PAGES: '1', GHRSS_TG_MEDIA_MIN_AGE_MS: '0' });
+  const med4 = medFeed();
+  ok(tgRequests.tgmedchan === req22d.tgmedchan + 2, `the next run sweeps from where the cursor parked (${tgRequests.tgmedchan - req22d.tgmedchan})`);
+  ok([601, 603].every((n) => medAt(med4, n)?.enclosures[0]?.url.endsWith('gen=4')) && medAt(med4, 604)?.enclosures[0]?.url.endsWith('gen=3'), 'already-refreshed messages are left alone while the cursor advances');
+  ok(medIdx().tgMediaCursor === null, `the cursor wrapped to the top after covering the corpus (${medIdx().tgMediaCursor})`);
+
+  tgMediaGen = 5;
+  await new Promise((r) => setTimeout(r, 1100));
+  const req22e = { ...tgRequests };
+  out = await run({ GHRSS_TG_BASE: TG, GHRSS_TG_MEDIA_PAGES: '0', GHRSS_TG_MEDIA_MIN_AGE_MS: '0' });
+  const med5 = medFeed();
+  ok(tgRequests.tgmedchan === req22e.tgmedchan + 1, `a zero budget costs no sweep pages (${tgRequests.tgmedchan - req22e.tgmedchan})`);
+  ok(medAt(med5, 601)?.enclosures[0]?.url.endsWith('gen=4') && medAt(med5, 609)?.enclosures[0]?.url.endsWith('gen=5'), 'GHRSS_TG_MEDIA_PAGES=0 keeps history tokens and still re-walks the newest page');
+
+  tgMediaGen = 6;
+  await new Promise((r) => setTimeout(r, 1100));
+  const req22f = { ...tgRequests };
+  out = await run({ GHRSS_TG_BASE: TG, GHRSS_TG_MEDIA_MIN_AGE_MS: '0' });
+  const med6 = medFeed();
+  ok(tgRequests.tgmedchan === req22f.tgmedchan + 3, `the default budget (40 pages) sweeps the whole corpus below the walk depth in one run (${tgRequests.tgmedchan - req22f.tgmedchan})`);
+  ok([601, 604, 606].every((n) => medAt(med6, n)?.enclosures[0]?.url.endsWith('gen=6')), 'every history token is refreshed by default');
+  ok(/refreshed 6 media message/.test(out), 'the default run logs the sweep');
+  tgMediaGen = 1;
 }
 console.log('run 23: telegram link previews — the real link_preview markup rides along');
 {
