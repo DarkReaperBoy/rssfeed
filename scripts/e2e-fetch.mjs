@@ -113,8 +113,18 @@ const tgChannels = () => {
     },
   };
 };
+const tgFileHits = {};
+let tgAvatarFail = false;
 const tgRoutes = (req, res) => {
   const u = new URL(req.url, 'http://t.me');
+  const fm = /^\/file\/([A-Za-z0-9_.-]+)$/.exec(u.pathname);
+  if (fm) {
+    tgFileHits[fm[1]] = (tgFileHits[fm[1]] || 0) + 1;
+    if (tgAvatarFail) { res.writeHead(404); res.end(); return true; }
+    res.writeHead(200, { 'Content-Type': 'image/jpeg' });
+    res.end(Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 1, 2, 3, 4, 5]));
+    return true;
+  }
   const m = /^\/s\/([A-Za-z0-9_]+)$/.exec(u.pathname);
   if (!m) return false;
   const channel = m[1];
@@ -689,7 +699,7 @@ console.log('run 15: telegram channels — every message is an article, images r
   const idx15 = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/index.json'), 'utf8'));
   ok(idx15.feeds.tgdemo.status.ok === true, 'the demo channel crawl is healthy');
   ok(idx15.feeds.tgdemo.title === 'Demo Telegram' && idx15.feeds.tgdemo.origTitle === 'Demo Channel', 'a config rename keeps the channel self-title as origTitle');
-  ok(idx15.feeds.tgdemo.site === 'https://t.me/s/demochan' && idx15.feeds.tgdemo.image === 'https://cdn4.telesco.pe/file/demochan-avatar.jpg', 'site and avatar come from the channel page (site points at the web preview)');
+  ok(idx15.feeds.tgdemo.site === 'https://t.me/s/demochan' && idx15.feeds.tgdemo.image === 'data/avatars/tgdemo.jpg', 'site comes from the channel page and the avatar is a self-hosted copy (the telesco.pe og:image token dies within hours)');
   ok(idx15.feeds.tgburst.title === 'Burst Feed' && idx15.feeds.tgburst.origTitle === null, 'an untitled feed derives its title from the channel');
   ok(idx15.feeds.tgmissing.status.ok === false && /no public posts/.test(idx15.feeds.tgmissing.status.error || ''), 'a missing/private channel reports NO_POSTS in the crawl status');
   ok(idx15.feeds.tgdeep.status.tgBacklog === false, 'the cold-start gap healed in the same run — no backlog flag remains');
@@ -908,6 +918,38 @@ console.log('run 22b: telegram media refresh — stale telesco.pe tokens re-toke
   ok(/refreshed 6 media message/.test(out), 'the default run logs the sweep');
   tgMediaGen = 1;
 }
+
+console.log('run 22c: self-hosted telegram avatars — og:image tokens die within hours, local copies do not');
+{
+  const TG = `http://127.0.0.1:${port}`;
+  fs.writeFileSync(path.join(SANDBOX, 'config.json'), JSON.stringify({
+    settings: { retentionDays: 30, fullTextDefault: false },
+    feeds: [ { id: 'tgdemo', url: 'https://t.me/demochan' }, { id: 'tgburst', url: 'https://t.me/burstchan' } ],
+  }, null, 2));
+  const fileHitsPre = { ...tgFileHits };
+  await new Promise((r) => setTimeout(r, 1100));
+  out = await run({ GHRSS_TG_BASE: TG });
+  const av1 = fs.readFileSync(path.join(SANDBOX, 'data/avatars/tgdemo.jpg'));
+  ok(av1[0] === 0xff && av1[1] === 0xd8, 'the channel avatar is stored as a real local JPEG copy under data/avatars/');
+  const idxA = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/index.json'), 'utf8'));
+  ok(idxA.feeds.tgdemo.image === 'data/avatars/tgdemo.jpg' && idxA.feeds.tgburst.image === 'data/avatars/tgburst.jpg', 'the published feed image is the self-hosted path, not the expiring token');
+  ok((tgFileHits['demochan-avatar.jpg'] || 0) - (fileHitsPre['demochan-avatar.jpg'] || 0) === 1 && (tgFileHits['burstchan-avatar.jpg'] || 0) - (fileHitsPre['burstchan-avatar.jpg'] || 0) === 1, `exactly one CDN fetch per feed (${tgFileHits['demochan-avatar.jpg']}/${tgFileHits['burstchan-avatar.jpg']})`);
+  await new Promise((r) => setTimeout(r, 1100));
+  out = await run({ GHRSS_TG_BASE: TG });
+  const idxB = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/index.json'), 'utf8'));
+  ok(idxB.feeds.tgdemo.image === 'data/avatars/tgdemo.jpg', 'the published path stays stable while the avatar bytes are identical');
+  ok(fs.readdirSync(path.join(SANDBOX, 'data/avatars')).filter((f) => f.startsWith('tgdemo.')).length === 1, 'no stale avatar copies accumulate');
+  tgAvatarFail = true;
+  await new Promise((r) => setTimeout(r, 1100));
+  out = await run({ GHRSS_TG_BASE: TG });
+  tgAvatarFail = false;
+  const idxC = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/index.json'), 'utf8'));
+  ok(idxC.feeds.tgdemo.image === 'data/avatars/tgdemo.jpg' && idxC.feeds.tgdemo.status.ok === true, `a dead avatar CDN keeps the previous self-hosted copy and the feed stays green (${idxC.feeds.tgdemo.image})`);
+  await new Promise((r) => setTimeout(r, 1100));
+  out = await run({ GHRSS_TG_BASE: 'http://127.0.0.1:9' });
+  const idxD = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/index.json'), 'utf8'));
+  ok(idxD.feeds.tgdemo.image === 'data/avatars/tgdemo.jpg' && idxD.feeds.tgdemo.status.ok === false, 'a failed crawl keeps the self-hosted avatar from the previous run');
+}
 console.log('run 23: telegram link previews — the real link_preview markup rides along');
 {
   const TG = `http://127.0.0.1:${port}`;
@@ -921,6 +963,7 @@ console.log('run 23: telegram link previews — the real link_preview markup rid
   out = await run({ GHRSS_TG_BASE: TG });
   const media23 = JSON.parse(fs.readFileSync(path.join(SANDBOX, 'data/feeds/tgmedia.json'), 'utf8')).articles;
   ok(media23.length === 8, `every media-zoo message stored (${media23.length})`);
+  ok(!fs.existsSync(path.join(SANDBOX, 'data/avatars/tgdemo.jpg')), 'removing feeds from the config purges their self-hosted avatars with the rest of their data');
   const a701 = media23.find((a) => a.link === 'https://t.me/s/mediachan/701');
   ok(a701?.title === 'GIF', `a gif-only message titles itself GIF (${a701?.title})`);
   ok((a701?.content.match(/<video/g) || []).length === 1, `a GIF's blurred backdrop layer never double-embeds the video (${(a701?.content.match(/<video/g) || []).length} tag(s))`);

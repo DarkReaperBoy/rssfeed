@@ -584,6 +584,31 @@ Live rollout: push to main → the Action run's log shows `refreshed N media mes
 
 ---
 
+## Self-hosted Telegram avatars (logo investigation outcome)
+
+**Root cause, measured on live data:** "some feeds don't even have a logo" was exactly the Telegram feeds — their stored avatars are tokened `cdn*.telesco.pe` og:image URLs that die within hours (5 of 14 were already 404 while investigating, ~5–7 h after the last scrape). The reader then degrades to the generic s2 favicon / letter tile. The 59 non-TG feeds are fine: only `4chan-g` and `hackernews` carry no stored image, and both render their site favicon via the fallback chain — not broken.
+
+**The fix:** every successful TG walk now downloads the channel og:image (one small CDN request per feed) into `data/avatars/<feedId>.<ext>` on gh-pages and publishes that **relative path** as the feed image. A local copy never expires, deploys with the rest of the data (`cp -r data _site/` + `git add -A` — no workflow change), and survives cron gaps of any length.
+
+- The file is written only when the bytes change; a stale copy under another extension is cleaned; the published path is stable across runs.
+- A dead avatar CDN keeps the previous self-hosted copy and the feed stays green; a failed crawl keeps the avatar from the last good run (`feedMetaFor` now preserves `data/avatars/...` values).
+- Strictly scoped: only `telesco.pe`-hosted images are cached — RSS/4chan/YouTube icons are untouched (pinned).
+- A feed removed from the config has its avatar copy purged with its feed data.
+- `assets/app.js`: `faviconHtml` and the feed-info card accept the relative `data/` path (smoke +2).
+
+**Verify:**
+```sh
+npm run test:e2e        # run 22c (+7): local JPEG stored, published path is self-hosted,
+                        # one CDN fetch per feed, byte-identical runs don't rewrite, dead avatar
+                        # CDN keeps the copy, failed crawl keeps it, config removal purges it
+                        # (run 15's avatar pin updated to the new self-hosted value)
+npm run test:ui         # reader renders the relative avatar path in sidebar + rows (+2)
+npm test                # whole suite green
+```
+Live rollout: push to main → next Action run creates `data/avatars/` on gh-pages and every Telegram feed's logo becomes a permanent local copy.
+
+---
+
 ## How to verify the whole thing in one command
 
 ```sh

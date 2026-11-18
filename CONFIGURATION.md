@@ -168,7 +168,7 @@ The fetcher scrapes the channel's **public web preview** (`t.me/s/<channel>`, no
 - **Videos** — embedded in the article body in the native browser player (`<video controls>` with the poster frame; the tokened download urls expire within hours — when one does, the reader swaps the dead player for the linked poster).
 - **Link previews, forwards, author signatures** — rendered into the body; `View on Telegram` links to the post's `t.me/s/<channel>/<id>` web-preview page (the full channel feed anchored at the message, not the bare interstitial).
 - **The whole media zoo** — photos, videos, animation GIFs (silent autoplaying loops), stickers (static webp and video/webm ones), voice messages (native audio player), round video messages, and document cards (name + size) all embed; paid/restricted media degrade to a poster or a plain link.
-- **Channel avatar** — the channel's og:image becomes the feed icon in the sidebar and article rows (any feed with an image gets this — see `image` in the feed options above for the full fallback chain).
+- **Channel avatar** — the channel's og:image becomes the feed icon in the sidebar and article rows (any feed with an image gets this — see `image` in the feed options above for the full fallback chain). Telegram avatars are tokened CDN links that expire within hours, so the fetcher keeps a local copy under `data/avatars/` and publishes that instead — the logo never rots, and it rides along with the rest of the data on GitHub Pages. A feed removed from the config loses its avatar copy with the rest of its data.
 
 | Option | What it does |
 |---|---|

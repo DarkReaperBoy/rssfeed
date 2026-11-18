@@ -316,7 +316,7 @@ function feedMetaFor(feed, prevMeta, parsed = null) {
     ? (parsed ? (parsedTitle && parsedTitle !== feed.title.trim() ? parsedTitle : null) : (trimStr(prevMeta?.origTitle) || null))
     : null;
   const site = trimStr(feed.site) || httpOr(parsed?.link) || httpOr(prevMeta?.site);
-  const image = httpOr(parsed?.image?.url || parsed?.icon || parsed?.logo, httpOr(prevMeta?.image, null));
+  const image = httpOr(parsed?.image?.url || parsed?.icon || parsed?.logo, httpOr(prevMeta?.image, selfHostedAvatar(prevMeta?.image)));
   return { title, origTitle, site, xml: feed.url || null, image };
 }
 function summarizeFeed(feed, articles) {
@@ -550,6 +550,48 @@ const TG_MEDIA_MIN_AGE_MS = (() => {
   const raw = Number(process.env.GHRSS_TG_MEDIA_MIN_AGE_MS);
   return Number.isFinite(raw) ? Math.max(0, Math.floor(raw)) : 12 * 3600000;
 })();
+// Avatar caching: the channel og:image is a tokened telesco.pe URL that dies within
+// hours, so each run stores a local copy under data/avatars/ and publishes that
+// relative path instead — the published logo never rots. When GHRSS_TG_BASE points
+// the web preview at a proxy, telesco.pe file urls ride the same base.
+const AVATARS_DIR = path.join(DATA_DIR, 'avatars');
+const AVATAR_EXT = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp' };
+const selfHostedAvatar = (u) => (/^data\/avatars\/[\w.-]+$/.test(String(u || '')) ? String(u) : null);
+const tgCdnUrl = (u) => {
+  const base = process.env.GHRSS_TG_BASE ? String(process.env.GHRSS_TG_BASE).replace(/\/+$/, '') : '';
+  if (!base) return u;
+  try {
+    const p = new URL(u);
+    if (/telesco\.pe$/i.test(p.hostname)) return base + p.pathname + p.search;
+  } catch {}
+  return u;
+};
+async function cacheTgAvatar(feedId, imageUrl, prevImage) {
+  if (!imageUrl || !/^https?:\/\//i.test(imageUrl)) return selfHostedAvatar(prevImage) || imageUrl || null;
+  let host = '';
+  try { host = new URL(imageUrl).hostname; } catch {}
+  if (!/telesco\.pe$/i.test(host)) return imageUrl;
+  try {
+    const res = await fetch(tgCdnUrl(imageUrl), { redirect: 'follow', signal: AbortSignal.timeout(20000), headers: { 'User-Agent': UA, Accept: 'image/*' } });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const ext = AVATAR_EXT[(res.headers.get('content-type') || '').split(';')[0].trim().toLowerCase()];
+    if (!ext) throw new Error('not an image');
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (!buf.length || buf.length > 2_000_000) throw new Error('bad avatar size');
+    const existing = (await fs.readdir(AVATARS_DIR).catch(() => [])).filter((f) => f.startsWith(`${feedId}.`));
+    const name = `${feedId}${ext}`;
+    const current = existing.find((f) => f === name);
+    if (current && (await fs.readFile(path.join(AVATARS_DIR, current))).equals(buf)) return `data/avatars/${current}`;
+    await fs.mkdir(AVATARS_DIR, { recursive: true });
+    await fs.writeFile(path.join(AVATARS_DIR, name), buf);
+    for (const f of existing) if (f !== name) await fs.unlink(path.join(AVATARS_DIR, f)).catch(() => {});
+    return `data/avatars/${name}`;
+  } catch (err) {
+    if (selfHostedAvatar(prevImage)) return selfHostedAvatar(prevImage);
+    console.error(`[${feedId}] avatar cache failed: ${err.message} — publishing the telesco.pe url as-is`);
+    return imageUrl;
+  }
+}
 const tgDeepest = (msgs) => (msgs.length ? Math.min(...msgs.map((m) => m.id)) : 0);
 function tgMergeGaps(raw) {
   const cleaned = [];
@@ -894,7 +936,8 @@ async function main() {
       if (gaps.length) status.tgGaps = gaps;
       if (prevStatus.tgMonthDone || !gaps.length) status.tgMonthDone = true;
       const effFeed = { ...feed, title: feed.title || result.info.title || channel, site: feed.site || `https://t.me/s/${channel}`, url: feed.url || `https://t.me/s/${channel}` };
-      const fmeta = feedMetaFor(effFeed, prevMeta, { title: result.info.title, link: `https://t.me/s/${channel}`, image: result.info.image ? { url: result.info.image } : null });
+      const fmetaRaw = feedMetaFor(effFeed, prevMeta, { title: result.info.title, link: `https://t.me/s/${channel}`, image: result.info.image ? { url: result.info.image } : null });
+      const fmeta = { ...fmetaRaw, image: await cacheTgAvatar(feed.id, fmetaRaw.image, prevMeta?.image) };
       const prevById = new Map((prev.articles || []).map((a) => [a.id, a]));
       const seenMsg = new Set();
       const walked = [];
@@ -1225,6 +1268,9 @@ async function main() {
         await fs.unlink(path.join(FEEDS_DIR, `${oldId}.json`));
         console.log(`[${oldId}] removed from config - purged feed data`);
       } catch {}
+      for (const name of await fs.readdir(AVATARS_DIR).catch(() => []).then((l) => l || [])) {
+        if (name.startsWith(`${oldId}.`)) await fs.unlink(path.join(AVATARS_DIR, name)).catch(() => {});
+      }
     }
   }
   try {
