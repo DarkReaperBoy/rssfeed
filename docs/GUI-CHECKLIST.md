@@ -9,6 +9,7 @@ Run against a local static serve of the working tree with generated fixture data
 - [ ] No `data/` yet: "No data yet" empty state with the Actions hint.
 - [ ] Theme: light, dark, auto — all three; system-preference switch flips auto live; no flash of wrong theme on reload (early script).
 - [ ] Favicon failures (block s2 favicons via DevTools): fallback letter tiles appear, no broken-image icons.
+- [ ] Self-hosted Telegram avatars: TG feed icons load from relative `data/avatars/…` paths (Network panel shows no telesco.pe request for them); a feed whose stored image is an expired token URL still degrades to the fallback chain, never a broken-image icon.
 
 ## Reading flow
 - [ ] Click a row: reader opens on the right; row marked read; badge/sidebar/title counters drop by one; URL becomes `#article/<id>`.
